@@ -358,7 +358,8 @@ assets/              greyBot-avatar.png — the canonical icon, 1024x1024
 scripts/selftest.py  the gate; no AWS, no boto3, no network
 scripts/deploy.sh    package + ship the Lambda, then verify admin-owned wiring
 scripts/set-webhook-identity.py   name + avatar on the announcing webhook
-infra/iam-setup.sh   one-time admin setup: table, role, secrets, schedule
+infra/iam-setup.sh   one-time admin setup (1 of 2): table, execution + scheduler roles
+infra/create-schedule.sh   admin setup (2 of 2): the 15-minute poll, created last
 ```
 
 No dependencies beyond the standard library and the boto3 already in the runtime, so the
@@ -383,14 +384,25 @@ aws logs tail /aws/lambda/ryangrey-greybot --region us-east-1 --since 5m
 Expect `{"event":"bootstrap_complete", ... "announced":0}`. If that first run produces an
 `announced_kill` or `announced_aotc`, something is wrong — stop the schedule.
 
-`infra/iam-setup.sh` covers the one-time table, role, secrets and schedule. It is
-deliberately separate: the deploy identity has no IAM write, no SSM write and no Scheduler
-write, so those are created once by an admin in CloudShell and then left alone.
-`deploy.sh` verifies they exist and reports drift rather than attempting updates it can
-only ever be denied.
+The one-time admin setup is split in two, and the order matters:
 
-Order matters once: deploy the function before creating the schedule, because EventBridge
-Scheduler validates its target at creation time.
+| | where | what |
+|---|---|---|
+| 1 | CloudShell | `infra/iam-setup.sh` — table, execution role, scheduler role |
+| 2 | local | `scripts/deploy.sh` — ship the function |
+| 3 | local | invoke once by hand, confirm it **seeded** |
+| 4 | local | `scripts/set-webhook-identity.py` — greyBot name and avatar |
+| 5 | CloudShell | `infra/create-schedule.sh` — start the 15-minute poll |
+
+The schedule is deliberately last. EventBridge Scheduler validates its target at creation
+time so the function must already exist, and starting a fifteen-minute timer before run one
+is verified means the clock is ticking while you are still checking whether it announced
+anything it should not have.
+
+The split between CloudShell and local is the same one as the study engine: the deploy
+identity has no IAM write, no SSM write and no Scheduler write, so those resources are
+created once by an admin and then left alone. `deploy.sh` verifies they exist and reports
+drift rather than attempting updates it can only ever be denied.
 
 The three secrets live in SSM as SecureString and are never written into the Lambda's
 environment — a Discord webhook URL is a post-anything-to-`#bots` credential, not a config

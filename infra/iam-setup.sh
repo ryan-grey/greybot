@@ -5,6 +5,11 @@
 # here is created once by a human with broader rights and then left alone.
 # scripts/deploy.sh verifies these exist and complains if they drift; it never creates them.
 #
+# This is step 1 of 2 in CloudShell. The EventBridge schedule is deliberately NOT here:
+# Scheduler validates its target at creation time, so the Lambda must exist first, and the
+# schedule should not start firing until the first invocation is confirmed to have seeded
+# rather than announced. It lives in infra/create-schedule.sh.
+#
 # The seven SSM parameters are ALREADY PROVISIONED and are deliberately not created here --
 # this script only grants read access to them. They are, in us-east-1:
 #
@@ -98,17 +103,6 @@ J
 aws iam put-role-policy --role-name $SCHED_ROLE --policy-name invoke-greybot \
   --policy-document file:///tmp/sched-policy.json
 
-# Deploy the function first (scripts/deploy.sh), then create the schedule -- Scheduler
-# validates the target at creation time and refuses a function that does not exist yet.
-#
-# The FIRST invocation seeds state and announces nothing. Watch for the bootstrap_complete
-# log line before letting it run unattended:
-#   aws logs tail /aws/lambda/$FN --follow --region $REGION
-aws scheduler create-schedule --region $REGION --name $SCHEDULE \
-  --schedule-expression 'rate(15 minutes)' \
-  --flexible-time-window '{"Mode":"OFF"}' \
-  --target "{\"Arn\":\"arn:aws:lambda:$REGION:$ACCT:function:$FN\",
-             \"RoleArn\":\"arn:aws:iam::$ACCT:role/$SCHED_ROLE\",
-             \"RetryPolicy\":{\"MaximumRetryAttempts\":2}}"
-
-echo "Done. Now run scripts/deploy.sh from the repo as the deploy user."
+echo
+echo "Roles and table created. Next: scripts/deploy.sh from the repo, then verify the"
+echo "first invocation SEEDED, then infra/create-schedule.sh back here."
