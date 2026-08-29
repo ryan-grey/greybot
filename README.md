@@ -328,6 +328,15 @@ Discord never renders a webhook avatar above 128px and has historically rejected
 data URIs, so the script downscales to 256px for the upload (328 KiB → 47 KiB) and leaves
 the master untouched.
 
+`assets/greyBot-avatar-256.png` is that downscale, committed rather than generated on the
+fly. The script downscales with `sips`, which exists on macOS and not in CloudShell — and
+CloudShell is where this runs, because the deploy user cannot read the webhook from SSM.
+Pass it with `--avatar` there. Regenerate it from the master with:
+
+```sh
+sips -Z 256 assets/greyBot-avatar.png --out assets/greyBot-avatar-256.png
+```
+
 ---
 
 ## Cost
