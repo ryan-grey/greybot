@@ -165,3 +165,111 @@ def progress_embed(guild_name, raid_name, killed, total, realm_rank,
     if author:
         embed["author"] = author
     return embed
+
+
+def _short(n):
+    """Damage totals, at a length a phone can read.
+
+    565,524,499 is nine characters of noise in a field three of these have to share.
+    Nobody reads the units digit of a damage meter.
+    """
+    n = float(n or 0)
+    for cut, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if n >= cut:
+            return f"{n / cut:.1f}{suffix}"
+    return str(int(n))
+
+
+def _tied(rows, key):
+    """Everyone level at the top, not just whoever sorted first.
+
+    Ties are real and common: the captured night ended with three people on fifteen deaths
+    each. Naming one of them is a quiet lie in a card people will argue about, and which
+    one gets named would come down to the alphabet.
+    """
+    if not rows:
+        return []
+    best = rows[0].get(key)
+    return [r for r in rows if r.get(key) == best]
+
+
+def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso_ts=None,
+                thumbnail_url=None, guild_label=None, guild_url=None):
+    """The morning-after card. One embed, no ping, same visual language as a kill card.
+
+    Every section is optional and silently absent when it could not be read. A recap that
+    lost its rankings blob is a card without a parse line, not a card that says "parse
+    unavailable" -- an apology for missing data is worse than not mentioning it, and worse
+    than the alternative of failing the whole post.
+    """
+    lines = []
+    bosses = summary.get("bosses") or []
+    if bosses:
+        if len(bosses) == 1:
+            lines.append(f"Killed **{bosses[0]}**")
+        else:
+            lines.append("Killed " + ", ".join(f"**{b}**" for b in bosses[:-1])
+                         + f" and **{bosses[-1]}**")
+    else:
+        lines.append("No kills — a full night on progression")
+
+    prog = summary.get("prog")
+    if prog:
+        line = f"**{prog['pulls']}** pulls on {prog['name']}"
+        # The best attempt is only interesting while the boss is still alive. Once it is
+        # dead the number is 0% and saying so reads as a bug.
+        if prog.get("best") and prog["best"] > 0:
+            line += f" — best **{prog['best']:.1f}%**"
+        lines.append(line)
+
+    embed = {
+        "title": f"{guild_name} — {night_text}",
+        "description": "\n".join(lines),
+        "color": BRAND_ACCENT,
+        "fields": [],
+        "footer": {"text": f"Heroic {raid_name}"
+                           + (f" · {summary['raiders']} raiders"
+                              if summary.get("raiders") else "")},
+    }
+
+    damage = summary.get("damage") or []
+    if damage:
+        embed["fields"].append({
+            "name": "Top damage",
+            "value": "\n".join(f"**{i}.** {r['name']} — {_short(r['total'])}"
+                               for i, r in enumerate(damage, 1)),
+            "inline": True})
+
+    deaths = summary.get("deaths") or []
+    tied = _tied(deaths, "deaths")
+    if tied:
+        embed["fields"].append({
+            "name": "Most deaths",
+            "value": ", ".join(r["name"] for r in tied[:3])
+                     + f" — **{tied[0]['deaths']}**",
+            "inline": True})
+
+    parses = summary.get("parses") or {}
+    for key, label in (("best", "Best parse"), ("worst", "Worst parse")):
+        p = parses.get(key)
+        if not p:
+            continue
+        embed["fields"].append({
+            "name": label,
+            "value": f"{p['name']} — **{int(round(p['percent']))}**\n{p['boss']}",
+            "inline": True})
+
+    if not embed["fields"]:
+        embed.pop("fields")
+    if report_url:
+        embed["url"] = report_url
+    if iso_ts:
+        embed["timestamp"] = iso_ts
+    if thumbnail_url:
+        embed["thumbnail"] = {"url": thumbnail_url}
+    author = _author(guild_label, guild_url)
+    if author:
+        embed["author"] = author
+    # No content, no roles in allowed_mentions. The recap is informational -- the AOTC card
+    # remains the only thing in this bot that pings anybody.
+    return {"embeds": [embed], "allowed_mentions": {"parse": []}}

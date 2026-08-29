@@ -289,3 +289,174 @@ def progress_count(state, raider_killed, total):
     if total:
         n = min(n, int(total))
     return n
+
+
+# ---------------------------------------------------------------- prog roster
+#
+# Three more item shapes, and the constraint that chose all three: the execution role
+# grants GetItem, PutItem and UpdateItem, and nothing else. No Query. So none of this can
+# be a collection the code discovers by scanning a key range -- every read has to be a
+# GetItem against a key the code already knows.
+#
+# That turns out fine, because the code does already know. The tier item's `announced`
+# set IS the list of this tier's first kills, so the participant records are addressable
+# one GetItem at a time from a list the bot maintains anyway. Nine reads once a week is
+# not a cost worth designing around, and one item per kill stays readable in the console,
+# which is the same reason the announced set holds boss names rather than encounter ids.
+#
+#   item              pk                             sk
+#   first-kill roster GUILD#<region>#<realm>#<name>  KILL#<slug>#<boss-key>
+#   derived roster    GUILD#<region>#<realm>#<name>  ROSTER#<slug>
+#   recap claims      GUILD#<region>#<realm>#<name>  RECAPS
+#
+# A boss in `announced` with no KILL# item is a boss that was SEEDED -- killed before the
+# bot was watching, or absorbed by a rollover seed. Those have no participants to record
+# and never will, and the recap treats them as "long dead", which is exactly right.
+
+
+def kill_sk(slug, boss_key):
+    return f"KILL#{slug}#{boss_key}"
+
+
+def roster_sk(slug):
+    return f"ROSTER#{slug}"
+
+
+def record_first_kill(pk, slug, boss_key, players, killed_at_ms, report_code, now_iso):
+    """Who was standing there for one first Heroic kill.
+
+    Written after the claim succeeds, so it records kills that were actually announced
+    rather than kills that were merely seen. Unconditional on purpose: if a webhook
+    failure released the boss and the next poll re-announced it, re-recording the same
+    participants over the same key is the correct outcome, not a conflict.
+
+    Returns False without writing when there are no participants. DynamoDB has no empty
+    string set, and a first kill whose roster could not be read is better recorded as
+    absent than as a boss nobody killed -- absent means "no evidence", which is true.
+    """
+    names = sorted({str(p) for p in (players or ()) if str(p).strip()})
+    if not names:
+        return False
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(pk), "sk": _s(kill_sk(slug, boss_key)),
+        "players": {"SS": names}, "killedAtMs": _n(int(killed_at_ms or 0)),
+        "reportCode": _s(report_code or ""), "recordedAt": _s(now_iso)})
+    return True
+
+
+def get_first_kill(pk, slug, boss_key):
+    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(kill_sk(slug, boss_key))})
+    item = res.get("Item")
+    if not item:
+        return None
+    return {"players": set((item.get("players") or {}).get("SS") or []),
+            "killedAtMs": int((item.get("killedAtMs") or {}).get("N") or 0),
+            "reportCode": (item.get("reportCode") or {}).get("S") or ""}
+
+
+def first_kills(pk, slug, boss_keys):
+    """Every recorded first kill for this tier, keyed by boss.
+
+    `boss_keys` comes from the tier's announced set. Bosses with no record are simply
+    absent from the result; the caller needs to tell "seeded, no participants known"
+    apart from "nobody was there", and an omission says the first thing.
+    """
+    out = {}
+    for key in sorted(boss_keys or ()):
+        rec = get_first_kill(pk, slug, key)
+        if rec and rec["players"]:
+            out[key] = rec
+    return out
+
+
+def load_roster(pk, slug):
+    """The persisted roster for one tier: what was derived, and what it was seeded from."""
+    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(roster_sk(slug))},
+                       ConsistentRead=True)
+    item = res.get("Item")
+    if not item:
+        return None
+    return {"derived": set((item.get("derived") or {}).get("SS") or []),
+            "seed": set((item.get("seed") or {}).get("SS") or []),
+            "seedFrom": (item.get("seedFrom") or {}).get("S") or "",
+            "sample": int((item.get("sample") or {}).get("N") or 0),
+            "provisional": bool((item.get("provisional") or {}).get("BOOL") or False),
+            "derivedAt": (item.get("derivedAt") or {}).get("S") or ""}
+
+
+def seed_roster(pk, slug, players, from_slug, now_iso):
+    """Carry the previous tier's roster into a new one, once.
+
+    An UpdateItem guarded on `seed` rather than a conditional PutItem, because the tier's
+    roster item may already exist -- the first kill of the new tier can easily land before
+    the first recap runs. Guarding on the attribute rather than the item means seeding is
+    still exactly-once without depending on which of the two got there first.
+
+    Returns True if this call is the one that seeded.
+    """
+    names = sorted({str(p) for p in (players or ()) if str(p).strip()})
+    if not names:
+        return False
+    try:
+        ddb.update_item(
+            TableName=TABLE, Key={"pk": _s(pk), "sk": _s(roster_sk(slug))},
+            UpdateExpression="SET seed = :p, seedFrom = :f, seededAt = :t",
+            ConditionExpression="attribute_not_exists(seed)",
+            ExpressionAttributeValues={":p": {"SS": names}, ":f": _s(from_slug or ""),
+                                       ":t": _s(now_iso)})
+        return True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def save_derived_roster(pk, slug, players, sample, provisional, now_iso):
+    """Persist the roster the bot actually used.
+
+    It is recomputed from the first-kill records on every recap, so this copy is not the
+    authority -- it is the record of what the authority said, which is what makes "why did
+    it call that report B team" answerable a week later from the console alone. It is also
+    what a later tier seeds from, so a rollover does not have to replay the evidence.
+    """
+    expr = ["sample = :n", "provisional = :p", "derivedAt = :t"]
+    vals = {":n": _n(int(sample or 0)), ":p": {"BOOL": bool(provisional)},
+            ":t": _s(now_iso)}
+    names = sorted({str(x) for x in (players or ()) if str(x).strip()})
+    if names:
+        expr.append("derived = :d")
+        vals[":d"] = {"SS": names}
+    ddb.update_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(roster_sk(slug))},
+                    UpdateExpression="SET " + ", ".join(expr),
+                    ExpressionAttributeValues=vals)
+
+
+RECAPS_SK = "RECAPS"
+
+
+def claim_recap(pk, night_key):
+    """Atomically claim the right to post one night's recap. Same discipline as
+    claim_boss, and for the same reason -- Discord has no undo.
+
+    Unlike claim_boss this does not require the item to exist first: there is no seeding
+    step for recaps, so the very first claim has to be able to create the item. The
+    exactly-once property comes from the set membership check, not from the item.
+    """
+    try:
+        ddb.update_item(
+            TableName=TABLE, Key={"pk": _s(pk), "sk": _s(RECAPS_SK)},
+            UpdateExpression="ADD posted :b",
+            ConditionExpression="attribute_not_exists(posted) OR NOT contains(posted, :k)",
+            ExpressionAttributeValues={":b": {"SS": [night_key]}, ":k": _s(night_key)})
+        return True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def release_recap(pk, night_key):
+    """Hand the night back after a permanent failure, so the next run retries it."""
+    ddb.update_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(RECAPS_SK)},
+                    UpdateExpression="DELETE posted :b",
+                    ExpressionAttributeValues={":b": {"SS": [night_key]}})

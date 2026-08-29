@@ -15,6 +15,7 @@ slugify into.
 
 import json
 import os
+import re
 import sys
 import types
 
@@ -87,29 +88,36 @@ class FakeDynamo:
         if ConditionExpression:
             if "attribute_exists(pk)" in ConditionExpression and item is None:
                 raise _conditional_failure()
-            if "NOT contains(announced, :k)" in ConditionExpression:
-                have = set((item.get("announced") or {}).get("SS") or [])
+            # Set-membership guards, over whichever set attribute the caller named:
+            # `announced` for boss claims, `posted` for recap claims.
+            guard = re.search(r"NOT contains\((\w+), :k\)", ConditionExpression)
+            if guard:
+                have = set(((item or {}).get(guard.group(1)) or {}).get("SS") or [])
                 if vals[":k"]["S"] in have:
                     raise _conditional_failure()
             if "aotcAnnounced = :f" in ConditionExpression:
                 if bool((item.get("aotcAnnounced") or {}).get("BOOL")):
                     raise _conditional_failure()
+            # A bare attribute guard -- store.seed_roster's "seed this once". Matched in
+            # full rather than by substring so it cannot also fire on the OR-form above,
+            # where attribute_not_exists is one alternative and not the whole condition.
+            once = re.fullmatch(r"attribute_not_exists\((\w+)\)", ConditionExpression.strip())
+            if once and item is not None and once.group(1) in item:
+                raise _conditional_failure()
 
         if item is None:
             item = dict(Key)
             self.items[k] = item
 
-        if UpdateExpression.startswith("ADD announced"):
-            have = set((item.get("announced") or {}).get("SS") or [])
-            have |= set(vals[":b"]["SS"])
-            item["announced"] = {"SS": sorted(have)}
-        elif UpdateExpression.startswith("DELETE announced"):
-            have = set((item.get("announced") or {}).get("SS") or [])
-            have -= set(vals[":b"]["SS"])
+        setop = re.match(r"(ADD|DELETE) (\w+) :b$", UpdateExpression.strip())
+        if setop:
+            verb, attr = setop.group(1), setop.group(2)
+            have = set((item.get(attr) or {}).get("SS") or [])
+            have = have | set(vals[":b"]["SS"]) if verb == "ADD" else have - set(vals[":b"]["SS"])
             if have:
-                item["announced"] = {"SS": sorted(have)}
+                item[attr] = {"SS": sorted(have)}
             else:
-                item.pop("announced", None)      # DynamoDB drops an emptied set
+                item.pop(attr, None)             # DynamoDB drops an emptied set
         elif UpdateExpression.startswith("SET"):
             for assign in UpdateExpression[4:].split(", "):
                 field, placeholder = [p.strip() for p in assign.split("=")]
@@ -158,6 +166,14 @@ import interactions       # noqa: E402
 import discord            # noqa: E402
 import raiderio           # noqa: E402
 import store              # noqa: E402
+import team               # noqa: E402
+import recap              # noqa: E402
+
+# A REAL Warcraft Logs response, trimmed and with character names substituted. Its whole
+# reason for existing is that the shapes of `table` and `rankings` are undocumented and
+# were not what a careful reading of the brief would have produced. See src/recap.py.
+FIXTURE = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      "fixtures", "report-recap.json"), encoding="utf-8"))
 import wcl                # noqa: E402
 
 # ---------------------------------------------------------------- fixtures
@@ -1273,12 +1289,580 @@ def test_end_to_end():
         "AOTC" in p["embeds"][0]["title"] for p in posts))
 
 
+# ------------------------------------------------- prog team identification
+#
+# Twenty A-team raiders, sixteen B-team raiders, and four people who genuinely raid on
+# both. That overlap is the entire reason the classifier needs a margin rather than a
+# majority, so it is in the fixture rather than assumed away.
+
+A_TEAM = [f"a{i:02d}" for i in range(1, 21)]
+B_ONLY = [f"b{i:02d}" for i in range(1, 17)]
+CROSS = A_TEAM[:4]                       # raid on both teams, legitimately
+B_TEAM = B_ONLY + CROSS
+
+# Four first kills. "fill01" stood in for one absent raider on exactly one night, which
+# is the case the frequency rule exists to reject.
+FIRST_KILLS = [
+    list(A_TEAM),
+    A_TEAM[:19] + ["fill01"],
+    list(A_TEAM),
+    list(A_TEAM),
+]
+
+ALREADY_DEAD = {raiderio.normalize(n) for n in ABYSS[:2]}
+
+
+def fights(kills=(), wipes=()):
+    out = []
+    for i, name in enumerate(kills):
+        out.append({"id": i, "name": name, "kill": True, "difficulty": wcl.HEROIC,
+                    "encounterID": 3000 + i})
+    for i, name in enumerate(wipes):
+        out.append({"id": 100 + i, "name": name, "kill": False, "difficulty": wcl.HEROIC,
+                    "encounterID": 3000 + ABYSS.index(name)})
+    return out
+
+
+FARM_NIGHT = fights(kills=ABYSS[:2])                 # only bosses that were already dead
+PROG_NIGHT = fights(kills=ABYSS[:2], wipes=[ABYSS[2]])   # pushing one that was not
+
+
+def test_roster_derivation():
+    print("\nDeriving the prog roster from first kills")
+    r = team.derive_roster(FIRST_KILLS, min_pct=50)
+    check("every regular raider is on the roster",
+          {team.player_key(n) for n in A_TEAM} <= r["roster"],
+          sorted(r["roster"]))
+    check("a one-off fill-in is not",
+          team.player_key("fill01") not in r["roster"], sorted(r["roster"]))
+    check("the sample size is carried for the log line", r["sample"] == 4, r["sample"])
+    check("four kills is enough to discriminate", r["provisional"] is False)
+
+    # The arithmetic that MIN_FIRST_KILLS_FOR_ROSTER exists for: at a 50% threshold a
+    # one-night fill-in clears the bar on any sample smaller than three.
+    thin = team.derive_roster(FIRST_KILLS[:2], min_pct=50)
+    check("two kills admits the fill-in", team.player_key("fill01") in thin["roster"])
+    check("...and is therefore flagged provisional", thin["provisional"] is True)
+    check("no kills at all yields an empty provisional roster",
+          team.derive_roster([], 50) == {"roster": set(), "sample": 0, "counts": {},
+                                         "provisional": True, "minPct": 50.0})
+
+    named = team.derive_roster([[{"name": "Belo'ren", "server": "Proudmoore"}],
+                                [{"name": "Beloren", "server": "proudmoore"}]], 50)
+    check("punctuation and case fold to one player", len(named["roster"]) == 1,
+          named["roster"])
+    same = team.derive_roster([[{"name": "Shadowstep", "server": "Proudmoore"}],
+                               [{"name": "Shadowstep", "server": "Illidan"}]], 50)
+    check("the same name on two realms is two players", len(same["counts"]) == 2,
+          same["counts"])
+
+
+def test_team_resolution():
+    print("\nClassifying a report as prog, other, or neither")
+    roster = team.derive_roster(FIRST_KILLS, 50)["roster"]
+    HIGH, LOW = 70, 35
+
+    def verdict(raiders, fs, r=roster, dead=ALREADY_DEAD):
+        v, why = team.resolve_team({team.player_key(n) for n in raiders}, fs, r, dead,
+                                   HIGH, LOW, difficulty=wcl.HEROIC)
+        return v, why
+
+    v, why = verdict(A_TEAM[:18] + ["pug01", "pug02"], PROG_NIGHT)
+    check("a clean A-team report is PROG", v == team.PROG, why)
+
+    v, why = verdict(B_TEAM, FARM_NIGHT)
+    check("a clean B-team report is OTHER", v == team.OTHER, why)
+    check("...decided by roster overlap alone", why["signalB"] == "inconclusive", why)
+
+    # The named test case: B team on a farm night wipes on bosses that are already dead,
+    # which is not progression and must not read as any.
+    v, why = verdict(B_TEAM, fights(kills=[ABYSS[0]], wipes=[ABYSS[1]]))
+    check("B team wiping only on already-killed bosses is still OTHER",
+          v == team.OTHER, why)
+
+    v, why = verdict(A_TEAM[:10] + B_ONLY[:10], FARM_NIGHT)
+    check("a heavily cross-team night is UNKNOWN", v == team.UNKNOWN, why)
+    check("...because neither signal was conclusive",
+          why["why"] == "neither signal was conclusive", why)
+
+    v, why = verdict(B_TEAM, PROG_NIGHT)
+    check("low overlap but real progression is UNKNOWN, not a coin flip",
+          v == team.UNKNOWN, why)
+    check("...and says so as a disagreement", why["why"] == "signals disagree", why)
+
+    # Cold start: nothing derived yet, nothing to seed from.
+    v, why = verdict(A_TEAM, PROG_NIGHT, r=set())
+    check("with no roster at all, progression alone decides", v == team.PROG, why)
+    check("...explicitly by signal B", why["why"] == "decided by signal B", why)
+    v, why = verdict(A_TEAM, FARM_NIGHT, r=set())
+    check("with no roster and no progression, nothing is posted", v == team.UNKNOWN, why)
+
+    # An empty roster must not read as zero overlap, which would be a confident OTHER.
+    check("an empty roster makes overlap unanswerable, not zero",
+          team.roster_overlap({"a01"}, set()) is None)
+
+    v, why = verdict(A_TEAM[:4], PROG_NIGHT)
+    check("a four-person log is too small for a percentage",
+          why["roster"]["overlap"] is None, why["roster"])
+
+    # A brand-new tier: nothing is dead yet, so every encounter is progression. This is
+    # the accepted edge case from the README -- signal B cannot tell the teams apart on
+    # opening bosses, and says PROG for whoever raided first.
+    v, why = verdict(A_TEAM, fights(kills=[ABYSS[0]]), dead=set())
+    check("at a fresh tier the first kill reads as progression", v == team.PROG, why)
+
+
+def test_roster_state():
+    print("\nRoster state, seeding and the recap claim")
+    FAKE_DDB.items.clear()
+    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    slug = "the-venomous-abyss"
+
+    for i, name in enumerate(ABYSS[:4]):
+        store.record_first_kill(pk, slug, raiderio.normalize(name),
+                                {team.player_key(p) for p in FIRST_KILLS[i]},
+                                1_700_000_000_000 + i, f"REPORT{i}", "now")
+    keys = {raiderio.normalize(n) for n in ABYSS[:5]}     # the 5th was seeded, not killed
+    recorded = store.first_kills(pk, slug, keys)
+    check("four first kills read back", len(recorded) == 4, sorted(recorded))
+    check("a seeded boss with no participants is simply absent",
+          raiderio.normalize(ABYSS[4]) not in recorded)
+
+    derived = team.derive_roster([sorted(v["players"]) for v in recorded.values()], 50)
+    check("the roster survives a round trip through DynamoDB",
+          derived["roster"] == team.derive_roster(FIRST_KILLS, 50)["roster"])
+
+    check("no participants means no record written",
+          store.record_first_kill(pk, slug, "nobody", set(), 1, "R", "now") is False)
+
+    store.save_derived_roster(pk, slug, derived["roster"], derived["sample"],
+                              derived["provisional"], "now")
+    saved = store.load_roster(pk, slug)
+    check("the derived roster persists", saved["derived"] == derived["roster"])
+    check("...with the sample it came from", saved["sample"] == 4, saved["sample"])
+
+    # Tier rollover: week one has no first kills, so the previous tier's roster stands in.
+    nxt = "the-next-tier"
+    check("a new tier seeds from the last one", store.seed_roster(pk, nxt, saved["derived"],
+                                                                  slug, "now"))
+    check("and only once", store.seed_roster(pk, nxt, {"someone-else"}, slug, "now") is False)
+    seeded = store.load_roster(pk, nxt)
+    check("the seed reads back intact", seeded["seed"] == saved["derived"])
+    check("...labelled with where it came from", seeded["seedFrom"] == slug)
+    check("a seeded tier has derived nothing of its own", seeded["derived"] == set())
+
+    # Seeding must still work when the new tier's roster item already exists, which is
+    # what happens whenever a first kill lands before the first recap of the tier.
+    third = "the-tier-after"
+    store.record_first_kill(pk, third, "someboss", {"a01"}, 1, "R", "now")
+    store.save_derived_roster(pk, third, {"a01"}, 1, True, "now")
+    check("an existing roster item can still be seeded",
+          store.seed_roster(pk, third, saved["derived"], slug, "now"))
+
+    check("a night can be claimed once", store.claim_recap(pk, "2026-08-29"))
+    check("an overlapping run does not double-post", store.claim_recap(pk, "2026-08-29") is False)
+    check("a different night is unaffected", store.claim_recap(pk, "2026-09-05"))
+    store.release_recap(pk, "2026-08-29")
+    check("a failed webhook lets the night retry", store.claim_recap(pk, "2026-08-29"))
+
+
+
+def test_iam_grant_covers_config():
+    """Every parameter config.py asks for must be in the execution role's policy.
+
+    This is not tidiness. GetParameters denies the ENTIRE call if the caller lacks
+    permission on any single name in it, and config.py fetches the optional names in
+    chunks of ten -- so one un-granted parameter silently pins every other name sharing
+    its chunk to a default. The symptom is a value you can see in the console that the bot
+    is demonstrably not using, which is a genuinely hard thing to debug.
+
+    It has happened once already: the Discord interaction parameters were added before the
+    role was widened, and the announcer stopped for want of a slash command.
+    """
+    print("\nThe role policy covers everything config.py reads")
+    import re
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    grant = open(os.path.join(root, "infra", "grant-recap-config.sh"),
+                 encoding="utf-8").read()
+    src = open(os.path.join(root, "src", "config.py"), encoding="utf-8").read()
+
+    wanted = set(re.findall(r'f"\{PREFIX\}(/[a-z_/]+)"', src))
+    granted = set(re.findall(r'\$P(/[a-z_/]+)"', grant))
+    check("config.py asks for a plausible number of parameters", len(wanted) >= 18,
+          len(wanted))
+    check("the role grants every one of them", wanted <= granted,
+          f"NOT granted: {sorted(wanted - granted)}")
+    check("and grants nothing it does not read", granted <= wanted,
+          f"granted but unused: {sorted(granted - wanted)}")
+
+    # The chunk boundary is the reason this matters, so assert it is still a real hazard
+    # rather than a theoretical one.
+    names = re.search(r"OPTIONAL_NAMES = \[(.*?)\]", src, re.S).group(1)
+    optional = [n.strip() for n in names.replace("\n", " ").split(",") if n.strip()]
+    check("the optional list still spans more than one GetParameters call",
+          len(optional) > 10, len(optional))
+
+
+def _src(report="R1", actors=None, elig=None, fids=None,
+         damage=None, deaths=(), rankings=None):
+    """One report's worth of blobs, in the shape recap.py aggregates over."""
+    return {"report": report, "actors": actors, "eligible": set(elig or ()),
+            "fightIDs": list(fids or ()), "damage": damage,
+            "deaths": list(deaths), "rankings": rankings}
+
+
+def test_recap_parsers():
+    print("\nReading the untyped table and rankings blobs")
+    scope = recap.raid_scope(FIXTURE["fights"], wcl.HEROIC)
+    actors = recap.actor_index(FIXTURE["masterData"])
+    elig, fids = scope["raiderIDs"], scope["fightIDs"]
+
+    def src(**kw):
+        kw.setdefault("actors", actors)
+        kw.setdefault("elig", elig)
+        kw.setdefault("fids", fids)
+        return _src(**kw)
+
+    check("only Heroic raid fights are in scope", len(fids) == 16, len(fids))
+    check("the Normal kill and three Mythic+ runs are excluded", scope["excluded"] == 4,
+          scope["excluded"])
+    check("the raid is eighteen people", len(elig) == 18, len(elig))
+    check("actors is indexed but is NOT the roster",
+          len(actors) > len(elig), f"{len(actors)} actors, {len(elig)} raiders")
+
+    # FINDING 1. The captured report holds a raid AND three Mythic+ dungeons, so a table
+    # over the whole report is not a raid leaderboard. It names different people.
+    unscoped = recap.top_damage([src(damage=FIXTURE["damage"])])
+    scoped = recap.top_damage([src(damage=FIXTURE["damageScoped"])])
+    check("an unscoped table names a different top three",
+          [r["name"] for r in unscoped] != [r["name"] for r in scoped],
+          f"{[r['name'] for r in unscoped]} vs {[r['name'] for r in scoped]}")
+    full = {r["name"]: r["total"]
+            for r in recap.top_damage([src(damage=FIXTURE["damageScoped"])], 99)}
+    check("...whose leader is not even in the real top three",
+          unscoped[0]["name"] not in {r["name"] for r in scoped},
+          f"{unscoped[0]['name']} vs {[r['name'] for r in scoped]}")
+    check("...because most of that leader's damage was in a dungeon",
+          full[unscoped[0]["name"]] < unscoped[0]["total"] / 2,
+          f"{unscoped[0]['total']:,} unscoped vs {full[unscoped[0]['name']]:,} in the raid")
+    check("a pet never reaches the leaderboard",
+          "Lightspawn Lasher" not in full)
+    check("dungeon partners are not raiders",
+          not ({"Brackwater", "Foxglove", "Hearthstone", "Marrowgate"}
+               & {r["name"] for r in recap.top_damage([src(damage=FIXTURE["damage"])], 99)}))
+
+    # FINDING 2. The Deaths table stops at 200 rows and says nothing about it.
+    pages = FIXTURE["deathPages"]
+    check("a full page is recognised as truncated", recap.page_is_truncated(pages[0]))
+    check("a short page is not", recap.page_is_truncated(pages[1]) is False)
+    check("the cursor is the last death seen", recap.last_timestamp(pages[0]) == 7859016,
+          recap.last_timestamp(pages[0]))
+    one = recap.death_counts([src(deaths=[pages[0]])])
+    all_ = recap.death_counts([src(deaths=pages)])
+    check("one page undercounts the night",
+          sum(r["deaths"] for r in one) == 200 and sum(r["deaths"] for r in all_) == 245,
+          f"{sum(r['deaths'] for r in one)} vs {sum(r['deaths'] for r in all_)}")
+    check("...and names the WRONG person as most deaths",
+          one[0]["deaths"] != all_[0]["deaths"], f"{one[0]} vs {all_[0]}")
+    check("re-reading an overlapping page cannot inflate a count",
+          recap.death_counts([src(deaths=pages + [pages[0]])]) == all_)
+
+    # FINDING 3, and the one a single-report fixture cannot show. Actor ids are scoped to
+    # ONE REPORT. A night logged twice renumbers everybody, so aggregating by id splits
+    # each raider in half and fuses unrelated people together. This is the shape of the bug
+    # the first live dry run produced.
+    shifted_actors = {aid + 1000: dict(a) for aid, a in actors.items()}
+    shifted_damage = {"data": {"entries": [
+        dict(e, id=e["id"] + 1000) for e in FIXTURE["damageScoped"]["data"]["entries"]]}}
+    shifted_deaths = [{"data": {"entries": [
+        dict(e, id=e["id"] + 1000) for e in p["data"]["entries"]]}} for p in pages]
+    two = [src(report="A", damage=FIXTURE["damageScoped"], deaths=pages),
+           _src(report="B", actors=shifted_actors, elig={i + 1000 for i in elig},
+                fids=fids, damage=shifted_damage, deaths=shifted_deaths)]
+
+    merged = recap.top_damage(two, 99)
+    check("the same night logged twice is still eighteen people",
+          len(recap.raider_keys(two)) == 18, len(recap.raider_keys(two)))
+    check("...and nobody appears twice under a renumbered id",
+          len(merged) == len({r["name"] for r in merged}), len(merged))
+    check("...with each player's damage summed, not split",
+          merged[0]["total"] == 2 * full[merged[0]["name"]],
+          f"{merged[0]}")
+    dmerged = recap.death_counts(two)
+    check("deaths merge on the player too",
+          sum(r["deaths"] for r in dmerged) == 490 and
+          len(dmerged) == len({r["name"] for r in dmerged}),
+          f"{sum(r['deaths'] for r in dmerged)} over {len(dmerged)} people")
+
+    # FINDING 4, also invisible in a one-report fixture: two people in the guild both log,
+    # so one night produces two reports of the SAME pulls. Summing those doubles the card.
+    HOUR = 3600000
+    twice = [{"code": "swibeto", "start": 0, "end": int(5.86 * HOUR), "heroicFights": 16},
+             {"code": "elder", "start": -4 * 60000, "end": int(2.79 * HOUR),
+              "heroicFights": 16}]
+    kept, dropped = recap.drop_duplicate_logs(twice)
+    check("the same night logged twice keeps one report", len(kept) == 1, kept)
+    check("...and keeps the more complete one", kept[0]["code"] == "swibeto", kept)
+    check("...naming what it duplicated",
+          dropped[0]["duplicateOf"] == "swibeto", dropped)
+
+    split = [{"code": "before", "start": 0, "end": 2 * HOUR, "heroicFights": 8},
+             {"code": "after", "start": 2 * HOUR + 60000, "end": 5 * HOUR,
+              "heroicFights": 8}]
+    kept2, dropped2 = recap.drop_duplicate_logs(split)
+    check("a night logged in two PARTS keeps both", len(kept2) == 2 and not dropped2,
+          f"{kept2} / {dropped2}")
+    check("...in their original order",
+          [r["code"] for r in kept2] == ["before", "after"], kept2)
+    nudge = [{"code": "x", "start": 0, "end": 2 * HOUR, "heroicFights": 8},
+             {"code": "y", "start": int(1.8 * HOUR), "end": 4 * HOUR, "heroicFights": 8}]
+    check("a small tail overlap is still two parts, not a duplicate",
+          len(recap.drop_duplicate_logs(nudge)[0]) == 2)
+
+    # rankings covers every ranked kill in the report, at every difficulty.
+    par = recap.parses([src(rankings=FIXTURE["rankings"])], None)
+    got = {r["difficulty"] for r in FIXTURE["rankings"]["data"]}
+    check("the rankings blob really does mix difficulties", got == {3, 4, 10}, got)
+    check("only Heroic parses survive",
+          par["best"]["boss"] in {"Nymrissa Wavecaller", "Nek'zali the Soulcoiler",
+                                  "The Lost Explorers"}, par["best"]["boss"])
+    check("rankPercent is used, not bracketPercent", par["best"]["percent"] == 81.0,
+          par["best"]["percent"])
+
+    # Difficulty alone is not enough. The report's Heroic kills span two raids, so a card
+    # labelled with one of them must not credit a parse earned in the other.
+    grotto = {f["id"] for f in FIXTURE["fights"]
+              if f["name"] == "Nymrissa Wavecaller" and f["difficulty"] == wcl.HEROIC}
+    check("the unscoped best parse comes from the OTHER raid",
+          par["best"]["boss"] == "Nymrissa Wavecaller", par["best"]["boss"])
+    tiered = recap.parses([src(rankings=FIXTURE["rankings"],
+                               fids=[i for i in fids if i not in grotto])], None)
+    check("scoping to the night's tier excludes it",
+          tiered["best"]["boss"] != "Nymrissa Wavecaller", tiered["best"])
+    check("...and still finds a parse from the right raid",
+          tiered["best"]["boss"] in {"Nek'zali the Soulcoiler", "The Lost Explorers"},
+          tiered["best"]["boss"])
+
+    # The roster intersection: the explicit answer to "who counts".
+    drop = {r["id"] for r in FIXTURE["damageScoped"]["data"]["entries"]
+            if r["name"] == scoped[0]["name"]}
+    thin = [src(damage=FIXTURE["damageScoped"], elig=elig - drop)]
+    check("dropping someone from the eligible set drops them from the card",
+          scoped[0]["name"] not in {r["name"] for r in recap.top_damage(thin)})
+    roster = {team.player_key(a["name"], a["server"]) for i, a in actors.items()
+              if i in elig and a["name"] != scoped[0]["name"]}
+    keep = [src(damage=FIXTURE["damageScoped"])]
+    gone = recap.restrict_to_roster(keep, roster)
+    check("restrict_to_roster excludes the off-roster raider", gone == 1, gone)
+    check("...and an empty result is refused rather than emptying the card",
+          recap.restrict_to_roster([src(damage=None)], {"nobody-at-all"}) == 0)
+
+    # A wipe night. Rankings only exist for kills, so there is nothing to say.
+    wipes = [dict(f, kill=False) for f in FIXTURE["fights"]]
+    wipe = recap.summarise(recap.raid_scope(wipes, wcl.HEROIC),
+                           [src(damage=FIXTURE["damageScoped"], deaths=pages,
+                                rankings={"data": []})])
+    check("a wipe night killed nothing", wipe["bosses"] == [], wipe["bosses"])
+    check("...has a progression boss anyway", wipe["prog"]["name"] == "The Lost Explorers",
+          wipe["prog"])
+    check("...and simply carries no parse section", wipe["parses"] is None)
+    check("...which is reported as a missing section", "parses" in wipe["missing"])
+
+    # Fields that vanish. Every one has to cost one section, never the card.
+    for label, kw in (
+            ("damage blob is empty", {"damage": {}}),
+            ("damage entries lost 'total'", {"damage": {"data": {"entries": [
+                {"id": i, "name": "x"} for i in elig]}}}),
+            ("deaths lost 'timestamp'", {"deaths": [{"data": {"entries": [
+                {"id": i, "fight": fids[0]} for i in elig]}}]}),
+            ("rankings became a bare list", {"rankings": {"data": "nonsense"}}),
+            ("rankings lost rankPercent", {"rankings": {"data": [
+                {"difficulty": 4, "kill": 1, "encounter": {"name": "X"},
+                 "roles": {"dps": {"characters": [{"name": "Ashvale"}]}}}]}}),
+    ):
+        args = {"damage": FIXTURE["damageScoped"], "deaths": pages,
+                "rankings": FIXTURE["rankings"]}
+        args.update(kw)
+        out = recap.summarise(scope, [src(**args)])
+        check(f"survives: {label}", isinstance(out, dict) and "bosses" in out)
+    check("a blob that is not even a dict is survivable",
+          recap.top_damage([src(damage="nonsense"), src(damage=None), src(damage=7)]) == [])
+
+
+def test_recap_end_to_end():
+    print("\nThe morning-after recap, end to end")
+    import copy
+    from datetime import datetime, timedelta, timezone
+    import handler
+    config._cache.clear()
+
+    FAKE_DDB.items.clear()
+    handler._guild_id["value"] = None
+    now = datetime.now(timezone.utc)
+    posts = []
+    profile = copy.deepcopy(PROFILE)
+    reports = [{"code": "FIXTURECODE0001", "title": "Prog Raid",
+                "startTime": int((now - timedelta(hours=13)).timestamp() * 1000),
+                "endTime": int((now - timedelta(hours=10)).timestamp() * 1000),
+                "guildTag": None, "zone": {"id": 44, "name": "The Venomous Abyss"}}]
+    rate = {"limitPerHour": 3600, "pointsSpentThisHour": 10.0, "pointsResetIn": 60}
+
+    detail = dict(FIXTURE)
+    detail["startTime"] = reports[0]["startTime"]
+    detail["endTime"] = reports[0]["endTime"]
+
+    handler.wcl.get_token = lambda *a, **kw: "tok"
+    handler.wcl.find_guild = lambda *a, **kw: ({"id": 777, "name": "Scrambled"}, None)
+    handler.wcl.query = lambda token, doc, variables=None: {"rateLimitData": rate}
+    handler.wcl.reports_in_window = lambda *a, **kw: (reports, None)
+    handler.wcl.report_detail = lambda token, code: (detail, None)
+    handler.wcl.report_tables = lambda token, code, fids: (
+        {"damage": FIXTURE["damageScoped"], "rankings": FIXTURE["rankings"]}, None)
+    handler.wcl.deaths_pages = lambda *a, **kw: (FIXTURE["deathPages"], None, 2)
+    handler.raiderio.guild_profile = lambda *a, **kw: profile
+    handler.raiderio.static_raids = lambda exp: {11: RAIDS, 10: PREV_RAIDS}.get(exp, [])
+    handler.discord.post = lambda hook, payload, **kw: posts.append(payload) or 204
+
+    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    store.mark_bootstrapped(pk, "now", 4)
+    store.seed_tier(pk, "the-venomous-abyss", set(), 0, "The Venomous Abyss", "now")
+    store.seed_tier(pk, "the-tidebound-grotto", set(), 0, "The Tidebound Grotto", "now")
+
+    cfg = config.load()
+    cfg["recap_enabled"] = False
+    handler.handler({"mode": "recap"}, None)
+    check("a disabled recap posts nothing", posts == [], f"{len(posts)} posts")
+
+    # The preview path, which has to work BEFORE the feature is switched on -- and must
+    # not claim the night, or the real recap would be silently skipped forever after.
+    before = dict(FAKE_DDB.items)
+    res = handler.handler({"mode": "recap", "dry": True}, None)
+    check("a dry run works while the recap is still disabled", res.get("dry") is True, res)
+    check("...renders a real card", res["payload"]["embeds"][0]["fields"])
+    check("...posts nothing", posts == [], f"{len(posts)} posts")
+    check("...and claims NO night, so the real recap still fires",
+          FAKE_DDB.items == before, "state changed — the dry run would silence the recap")
+
+    # The window override, and the fact that only a dry run gets one.
+    old_start = reports[0]["startTime"]
+    reports[0]["startTime"] = int((now - timedelta(hours=42)).timestamp() * 1000)
+    reports[0]["endTime"] = int((now - timedelta(hours=36)).timestamp() * 1000)
+    detail["startTime"], detail["endTime"] = reports[0]["startTime"], reports[0]["endTime"]
+    seen = {}
+
+    def spy(token, gid, start, end, limit=10):
+        seen["hours"] = (end - start) / 3600000.0
+        return reports, None
+
+    handler.wcl.reports_in_window = spy
+    handler.handler({"mode": "recap", "dry": True, "hours": 48}, None)
+    check("a dry run can widen its own window", round(seen["hours"]) == 48, seen)
+    cfg["recap_enabled"] = True
+    handler.handler({"mode": "recap", "hours": 999}, None)
+    check("a scheduled run cannot", round(seen["hours"]) == 18, seen)
+    cfg["recap_enabled"] = False
+
+    # An explicit manual post: ignores the enabled switch, may widen the window, and still
+    # claims the night so it cannot be published twice.
+    posts.clear()
+    # The window test above did a real post, which claimed this night. Release it, or the
+    # manual case would be testing the duplicate guard rather than the manual path.
+    FAKE_DDB.items.pop((pk, store.RECAPS_SK), None)
+    before_manual = dict(FAKE_DDB.items)
+    res = handler.handler({"mode": "recap", "manual": True, "hours": 48}, None)
+    check("a manual post works while the schedule is still disabled",
+          len(posts) == 1 and res.get("posted") is True, f"{len(posts)} posts / {res}")
+    check("...and honours its window", round(seen["hours"]) == 48, seen)
+    posts.clear()
+    res = handler.handler({"mode": "recap", "manual": True, "hours": 48}, None)
+    check("...and claims the night, so it cannot post twice",
+          posts == [] and res.get("duplicate") is True, f"{len(posts)} posts / {res}")
+    FAKE_DDB.items.clear()
+    FAKE_DDB.items.update(before_manual)
+    posts.clear()
+    posts.clear()
+    FAKE_DDB.items.clear()
+    FAKE_DDB.items.update(before)
+    reports[0]["startTime"], reports[0]["endTime"] = old_start, old_start + 3600000
+    detail["startTime"], detail["endTime"] = old_start, old_start + 3600000
+    handler.wcl.reports_in_window = lambda *a, **kw: (reports, None)
+
+    cfg["recap_enabled"] = True
+    rate = {"limitPerHour": 3600, "pointsSpentThisHour": 3500.0, "pointsResetIn": 60}
+    res = handler.handler({"mode": "recap"}, None)
+    check("an exhausted point budget aborts before the expensive calls",
+          res.get("skipped") == "rate_limit", res)
+    check("...and posts nothing", posts == [], f"{len(posts)} posts")
+
+    # The band that matters, and the reason the two reserves are different numbers: the
+    # announcer's ceiling is not yet reached, so a poll would still run -- and the recap
+    # stands down anyway to leave those points for it.
+    rate = {"limitPerHour": 3600, "pointsSpentThisHour": 3000.0, "pointsResetIn": 60}
+    res = handler.handler({"mode": "recap"}, None)
+    check("the recap yields while the announcer still has headroom",
+          res.get("skipped") == "rate_limit", res)
+    check("...at a point where a poll would NOT have backed off",
+          3000.0 / 3600 < handler.POINTS_CEILING,
+          f"{3000.0 / 3600:.3f} vs ceiling {handler.POINTS_CEILING}")
+    check("...and posts nothing", posts == [], f"{len(posts)} posts")
+    rate = {"limitPerHour": 3600, "pointsSpentThisHour": 10.0, "pointsResetIn": 60}
+
+    saved, reports = reports, []
+    res = handler.handler({"mode": "recap"}, None)
+    check("a night with no report posts nothing, silently", posts == [] and res["reports"] == 0)
+    reports = saved
+
+    # Cold start: no roster at all, so signal B alone decides -- and this report is full of
+    # wipes on bosses nothing has ever killed.
+    posts.clear()
+    res = handler.handler({"mode": "recap"}, None)
+    check("a prog night posts exactly one card", len(posts) == 1, f"{len(posts)} posts")
+    check("...as one embed, not several",
+          posts and len(posts[0]["embeds"]) == 1, len(posts[0]["embeds"]) if posts else 0)
+    check("...and pings nobody", posts and posts[0]["allowed_mentions"] == {"parse": []})
+    check("...with no content line at all", posts and "content" not in posts[0])
+
+    embed = posts[0]["embeds"][0]
+    check("the card is labelled with the tier holding most of the night",
+          "The Venomous Abyss" in embed["footer"]["text"], embed["footer"]["text"])
+    check("the warm-up kill in another raid is not on the card",
+          "Nymrissa" not in embed["description"], embed["description"])
+    check("the progression boss is the one with the most wipes",
+          "The Lost Explorers" in embed["description"], embed["description"])
+    fields = {f["name"] for f in embed.get("fields", [])}
+    check("top damage is on the card", "Top damage" in fields, fields)
+    check("most deaths is on the card", "Most deaths" in fields, fields)
+    check("worst parse is OFF by default", "Worst parse" not in fields, fields)
+
+    posts.clear()
+    res = handler.handler({"mode": "recap"}, None)
+    check("running it again does not double-post", posts == [], f"{len(posts)} posts")
+    check("...because the night was already claimed", res.get("duplicate") is True, res)
+
+    # A B-team night: everything it touched was already dead, and there is no roster to
+    # tell the teams apart. Neither signal is conclusive.
+    FAKE_DDB.items.clear()
+    store.mark_bootstrapped(pk, "now", 4)
+    dead = {raiderio.normalize(f["name"]) for f in FIXTURE["fights"]
+            if f["difficulty"] == wcl.HEROIC}
+    store.seed_tier(pk, "the-venomous-abyss", dead, 3, "The Venomous Abyss", "now")
+    store.seed_tier(pk, "the-tidebound-grotto", dead, 1, "The Tidebound Grotto", "now")
+    posts.clear()
+    res = handler.handler({"mode": "recap"}, None)
+    check("with nothing new killed and no roster, the verdict is UNKNOWN",
+          res.get("posted") is False, res)
+    check("...and UNKNOWN posts NOTHING", posts == [], f"{len(posts)} posts")
+
+
 def main():
     print("greyBot self-test")
     for fn in (test_config, test_boss_art, test_name_normalisation, test_slug_resolution,
                test_seed_names, test_progress_count, test_dedupe, test_aotc_guard,
+               test_roster_derivation, test_team_resolution, test_roster_state,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
-               test_interactions, test_end_to_end):
+               test_interactions, test_iam_grant_covers_config,
+               test_recap_parsers, test_end_to_end,
+               test_recap_end_to_end):
         fn()
     print()
     if FAILED:

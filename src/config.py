@@ -15,8 +15,8 @@ variables are readable by anything that can call GetFunctionConfiguration. And t
 identity sits alongside them so there is exactly one place to look when the realm slug is
 wrong, rather than two that can disagree.
 
-Fetched once per container and cached. get_parameters takes up to ten names, so all seven
-arrive in a single call rather than seven.
+Fetched once per container and cached. The seven required names arrive in a single
+GetParameters call; the optional ones follow in chunks of ten, which is that call's limit.
 """
 
 import json
@@ -54,8 +54,63 @@ DISCORD_BOT_TOKEN = f"{PREFIX}/discord/bot_token"
 DISCORD_PUBLIC_KEY = f"{PREFIX}/discord/public_key"
 DISCORD_GUILD_ID = f"{PREFIX}/discord/guild_id"
 
+# The weekly recap and its team classification. Optional for the same reason, and for
+# one more: every one of these is unreadable until the execution role is widened to
+# include them, and the bot must survive that gap rather than stop announcing kills
+# because a feature nobody has enabled yet cannot read its own settings.
+#
+# RECAP_ENABLED defaults to FALSE when absent, which makes deploying this code a no-op.
+# The recap posts a card naming individual raiders into a live guild channel; the one
+# thing it must not do is start doing that because a parameter was missing.
+RECAP_ENABLED = f"{PREFIX}/recap/enabled"
+RECAP_WORST_PARSE = f"{PREFIX}/recap/show_worst_parse"
+RECAP_SCHEDULE = f"{PREFIX}/recap/schedule"
+TEAM_ROSTER_MIN_PCT = f"{PREFIX}/team/roster_min_first_kill_pct"
+TEAM_OVERLAP_HIGH = f"{PREFIX}/team/prog_overlap_high"
+TEAM_OVERLAP_LOW = f"{PREFIX}/team/prog_overlap_low"
+# Empty today, because Scrambled tags no reports. Introspection confirmed the API
+# supports it (reports(guildTagID:), Report.guildTag, Guild.tags), so if the guild
+# ever starts tagging its two teams, setting this name turns a statistical guess
+# into an authoritative answer with no code change.
+TEAM_PROG_TAG = f"{PREFIX}/team/prog_tag"
+
 OPTIONAL_NAMES = [BLIZZARD_CLIENT_ID, BLIZZARD_CLIENT_SECRET,
-                  DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID]
+                  DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID,
+                  RECAP_ENABLED, RECAP_WORST_PARSE, RECAP_SCHEDULE,
+                  TEAM_ROSTER_MIN_PCT, TEAM_OVERLAP_HIGH, TEAM_OVERLAP_LOW,
+                  TEAM_PROG_TAG]
+
+# Defaults for everything the recap reads. A missing parameter is a configured default,
+# not a failure -- the thresholds especially, because they are tuning knobs that only
+# become interesting once the first few weeks show how much the two teams overlap.
+#
+# 70 and 35 are a MARGIN, not a majority, which is the whole point. Several people raid
+# on both teams: a B-team report carrying four of them out of twenty raiders sits near
+# 20% overlap, an A-team night with a couple of pugs sits near 90%, and the 35-70 gap in
+# between is where the bot admits it cannot tell and says nothing.
+DEFAULTS = {
+    RECAP_ENABLED: "false",
+    RECAP_WORST_PARSE: "false",     # parse-shaming starts arguments; opt in, never out
+    RECAP_SCHEDULE: "",
+    TEAM_ROSTER_MIN_PCT: "50",
+    TEAM_OVERLAP_HIGH: "70",
+    TEAM_OVERLAP_LOW: "35",
+    TEAM_PROG_TAG: "",
+}
+
+
+def _flag(raw, default=False):
+    v = (raw or "").strip().lower()
+    if not v:
+        return default
+    return v in ("1", "true", "yes", "on")
+
+
+def _number(raw, default):
+    try:
+        return float(str(raw).strip())
+    except (TypeError, ValueError):
+        return float(default)
 
 _cfg = Config(retries={"max_attempts": 3, "mode": "standard"}, read_timeout=10)
 ssm = boto3.client("ssm", region_name=REGION, config=_cfg)
@@ -87,12 +142,21 @@ def load(now=None):
     # un-granted parameter takes down the whole bot rather than disabling one feature.
     # That is exactly what happened when the Discord interaction parameters were added
     # before the role was widened: the announcer stopped, for want of a slash command.
-    try:
-        opt = ssm.get_parameters(Names=OPTIONAL_NAMES, WithDecryption=True)
-        got.update({p["Name"]: p["Value"] for p in opt.get("Parameters", [])})
-    except Exception as exc:                                   # noqa: BLE001
-        print(json.dumps({"event": "optional_config_unavailable", "error": repr(exc),
-                          "note": "optional features disabled; required config is fine"}))
+    #
+    # Chunked in tens because that is GetParameters' hard limit and the optional list has
+    # outgrown it. Each chunk is caught separately, so a grant that covers the Blizzard
+    # keys but not the recap ones disables the recap and keeps the boss art, rather than
+    # losing both to one AccessDenied.
+    for i in range(0, len(OPTIONAL_NAMES), 10):
+        chunk = OPTIONAL_NAMES[i:i + 10]
+        try:
+            opt = ssm.get_parameters(Names=chunk, WithDecryption=True)
+            got.update({p["Name"]: p["Value"] for p in opt.get("Parameters", [])})
+        except Exception as exc:                               # noqa: BLE001
+            print(json.dumps({"event": "optional_config_unavailable", "error": repr(exc),
+                              "names": chunk,
+                              "note": "those optional features disabled; required config "
+                                      "is fine"}))
 
     _cache.clear()
     _fetched_at["t"] = now
@@ -112,6 +176,15 @@ def load(now=None):
         "bot_token": got.get(DISCORD_BOT_TOKEN, "").strip(),
         "public_key": got.get(DISCORD_PUBLIC_KEY, "").strip(),
         "discord_guild_id": got.get(DISCORD_GUILD_ID, "").strip(),
+        "recap_enabled": _flag(got.get(RECAP_ENABLED, DEFAULTS[RECAP_ENABLED])),
+        "recap_worst_parse": _flag(got.get(RECAP_WORST_PARSE,
+                                           DEFAULTS[RECAP_WORST_PARSE])),
+        "recap_schedule": got.get(RECAP_SCHEDULE, DEFAULTS[RECAP_SCHEDULE]).strip(),
+        "roster_min_pct": _number(got.get(TEAM_ROSTER_MIN_PCT),
+                                  DEFAULTS[TEAM_ROSTER_MIN_PCT]),
+        "overlap_high": _number(got.get(TEAM_OVERLAP_HIGH), DEFAULTS[TEAM_OVERLAP_HIGH]),
+        "overlap_low": _number(got.get(TEAM_OVERLAP_LOW), DEFAULTS[TEAM_OVERLAP_LOW]),
+        "prog_tag": got.get(TEAM_PROG_TAG, DEFAULTS[TEAM_PROG_TAG]).strip(),
     })
     return _cache
 
@@ -124,4 +197,10 @@ def redacted(cfg):
             "bossArtEnabled": bool(cfg.get("blizzard_client_id")
                                    and cfg.get("blizzard_client_secret")),
             "interactionsEnabled": bool(cfg.get("public_key")),
-            "botTokenSet": bool(cfg.get("bot_token"))}
+            "botTokenSet": bool(cfg.get("bot_token")),
+            "recapEnabled": bool(cfg.get("recap_enabled")),
+            "recapWorstParse": bool(cfg.get("recap_worst_parse")),
+            "rosterMinPct": cfg.get("roster_min_pct"),
+            "overlapHigh": cfg.get("overlap_high"),
+            "overlapLow": cfg.get("overlap_low"),
+            "progTag": cfg.get("prog_tag") or None}

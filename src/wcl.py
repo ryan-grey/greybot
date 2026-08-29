@@ -204,3 +204,172 @@ def heroic_kills_since(token, guild_id, since_ms, limit=12, difficulty=HEROIC,
             })
     kills.sort(key=lambda k: k["killedAtMs"])
     return kills, rate
+
+
+# ------------------------------------------------------------------ recap queries
+#
+# Every argument below was read off a real introspection of reportData/Report rather than
+# guessed (scripts/introspect-wcl.py). Two of them carry the findings that a guessed query
+# would have got silently wrong:
+#
+#   fightIDs on the tables. A report is not one activity -- the captured Scrambled report
+#   held sixteen Heroic raid fights, a Normal kill and three Mythic+ dungeons. Unscoped,
+#   the DamageDone table returned twenty-seven rows for an eighteen-person raid and a
+#   different top three, led by a player whose total was mostly dungeon damage.
+#
+#   startTime on the Deaths table. That table stops at 200 rows without saying so. The
+#   captured night had 245 deaths, and the top of the "most deaths" list read differently
+#   depending on whether you had noticed.
+#
+# GuildTag rides along on the reports query. Scrambled tags nothing today, so it is always
+# null and the roster classifier does the work -- but it costs nothing to ask, and the day
+# somebody tags the B team's reports the bot starts using the authoritative answer.
+
+NIGHT_REPORTS_Q = """
+query($guildID: Int!, $start: Float!, $end: Float!, $limit: Int!) {
+  %s
+  reportData {
+    reports(guildID: $guildID, startTime: $start, endTime: $end, limit: $limit) {
+      data { code title startTime endTime guildTag { id name } zone { id name } }
+    }
+  }
+}
+""" % RATE
+
+# masterData is asked for once per report, not once per fight. It comes back large -- 2,295
+# players across 130 realms in the captured response, because it holds every actor the log
+# ever saw rather than the raid -- but it is the only way an id in friendlyPlayers becomes
+# a name, and one 225KB read a week is not worth a cleverer scheme.
+REPORT_DETAIL_Q = """
+query($code: String!) {
+  %s
+  reportData {
+    report(code: $code) {
+      code title startTime endTime
+      guild { id name } guildTag { id name } zone { id name }
+      masterData { actors(type: "Player") { id name server type subType } }
+      fights(killType: Encounters) {
+        id name kill difficulty encounterID startTime endTime fightPercentage size
+        friendlyPlayers
+      }
+    }
+  }
+}
+""" % RATE
+
+REPORT_TABLES_Q = """
+query($code: String!, $fightIDs: [Int]!) {
+  %s
+  reportData {
+    report(code: $code) {
+      damage: table(dataType: DamageDone, killType: Encounters, viewBy: Source,
+                    fightIDs: $fightIDs)
+      rankings
+    }
+  }
+}
+""" % RATE
+
+DEATHS_Q = """
+query($code: String!, $fightIDs: [Int]!, $start: Float!, $end: Float!) {
+  %s
+  reportData {
+    report(code: $code) {
+      deaths: table(dataType: Deaths, killType: Encounters, fightIDs: $fightIDs,
+                    startTime: $start, endTime: $end)
+    }
+  }
+}
+""" % RATE
+
+# One kill's roster, for the derived prog roster. Filtered to the encounter rather than
+# fetching the whole report, and only ever run just after a first kill was announced --
+# a handful of times a tier, not once a poll.
+KILL_ROSTER_Q = """
+query($code: String!, $encounterID: Int!, $difficulty: Int!) {
+  %s
+  reportData {
+    report(code: $code) {
+      masterData { actors(type: "Player") { id name server type } }
+      fights(encounterID: $encounterID, difficulty: $difficulty, killType: Kills) {
+        id startTime endTime friendlyPlayers
+      }
+    }
+  }
+}
+""" % RATE
+
+
+def _report(data):
+    return ((data.get("reportData") or {}).get("report")) or {}
+
+
+def reports_in_window(token, guild_id, start_ms, end_ms, limit=10):
+    """Reports the guild filed in one raid night's window. Deliberately cheap: no fights,
+    so this costs a fraction of what the announcer's paged query does."""
+    data = query(token, NIGHT_REPORTS_Q, {"guildID": int(guild_id), "start": float(start_ms),
+                                          "end": float(end_ms), "limit": int(limit)})
+    reports = (((data.get("reportData") or {}).get("reports") or {}).get("data")) or []
+    return reports, rate_limit(data)
+
+
+def report_detail(token, code):
+    data = query(token, REPORT_DETAIL_Q, {"code": code})
+    return _report(data), rate_limit(data)
+
+
+def report_tables(token, code, fight_ids):
+    data = query(token, REPORT_TABLES_Q, {"code": code,
+                                          "fightIDs": [int(i) for i in fight_ids]})
+    return _report(data), rate_limit(data)
+
+
+def deaths_pages(token, code, fight_ids, span_ms, max_pages=6, is_truncated=None,
+                 cursor_of=None):
+    """Every death of the night, walked with a timestamp cursor.
+
+    The Deaths table returns at most 200 rows and gives no indication that it stopped
+    early, so a full page is treated as "there is more" and the next call resumes one
+    millisecond after the last death seen. Resuming by timestamp rather than halving the
+    range means no page is fetched twice, and the merge in recap.death_counts de-duplicates
+    anyway in case a tie on the cursor makes one overlap.
+
+    The truncation test and the cursor are injected so this module stays free of any
+    opinion about the blob's internal shape -- that lives in recap.py, which is where the
+    captured response is documented.
+    """
+    pages, rate, start, guard = [], None, 0.0, 0
+    while guard < max(1, int(max_pages)):
+        guard += 1
+        data = query(token, DEATHS_Q, {"code": code,
+                                       "fightIDs": [int(i) for i in fight_ids],
+                                       "start": float(start), "end": float(span_ms)})
+        rate = rate_limit(data) or rate
+        blob = (_report(data) or {}).get("deaths")
+        pages.append(blob)
+        if not is_truncated or not is_truncated(blob):
+            break
+        nxt = cursor_of(blob) if cursor_of else None
+        if nxt is None or float(nxt) + 1 <= start:
+            break                       # no forward progress; stop rather than loop
+        start = float(nxt) + 1
+    return pages, rate, guard
+
+
+def kill_participants(token, code, encounter_id, difficulty=HEROIC):
+    """Who was standing there for one first kill: [{"name":..., "server":...}]."""
+    data = query(token, KILL_ROSTER_Q, {"code": code, "encounterID": int(encounter_id),
+                                        "difficulty": int(difficulty)})
+    rep = _report(data)
+    actors = {}
+    for a in ((rep.get("masterData") or {}).get("actors")) or []:
+        if a.get("id") is not None and a.get("name"):
+            actors[int(a["id"])] = {"name": a["name"], "server": a.get("server") or ""}
+    people, seen = [], set()
+    for f in rep.get("fights") or []:
+        for pid in f.get("friendlyPlayers") or []:
+            pid = int(pid)
+            if pid in actors and pid not in seen:
+                seen.add(pid)
+                people.append(actors[pid])
+    return people, rate_limit(data)

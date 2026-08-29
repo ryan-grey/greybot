@@ -135,6 +135,28 @@ Seven parameters under `/greybot`, read at runtime, cached per container, fetche
 | `/greybot/guild/realm` | String | realm **slug**, lowercase-hyphenated |
 | `/greybot/guild/region` | String | `us` |
 
+Seven more are **optional**, and default to something safe when missing. They are fetched
+in a separate call, chunked in tens, because `GetParameters` denies the whole request if
+the caller lacks permission on any single name in it — asking for optional names alongside
+required ones means one un-granted parameter takes the announcer down. That is not
+hypothetical; it is what happened when the Discord interaction parameters were added
+before the role was widened.
+
+| parameter | default | |
+|---|---|---|
+| `/greybot/recap/enabled` | **false** | the recap posts nothing until this is turned on |
+| `/greybot/recap/show_worst_parse` | **false** | parse-shaming starts arguments; opt in, never out |
+| `/greybot/recap/schedule` | — | the cron; `infra/create-recap-schedule.sh` reads it |
+| `/greybot/team/roster_min_first_kill_pct` | 50 | share of first kills that puts a player on the roster |
+| `/greybot/team/prog_overlap_high` | 70 | roster overlap at or above this is the prog team |
+| `/greybot/team/prog_overlap_low` | 35 | roster overlap at or below this is the other team |
+| `/greybot/team/prog_tag` | — | Warcraft Logs report tag, if the guild ever starts tagging |
+
+`recap/enabled` defaulting to false is the important one: deploying this code changes
+nothing until somebody decides otherwise. The recap posts a card naming individual raiders
+into a live guild channel, and "it started posting because a parameter appeared" is not an
+acceptable way for that to begin.
+
 None of this is a Lambda environment variable. The two secrets are credentials, and
 environment variables are readable by anything that can call `GetFunctionConfiguration`;
 the guild identity sits with them so there is exactly one place to look when the realm slug
@@ -242,10 +264,26 @@ stays inside that grant.
 |---|---|---|
 | bootstrap marker | `GUILD#<region>#<realm>#<name>` | `BOOTSTRAP` |
 | tier state | `GUILD#<region>#<realm>#<name>` | `TIER#<raid-slug>` |
+| first-kill roster | `GUILD#<region>#<realm>#<name>` | `KILL#<raid-slug>#<boss-key>` |
+| derived roster | `GUILD#<region>#<realm>#<name>` | `ROSTER#<raid-slug>` |
+| recap claims | `GUILD#<region>#<realm>#<name>` | `RECAPS` |
 
 Held per tier: the set of announced bosses, the seed size, the count baseline, and the
 AOTC flag. **Tier rollover needs no migration and no detection** — a new raid slug is a new
 sort key, so the announced set starts empty on its own.
+
+The role grants no `Query` either, which shaped the roster storage rather than merely
+constraining it. Nothing can be a collection the code discovers by scanning a key range,
+so the participant records are one item per kill, addressable by a key the code already
+has: the tier's `announced` set *is* the list of first kills. Nine `GetItem`s once a week
+is not worth a cleverer scheme, and one item per kill stays readable in the console — the
+same reason the announced set holds boss names rather than encounter ids. A boss in
+`announced` with no `KILL#` item was seeded, killed before the bot was watching, and is
+treated as long dead.
+
+Recap claims are a string set on one item rather than an item per night, because releasing
+a claim after a failed webhook has to be an `UpdateItem ... DELETE` to stay inside the
+grant — the same shape as the boss claim, for the same reason.
 
 ---
 
@@ -274,6 +312,211 @@ Raider.IO shows Heroic kills while Warcraft Logs returns no reports at all, the 
 point, and no amount of retrying will help.
 
 ---
+
+## The morning-after recap, and the two-teams problem
+
+The morning after raid night a second card goes up in `#bots`: top three damage, most
+deaths, best parse, pull count on the progression boss, and what died. One embed, no ping.
+It runs on a second EventBridge schedule pointed at the **same** Lambda with
+`{"mode": "recap"}` — one function, two schedules, not a parallel stack.
+
+Scrambled runs two raid teams into one Warcraft Logs guild, an A team and a B team, and
+only the A team gets recapped. Nothing in the API says which is which.
+
+### Why the roster is derived and not written down
+
+A hand-maintained roster goes stale the first time somebody transfers, and a stale roster
+fails silently. So the roster is derived from something the bot already knows for certain:
+who was standing there for each of the tier's first Heroic kills. Under the guild's own
+premise — the B team does not kill a Heroic boss before the A team — every first kill is
+the A team's, so its participants are the A team by construction.
+
+Membership is by **frequency**, not presence. A player has to appear in at least 50% of
+the tier's first kills, so a one-off fill-in never enters the roster no matter how well
+they played. That threshold has an arithmetic consequence worth knowing: a player who
+raided once clears 50% on any sample smaller than three kills, so a roster derived from
+fewer than three is marked *provisional* and the previous tier's roster is preferred until
+real data replaces it. At a tier rollover the old roster is carried forward as a seed, and
+every verdict reached against a seed is logged as such.
+
+### Two signals, and a refusal
+
+`resolve_team()` returns `PROG`, `OTHER` or `UNKNOWN`.
+
+**Signal A — roster overlap.** What fraction of this report's raiders are on the derived
+roster? This needs a *margin*, not a majority: several people raid on both teams, so a
+B-team report legitimately contains A-team players and a 51% rule would call it prog about
+half the time. Above 70% is prog, at or below 35% is not, and the gap between them is the
+bot admitting the number does not know. An empty roster yields `None`, never `0.0` — those
+must not collapse, or "we have no roster yet" becomes a confident `OTHER`.
+
+**Signal B — progression evidence.** Does the report contain a Heroic encounter that was
+not dead when the report started? The B team farms what is already dead; pushing an undead
+boss is the A team essentially by definition. This is what carries the cold start, where
+the roster is empty or merely seeded.
+
+Two details in signal B are deliberate departures from the obvious reading. It compares
+against the bosses dead **before this report began**, not against everything the bot has
+ever announced — the announcer polls every fifteen minutes, so a boss killed at 9pm is in
+the announced set long before the recap runs, and comparing against that set would erase
+the very evidence identifying the night. And it counts a first *kill* as progression, not
+only wipes: a one-pull clear of the last undead boss is not less the A team for having
+been efficient, and excluding it would make the bot abstain on the report the guild most
+wants to see.
+
+One conclusive signal decides. Two that disagree do not. **`UNKNOWN` posts nothing**, and
+logs which signals were inconclusive. This is the same rule that removed the
+raid-resolution fallback from the announcer, and it matters more here: a recap names
+individual people and can publish their worst parse. Silence beats a confident wrong
+answer.
+
+The kill announcer is unchanged. It announces only the *first* Heroic kill of each boss,
+so under the premise above every announcement is already the A team's and the existing
+dedupe suppresses the B team's later kills of the same boss. Adding team filtering there
+would be solving a problem that does not exist.
+
+### Report tags: supported, unused
+
+Warcraft Logs has exactly the right feature for this. Introspection confirmed
+`reportData.reports(guildTagID:)`, `Report.guildTag`, `Guild.tags` and even `Guild.teams`
+all exist. Scrambled uses none of them — `tags: []`, `teams: []`, and every recent report
+comes back with `guildTag: null`.
+
+So the derived roster does the work. But the tag path is built and checked first, so **if
+the guild ever tags its two teams**, setting `/greybot/team/prog_tag` turns a statistical
+guess into an authoritative answer with no code change. That is the single highest-value
+thing anyone could do to make this more reliable.
+
+### What the API actually returns
+
+`table` and `rankings` return the untyped `JSON` scalar. Their contents are not in the
+schema and are not documented, so the parsers were written against a real captured
+response — `scripts/fixtures/report-recap.json`, trimmed, with character names substituted.
+Six things in the real data would each have broken a parser written from a careful reading
+of the docs. The last two were invisible in a single-report fixture and were caught by the
+first live dry run, which is what that dry run is for:
+
+**One report is not one activity.** The captured report holds sixteen Heroic raid fights,
+a Normal kill, *and three Mythic+ dungeon runs*. A DamageDone table over the report's full
+time range returned 27 entries for an 18-person raid, eight of them people who never
+entered a Heroic fight — and a different top three, led by a player whose total was mostly
+dungeon damage. The tables are scoped to explicit `fightIDs`. Still one table call per
+report; the point budget is unaffected.
+
+**One report is not one raid, either.** That same report opens with a Heroic kill in *The
+Tidebound Grotto* and then spends the night in *The Venomous Abyss*. Taking the tier from
+the first fight — the obvious reading — labels the night with a raid it visited for two
+pulls. The tier is the one holding the most of the night's Heroic fights, and fights from
+elsewhere are dropped from the card — *including* from the rankings, which is subtler than
+it sounds. Filtering parses by difficulty alone left a card correctly labelled "The Venomous
+Abyss" crediting its best parse to Nymrissa Wavecaller, a boss in a different raid that the
+same card had already excluded from its own list of what died.
+
+**The Deaths table stops at 200 rows and does not say so.** The captured night had 245
+deaths; a single call returned the first 200, ending 37% of the way through, with nothing
+in the payload indicating truncation. Most importantly it named the *wrong person* as most
+deaths. Deaths are read with a timestamp cursor until a short page comes back.
+
+**Two people in the guild both log.** A single Thursday produced *two* reports of the same
+pulls — `Prog Raid` by one raider and `Starting Heroic - 8/27` by another, starting four
+minutes apart, 98% overlapping, with all three Heroic kills present in both at identical
+wall-clock times. That is not the same as a night logged in two *parts*, which also happens
+when a log restarts at the break, and the two need opposite handling: parts must be summed
+or an hour of the night vanishes, duplicates must not be or every number doubles. Time
+overlap separates them. Where two reports overlap by more than half of the shorter, the
+more complete one is kept.
+
+**Actor ids are scoped to one report.** Warcraft Logs renumbers actors per report, so id 2
+in one log is a different person from id 2 in another. Every aggregate keys on the player —
+name and server folded together — and an actor id is only used to look that player up
+inside the report it came from. Aggregating by id splits one raider in half and fuses two
+strangers together.
+
+**`masterData.actors` is not a roster.** It returned 2,295 players across 130 realms — it
+is every actor the log ever saw. The raiders are the ids in each fight's `friendlyPlayers`;
+actors is only how an id becomes a name and a server. Damage entries carry no server at
+all, and one of them was a warlock's pet.
+
+Nothing in `src/recap.py` raises on a missing field. A blob that has lost a key costs the
+card that one section and nothing else — the alternative is a parser that takes the whole
+recap down the week Warcraft Logs renames something.
+
+### Who counts, explicitly
+
+Pugs and trials appear in the tables and must not top a guild leaderboard. The rule:
+eligibility is *took part in a Heroic raid fight tonight*, intersected with the prog roster
+when there is a usable one. Without a usable roster the intersection is dropped rather than
+guessed — excluding real raiders is worse than occasionally including a guest. Pets are
+excluded by actor type, and ties are shown in full rather than resolved by alphabet, because
+three people level on deaths is a normal outcome of a wipe night.
+
+### The point budget
+
+`table` and `rankings` are materially more expensive than the fight queries the announcer
+uses. `RateLimitData` is checked **before** any expensive call — checking afterwards would
+report the damage rather than prevent it — and the recap stands down if fewer than 750
+points remain.
+
+That number is larger than the headroom `POINTS_CEILING` already reserves, and it has to
+be: at 0.85 of a 3,600-point allowance the announcer's own check stops everything with 540
+points left, so any recap reserve below 540 could never bind and would be decoration. 750
+makes the recap yield *while the announcer still has room*, which is the entire reason
+there are two numbers. Recapping one night measures at roughly 25 points, so the reserve is
+thirty times what the job needs — deliberately. A recap that skips a week is fine. A first
+kill that goes unannounced is not.
+
+### Seeing a card before switching it on
+
+```sh
+aws lambda invoke --function-name ryangrey-greybot --region us-east-1 \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"mode":"recap","dry":true,"hours":48}' /dev/stdout
+```
+
+`hours` widens the lookback and is accepted **only** on a dry run — nothing in a scheduled
+event payload should be able to move the window, or a stray field could make the bot recap
+a night it was never meant to see. It exists because the useful moment to look at a card is
+rarely the morning after a raid; without it you would have to wait for the next Wednesday
+to see anything at all.
+
+Renders the card from last night's real data and returns it in the response. It posts
+nothing, and it **writes nothing** — not the claim, not the derived roster, not a rollover
+seed — so it is safe to run repeatedly against production. It deliberately ignores
+`/greybot/recap/enabled`, because a preview gated behind the switch it exists to inform is
+not a preview.
+
+The no-claim part is not a nicety. A dry run that took the ordinary path would mark the
+night posted, and the real recap would then be correctly, silently and permanently
+skipped: the whole point of the feature, defeated by the demo of it. The kill preview has
+the same property for the same reason.
+
+### Known edge case: the first bosses of a new tier
+
+At a fresh tier the killed-boss set is empty, so signal B reads *any* progression as the A
+team. If the B team raids first on opening night, it can take genuine first kills on the
+easy encounters, and greyBot will announce them as prog and may recap that night as the A
+team. This is understood and accepted for now; revisit before the next tier. Tagging the
+two teams in Warcraft Logs would close it outright.
+
+### Schedule, and the DST trap
+
+Scrambled raids Tuesday and Thursday, 9pm to midnight Eastern, so the recap fires Wednesday
+and Friday at 10am Eastern — two cards a week, each covering one night.
+
+```
+cron(0 10 ? * WED,FRI *)   timezone America/New_York
+```
+
+**The timezone argument is the point.** A bare UTC cron for 10am Eastern is 14:00 in summer
+and 15:00 in winter, so it drifts an hour every November and every March and has to be
+edited by hand twice a year. `--schedule-expression-timezone` keeps 10am at 10am.
+
+The kill poller has never had this problem and does not need the fix: it runs on
+`rate(15 minutes)`, which has no relationship to wall-clock time at all.
+
+A raid that runs past midnight is still one night. The exactly-once key is the local date
+the report **started**, so a Tuesday raid ending at 12:40am is claimed as Tuesday and
+cannot be re-posted as Wednesday.
 
 ## The role mention
 
@@ -428,15 +671,21 @@ src/handler.py       poll, resolve, announce — the orchestration
 src/config.py        the seven SSM parameters
 src/wcl.py           Warcraft Logs v2: OAuth, GraphQL, rate-limit accounting
 src/raiderio.py      Raider.IO: profile, static raid data, slug resolution
-src/store.py         DynamoDB: the announce-once claim
+src/store.py         DynamoDB: the announce-once claim, the prog roster
+src/team.py          which of the guild's two raid teams filed a report
+src/recap.py         reading the untyped table/rankings blobs
 src/discord.py       webhook payloads and retries
 src/interactions.py  slash commands: Ed25519 verification, PING/PONG, /progress
 assets/              greyBot-avatar.png — the canonical icon, 1024x1024
 scripts/selftest.py  the gate; no AWS, no boto3, no network
+scripts/fixtures/report-recap.json  a REAL Warcraft Logs response, trimmed
+scripts/introspect-wcl.py  ask the API what its schema is, before writing a query
 scripts/deploy.sh    package + ship the Lambda, then verify admin-owned wiring
 scripts/set-webhook-identity.py   name + avatar on the announcing webhook
 infra/iam-setup.sh   one-time admin setup (1 of 2): table, execution + scheduler roles
 infra/create-schedule.sh   admin setup (2 of 2): the 15-minute poll, created last
+infra/grant-recap-config.sh       widen the role for the recap, create its parameters
+infra/create-recap-schedule.sh    the Wed/Fri morning recap schedule
 infra/create-interactions-api.sh  the HTTPS endpoint Discord posts interactions to
 infra/grant-interactions.sh       widen the role for slash commands
 ```

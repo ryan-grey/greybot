@@ -1,7 +1,13 @@
-"""greyBot — announce first Heroic boss kills, and AOTC, for the guild Scrambled.
+"""greyBot — announce first Heroic boss kills and AOTC, and recap raid nights, for
+the guild Scrambled.
 
 EventBridge Scheduler -> this Lambda -> Discord webhook. There is no gateway connection
 because there is nothing to listen for: the bot announces and never responds.
+
+TWO schedules, one function. The poller runs every fifteen minutes on an empty event; the
+recap runs Wednesday and Friday mornings on {"mode": "recap"} and branches here. A second
+Lambda would have meant a second copy of the config, the state access and the rate-limit
+accounting, all of which would then be free to drift apart from these.
 
 The #logs channel is deliberately not a source. Scraping posted links only catches the
 kills somebody remembered to paste, breaks whenever the link format shifts, and -- the
@@ -42,7 +48,9 @@ import config
 import discord
 import interactions
 import raiderio
+import recap as recap_mod
 import store
+import team
 import wcl
 
 # Tuning knobs, not provisioned configuration. Everything that identifies the guild or
@@ -78,6 +86,28 @@ SEED_MAX_PAGES = int(os.environ.get("SEED_MAX_PAGES", "6"))
 # allowance the run stops before the expensive reports query. Announcements resume when
 # the window rolls; the alternative is spending the last points and getting nothing.
 POINTS_CEILING = float(os.environ.get("POINTS_CEILING", "0.85"))
+
+# How far back the recap looks for last night's report. It fires the morning after, and
+# Scrambled raids 9pm to midnight Eastern, so eighteen hours from a 10am post reaches back
+# to 4pm the previous afternoon -- comfortably before the pull and comfortably after the
+# previous raid night. A raid that runs past midnight is still one night to this window,
+# which is why the night is keyed on the report's START.
+RECAP_LOOKBACK_HOURS = float(os.environ.get("RECAP_LOOKBACK_HOURS", "18"))
+
+# Points that must be LEFT before the recap is allowed to start.
+#
+# This number has to be bigger than the headroom POINTS_CEILING already reserves, or it
+# can never bind and is decoration: at 0.85 of a 3,600-point allowance the generic check
+# stops everything with 540 points left, so any recap reserve below that is unreachable
+# code. 750 makes the recap yield while the announcer still has room, which is the whole
+# point of having two numbers -- the announcer is the higher-priority consumer and must
+# never be starved by the recap.
+#
+# The measured cost of recapping one night is roughly 25 points, so this reserve is thirty
+# times what the job needs. That asymmetry is deliberate. A recap that skips a week is
+# fine; a first kill that goes unannounced is not.
+RECAP_POINT_BUDGET = float(os.environ.get("RECAP_POINT_BUDGET", "750"))
+RECAP_MAX_REPORTS = int(os.environ.get("RECAP_MAX_REPORTS", "4"))
 
 _guild_id = {"value": None}
 
@@ -316,8 +346,38 @@ def seed_new_tier(token, gid, pk, cfg, slug, raid_label, profile, index,
     return silent
 
 
+def record_roster(token, cfg, pk, slug, boss_key, kill, now_iso):
+    """Who was standing there for a first kill, recorded for the prog roster.
+
+    Called only after an announcement actually went out, and only for a boss that was
+    genuinely claimed -- so this runs a handful of times a tier, not once a poll. That is
+    what makes an extra Warcraft Logs query affordable here and unaffordable in the poll
+    itself, where the same data would mean pulling a 225KB actor list every fifteen
+    minutes forever.
+
+    Every failure is swallowed. The announcement has already been posted by this point and
+    nothing about the roster is allowed to reach back and affect it; a missing first kill
+    costs the roster one sample, which the frequency rule is built to tolerate.
+    """
+    if not token or not kill.get("reportCode") or not kill.get("encounterID"):
+        return False
+    try:
+        people, rate = wcl.kill_participants(token, kill["reportCode"],
+                                             kill["encounterID"])
+        players = {team.player_key(p["name"], p.get("server")) for p in people}
+        wrote = store.record_first_kill(pk, slug, boss_key, players,
+                                        kill["killedAtMs"], kill["reportCode"], now_iso)
+        log("first_kill_roster_recorded", slug=slug, boss=kill["name"], players=len(players),
+            written=wrote, report=kill["reportCode"], points=rate)
+        return wrote
+    except Exception as exc:                                   # noqa: BLE001
+        log("first_kill_roster_failed", slug=slug, boss=kill.get("name"), error=repr(exc),
+            note="the announcement was already posted; the roster loses one sample")
+        return False
+
+
 def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None,
-                  now_iso=None):
+                  now_iso=None, token=None):
     """Claim, then post. In that order -- see store.claim_boss."""
     key = boss_key(kill["name"])
     if not store.claim_boss(pk, slug, key):
@@ -349,6 +409,8 @@ def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None,
         log("announce_failed", slug=slug, boss=kill["name"], error=str(exc))
         return False
 
+    record_roster(token, cfg, pk, slug, key, kill,
+                  now_iso or _iso(datetime.now(timezone.utc)))
     log("announced_kill", slug=slug, boss=kill["name"], key=key,
         encounterID=kill.get("encounterID"), count=count, total=total, realmRank=rank,
         raiderioKilled=r_killed,
@@ -618,6 +680,19 @@ def handler(event, context):
                                      cfg["guild_name"])
     index, expansions = raiderio.build_index(profile, EXPANSION_HINT)
 
+    # The second schedule. Same function, same package, one branch -- not a parallel stack.
+    # It sits above the bootstrap branch rather than below it because a recap before the
+    # guild has ever been seeded has no announced set to reason about, and would classify
+    # every boss as fresh progression.
+    if isinstance(event, dict) and str(event.get("mode") or "").lower() == "recap":
+        if not store.is_bootstrapped(pk):
+            log("recap_before_bootstrap",
+                note="the guild has not been seeded yet — nothing to recap against")
+            return {"ok": True, "skipped": "not_bootstrapped"}
+        return recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started,
+                           dry=bool(event.get("dry")), hours=event.get("hours"),
+                           manual=bool(event.get("manual")))
+
     # The first-run branch. Nothing below this line can run until a bootstrap has been
     # recorded, so there is no ordering in which run one announces anything.
     if not store.is_bootstrapped(pk):
@@ -678,7 +753,7 @@ def handler(event, context):
         last_announced_ms = None
         for kill in bundle["kills"]:
             if announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb,
-                             now_iso):
+                             now_iso, token=token):
                 announced += 1
                 last_announced_ms = kill["killedAtMs"]
 
@@ -716,3 +791,375 @@ def handler(event, context):
     log("poll_done", kills=len(kills), announced=announced, tiers=len(grouped),
         points=rate, ms=int((time.time() - started) * 1000))
     return {"ok": True, "kills": len(kills), "announced": announced}
+
+
+# ---------------------------------------------------------------- the weekly recap
+
+
+def previous_slug(profile, slug):
+    """The tier before this one, from Raider.IO's own ordering.
+
+    Used only to seed a new tier's prog roster. Deriving it from raid_progression rather
+    than tracking "the last tier we saw" in DynamoDB means there is no extra item to keep
+    correct, and no way for that item to disagree with reality after a rollover.
+    """
+    order = list((profile or {}).get("raid_progression") or {})
+    if slug not in order:
+        return None
+    i = order.index(slug)
+    return order[i - 1] if i > 0 else None
+
+
+def killed_before(pk, slug, announced, report_start_ms):
+    """Bosses that were already dead when this report started.
+
+    Not the same thing as the announced set, and the difference is the whole point. The
+    announcer polls every fifteen minutes, so a boss killed at 9pm is in `announced` long
+    before the recap runs the next morning -- comparing against that set would erase
+    exactly the progression evidence that identifies the night as A team's.
+
+    A boss in `announced` with no first-kill record was SEEDED: killed before the bot was
+    watching, or absorbed by a rollover seed. Those are long dead by definition.
+    """
+    dead = set()
+    for key in announced or ():
+        try:
+            rec = store.get_first_kill(pk, slug, key)
+        except Exception as exc:                               # noqa: BLE001
+            log("first_kill_read_failed", slug=slug, boss=key, error=repr(exc))
+            rec = None
+        if rec is None or int(rec.get("killedAtMs") or 0) < int(report_start_ms):
+            dead.add(key)
+    return dead
+
+
+def prog_roster(pk, slug, announced, profile, cfg, now_iso, persist=True):
+    """The roster to classify against, and an honest account of where it came from.
+
+    Three states, in preference order. A roster derived from enough of this tier's own
+    first kills is used. One derived from too few is not trusted to reject anybody, so a
+    seed carried from the previous tier is preferred while it exists. With neither, the
+    roster is empty and signal A abstains -- which is the correct answer in week one of a
+    fresh tier, not a failure.
+    """
+    try:
+        records = store.first_kills(pk, slug, announced)
+    except Exception as exc:                                   # noqa: BLE001
+        log("roster_read_failed", slug=slug, error=repr(exc))
+        records = {}
+
+    derived = team.derive_roster([sorted(r["players"]) for r in records.values()],
+                                 cfg.get("roster_min_pct", 50))
+    if persist:
+        try:
+            store.save_derived_roster(pk, slug, derived["roster"], derived["sample"],
+                                      derived["provisional"], now_iso)
+        except Exception as exc:                               # noqa: BLE001
+            log("roster_write_failed", slug=slug, error=repr(exc))
+
+    state = None
+    try:
+        state = store.load_roster(pk, slug)
+    except Exception as exc:                                   # noqa: BLE001
+        log("roster_state_read_failed", slug=slug, error=repr(exc))
+
+    seed = set((state or {}).get("seed") or ())
+    if not seed and derived["provisional"]:
+        # First recap of a new tier. Carry the previous tier's roster forward so week one
+        # works at all, then let real first kills replace it as they accumulate.
+        prev = previous_slug(profile, slug) if persist else None
+        if prev:
+            try:
+                prev_state = store.load_roster(pk, prev) or {}
+                candidate = prev_state.get("derived") or set()
+                if candidate and store.seed_roster(pk, slug, candidate, prev, now_iso):
+                    seed = candidate
+                    log("roster_seeded_from_previous_tier", slug=slug, fromSlug=prev,
+                        players=len(candidate))
+            except Exception as exc:                           # noqa: BLE001
+                log("roster_seed_failed", slug=slug, fromSlug=prev, error=repr(exc))
+
+    if derived["roster"] and not derived["provisional"]:
+        return derived["roster"], False, {"source": "derived", "sample": derived["sample"]}
+    if seed:
+        # Logged loudly every time. A verdict reached against a carried-forward roster is
+        # a verdict about last tier's raid team, and if the roster changed over the break
+        # this is where a wrong answer comes from.
+        log("roster_is_seeded", slug=slug, players=len(seed), sample=derived["sample"],
+            note="classifying against the PREVIOUS tier's roster until enough first kills "
+                 "accumulate in this one")
+        return seed, True, {"source": "seed", "sample": derived["sample"]}
+    return derived["roster"], False, {"source": "derived-provisional",
+                                      "sample": derived["sample"]}
+
+
+def report_tier(detail, scope, base, cfg, profile, index):
+    """Which raid this report was, and the fights that belong to it.
+
+    A report is not one tier any more than it is one activity. The captured Scrambled
+    report opens with a Heroic Nymrissa Wavecaller kill -- which is The Tidebound Grotto --
+    and then spends the rest of the night in The Venomous Abyss. Taking the tier from the
+    earliest fight, the obvious reading, would label that night with a raid it visited for
+    two pulls, look up the wrong boss list, and compare the wipes against the wrong
+    killed-boss set.
+
+    So the tier is the one holding the MOST of the night's Heroic fights, and the scope is
+    narrowed to that tier's fights alone. The warm-up kill in another raid then falls out
+    of the leaderboards too, which is correct: it was not part of this raid.
+    """
+    tally = {}
+    for f in scope["fights"]:
+        slug, rmeta, how = raiderio.resolve_raid(
+            profile, f.get("name"), (detail.get("zone") or {}).get("name"),
+            _at(base + (f.get("startTime") or 0)), cfg["guild_region"], index)
+        if not slug:
+            continue
+        rec = tally.setdefault(slug, {"meta": rmeta, "how": how, "fights": []})
+        rec["fights"].append(f)
+    if not tally:
+        return None, None, None, scope
+    slug = max(tally, key=lambda s: len(tally[s]["fights"]))
+    rec = tally[slug]
+    if len(tally) > 1:
+        log("recap_report_spans_tiers", chosen=slug,
+            counts={s: len(v["fights"]) for s, v in tally.items()},
+            note="fights from other raids are excluded from the night's card")
+    return slug, rec["meta"], rec["how"], recap_mod.raid_scope(rec["fights"], wcl.HEROIC)
+
+
+def recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started, dry=False,
+                hours=None, manual=False):
+    """Post one raid night's recap, or post nothing and say why.
+
+    Every exit that posts nothing is a log line, never a message. "No raid this week" in
+    a guild channel is noise the guild did not ask for, and an UNKNOWN verdict is the bot
+    admitting it cannot tell the two teams apart -- which is precisely the moment not to
+    publish a leaderboard naming individual people.
+
+    `manual` posts one night by hand: it permits the window override and ignores
+    /greybot/recap/enabled, because a person invoking this deliberately has already made
+    that call for this one night. It still claims the night, so a manual post and the
+    schedule cannot both publish the same evening.
+
+    `dry` renders the card from real data and returns it without posting and without
+    claiming the night. It deliberately ignores /greybot/recap/enabled, because the whole
+    point is to look at a real card BEFORE turning the feature on -- a preview gated behind
+    the switch it exists to inform is not a preview.
+
+    It must not claim, for the same reason the kill preview must not: a dry run that took
+    the ordinary path would mark the night posted, and the real recap would then be
+    correctly, silently and permanently skipped. It writes NOTHING at all -- not the
+    claim, not the derived roster, not a rollover seed -- so it is safe to run repeatedly
+    against production while deciding whether to switch the feature on.
+    """
+    if dry:
+        log("recap_dry_run_start",
+            note="rendering from real data — will not post and will not claim the night")
+    elif manual:
+        # `enabled` governs whether the SCHEDULE may post. A human invoking this by hand
+        # with an explicit flag has already made that decision for one night, so the switch
+        # does not gate it -- which is what makes it possible to show the guild a real card
+        # before committing to a recurring one. The schedule sends {"mode": "recap"} and
+        # nothing else, so it can never set this.
+        log("recap_manual_post", enabled=bool(cfg.get("recap_enabled")),
+            note="posting one night by hand; this does not enable the schedule")
+    elif not cfg.get("recap_enabled"):
+        log("recap_disabled", note="/greybot/recap/enabled is not true — nothing posted")
+        return {"ok": True, "skipped": "disabled"}
+
+    # The budget check comes BEFORE any expensive call, which is the only place it is worth
+    # anything. Checking afterwards would report the damage rather than prevent it.
+    rate = wcl.rate_limit(wcl.query(token, wcl.RATE_ONLY_Q))
+    if rate:
+        remaining = rate["limit"] - rate["spent"]
+        if remaining < RECAP_POINT_BUDGET:
+            log("recap_rate_abort", **rate, remaining=remaining,
+                needed=RECAP_POINT_BUDGET,
+                note="skipped to protect the kill announcer's share of the hourly budget")
+            return {"ok": True, "skipped": "rate_limit", "points": rate}
+
+    # The window is fixed in normal operation -- it is derived from the raid schedule and
+    # nothing in an event payload should be able to widen it, or a stray field could make
+    # the bot recap a night it was never meant to see. A DRY run is the exception, because
+    # the useful moment to preview a card is rarely the morning after a raid.
+    lookback = RECAP_LOOKBACK_HOURS
+    if (dry or manual) and hours:
+        lookback = float(hours)
+        log("recap_window_override", hours=lookback,
+            note="dry run or explicit manual post only")
+    end_ms = int(now.timestamp() * 1000)
+    start_ms = int((now - timedelta(hours=lookback)).timestamp() * 1000)
+    reports, rate = wcl.reports_in_window(token, gid, start_ms, end_ms,
+                                          limit=RECAP_MAX_REPORTS)
+    if not reports:
+        log("recap_no_report", lookbackHours=lookback, points=rate,
+            note="no raid last night — nothing posted, by design")
+        return {"ok": True, "reports": 0}
+
+    chosen, skipped, tier = [], [], None
+    for meta in reports:
+        detail, rate = wcl.report_detail(token, meta["code"])
+        scope = recap_mod.raid_scope(detail.get("fights"), wcl.HEROIC)
+        if not scope["fightIDs"]:
+            skipped.append({"report": meta["code"], "why": "no Heroic raid fights",
+                            "title": meta.get("title")})
+            continue
+
+        base = int(detail.get("startTime") or meta.get("startTime") or 0)
+        slug, rmeta, how, scope = report_tier(detail, scope, base, cfg, profile, index)
+        if not slug:
+            skipped.append({"report": meta["code"], "why": "could not resolve the raid"})
+            continue
+        if tier is None:
+            tier = {"slug": slug, "meta": rmeta,
+                    "label": (detail.get("zone") or {}).get("name")
+                             or (rmeta or {}).get("name") or slug,
+                    "roster": None, "seeded": False, "rosterInfo": None}
+        elif slug != tier["slug"]:
+            skipped.append({"report": meta["code"], "why": "different tier to the night's"})
+            continue
+
+        state = store.load_tier(pk, slug) or {"announced": set()}
+        dead = killed_before(pk, slug, state.get("announced") or set(), base)
+        roster, seeded, roster_info = prog_roster(pk, slug, state.get("announced") or set(),
+                                                  profile, cfg, now_iso, persist=not dry)
+        # Kept for the eligibility filter below rather than derived a second time. Both
+        # reports of one night are the same tier by the time they get here, so the last
+        # answer is the only answer.
+        tier.update({"roster": roster, "seeded": seeded, "rosterInfo": roster_info})
+
+        actors = recap_mod.actor_index(detail.get("masterData"))
+        raiders = {team.player_key(actors[i]["name"], actors[i]["server"])
+                   for i in scope["raiderIDs"] if i in actors}
+
+        # The tag is authoritative when it exists. Scrambled tags nothing today, so this
+        # is always None and the two signals do the work -- but the day somebody tags the
+        # B team's reports, the guess stops being a guess with no code change.
+        tag = (detail.get("guildTag") or {}).get("name")
+        if tag and cfg.get("prog_tag"):
+            verdict = team.PROG if tag == cfg["prog_tag"] else team.OTHER
+            why = {"verdict": verdict, "why": "decided by the report's guild tag",
+                   "tag": tag}
+        else:
+            if tag:
+                # A tagged report with no configured prog tag is new information, not a
+                # verdict. Guessing which tag means "A team" from its name is exactly the
+                # kind of inference this bot does not make.
+                log("recap_tag_seen_but_unconfigured", report=meta["code"], tag=tag,
+                    note="set /greybot/team/prog_tag to use tags as the authority")
+            verdict, why = team.resolve_team(raiders, scope["fights"], roster, dead,
+                                             cfg.get("overlap_high", 70),
+                                             cfg.get("overlap_low", 35),
+                                             difficulty=wcl.HEROIC, roster_seeded=seeded)
+
+        log("recap_report_classified", report=meta["code"], title=meta.get("title"),
+            slug=slug, resolvedBy=how, rosterSource=roster_info["source"],
+            rosterSample=roster_info["sample"], **why)
+
+        if verdict != team.PROG:
+            skipped.append({"report": meta["code"], "why": f"classified {verdict}"})
+            continue
+        chosen.append({"meta": meta, "detail": detail, "scope": scope, "actors": actors,
+                       "base": base, "code": meta["code"], "start": base,
+                       "end": int(detail.get("endTime") or meta.get("endTime") or base),
+                       "heroicFights": len(scope["fightIDs"])})
+
+    # Two people in the guild both log, so one night routinely produces two reports of the
+    # same pulls. Summing those doubles every number on the card.
+    chosen, duplicates = recap_mod.drop_duplicate_logs(chosen)
+    if duplicates:
+        log("recap_duplicate_logs", dropped=duplicates, kept=[c["code"] for c in chosen],
+            note="same night logged more than once; the most complete log is used")
+        skipped.extend(duplicates)
+
+    if not chosen:
+        # The important silence. UNKNOWN posts nothing and never guesses -- the same rule
+        # that took the raid-resolution fallback out of the announcer.
+        log("recap_nothing_to_post", reports=len(reports), skipped=skipped,
+            note="no report was confidently the prog team — posting nothing")
+        return {"ok": True, "reports": len(reports), "posted": False, "skipped": skipped}
+
+    # Idempotency is keyed on the local DATE THE NIGHT STARTED. A raid that runs past
+    # midnight is one night, and a retry, an overlapping schedule or a manual invocation
+    # must all land on the same key.
+    earliest = min(chosen, key=lambda c: c["base"])
+    night = _local(_at(earliest["base"]))
+    night_key = night.strftime("%Y-%m-%d")
+    if not dry and not store.claim_recap(pk, night_key):
+        log("recap_already_posted", night=night_key, note="claimed by an earlier run")
+        return {"ok": True, "night": night_key, "posted": False, "duplicate": True}
+
+    # One source per REPORT, kept separate on purpose. Actor ids and fight ids are scoped
+    # to the report that issued them, so merging two reports' blobs into one pile and
+    # aggregating by id splits a raider in half and fuses two strangers together. That is
+    # not hypothetical: the first live dry run of this code, on a night Scrambled logged
+    # twice, reported Thaydan at 27 deaths and again at 14, and named the wrong person as
+    # the night's most deaths.
+    sources = []
+    for c in chosen:
+        tables, rate = wcl.report_tables(token, c["meta"]["code"], c["scope"]["fightIDs"])
+        span = int(c["detail"].get("endTime") or 0) - c["base"]
+        pages, rate, calls = wcl.deaths_pages(
+            token, c["meta"]["code"], c["scope"]["fightIDs"], max(span, 1),
+            is_truncated=recap_mod.page_is_truncated,
+            cursor_of=recap_mod.last_timestamp)
+        if calls > 1:
+            log("recap_deaths_paged", report=c["meta"]["code"], pages=calls,
+                note="the Deaths table caps at 200 rows and does not say so")
+        sources.append({"report": c["meta"]["code"], "actors": c["actors"],
+                        "eligible": set(c["scope"]["raiderIDs"]),
+                        "fightIDs": list(c["scope"]["fightIDs"]),
+                        "damage": tables.get("damage"), "deaths": pages,
+                        "rankings": tables.get("rankings")})
+
+    # The explicit pug rule. Eligibility is "took part in a Heroic raid fight tonight",
+    # intersected with the prog roster when there is a usable one. The intersection is what
+    # keeps a pug or a trial off the guild's leaderboard; without a usable roster it is
+    # dropped rather than guessed, because excluding real raiders is worse than including
+    # an occasional guest.
+    roster = tier.get("roster") or set()
+    seeded, roster_info = tier.get("seeded"), tier.get("rosterInfo") or {"source": "none"}
+    excluded = recap_mod.restrict_to_roster(sources, roster)
+
+    combined = recap_mod.raid_scope(
+        [f for c in chosen for f in c["scope"]["fights"]], wcl.HEROIC)
+    summary = recap_mod.summarise(combined, sources,
+                                  show_worst_parse=bool(cfg.get("recap_worst_parse")))
+
+    payload = discord.recap_embed(
+        cfg["guild_name"], tier["label"], night.strftime("%A, %B %-d"), summary,
+        report_url=report_url(earliest["meta"]["code"]), iso_ts=_iso(_at(earliest["base"])),
+        thumbnail_url=raiderio.icon_url(tier.get("meta")),
+        guild_label=raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
+        guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
+                                       cfg["guild_name"]))
+    if dry:
+        log("recap_dry_run", night=night_key, slug=tier["slug"],
+            bosses=summary.get("bosses"), prog=(summary.get("prog") or {}).get("name"),
+            raiders=summary.get("raiders"),
+        eligible=sum(len(src["eligible"]) for src in sources),
+            missingSections=summary["missing"], posted=False, stateWritten=False,
+            note="DRY RUN — nothing posted, no night claimed")
+        return {"ok": True, "night": night_key, "posted": False, "dry": True,
+                "payload": payload, "summary": summary}
+
+    try:
+        discord.post(cfg["webhook"], payload)
+    except discord.DiscordError as exc:
+        # Hand the night back so the next run retries it, exactly as a failed kill
+        # announcement hands the boss back.
+        store.release_recap(pk, night_key)
+        log("recap_failed", night=night_key, error=str(exc))
+        return {"ok": False, "night": night_key, "posted": False}
+
+    log("recap_posted", night=night_key, manual=bool(manual),
+        slug=tier["slug"], raid=tier["label"],
+        reports=[c["meta"]["code"] for c in chosen], skipped=skipped,
+        bosses=summary.get("bosses"), prog=(summary.get("prog") or {}).get("name"),
+        raiders=summary.get("raiders"),
+        eligible=sum(len(src["eligible"]) for src in sources),
+        excludedByRoster=excluded, rosterSource=roster_info["source"], rosterSeeded=seeded,
+        worstParse=bool(cfg.get("recap_worst_parse")), missingSections=summary["missing"],
+        points=rate, ms=int((time.time() - started) * 1000))
+    return {"ok": True, "night": night_key, "posted": True,
+            "reports": len(chosen), "missing": summary["missing"]}

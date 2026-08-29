@@ -30,7 +30,10 @@ PARAMS=(/greybot/wcl/client_id /greybot/wcl/client_secret /greybot/discord/webho
         /greybot/discord/prog_role_id /greybot/guild/name /greybot/guild/realm
         /greybot/guild/region /greybot/blizzard/client_id
         /greybot/blizzard/client_secret /greybot/discord/bot_token
-        /greybot/discord/public_key /greybot/discord/guild_id)
+        /greybot/discord/public_key /greybot/discord/guild_id
+        /greybot/recap/enabled /greybot/recap/show_worst_parse /greybot/recap/schedule
+        /greybot/team/roster_min_first_kill_pct /greybot/team/prog_overlap_high
+        /greybot/team/prog_overlap_low /greybot/team/prog_tag)
 
 # The self-test needs PyNaCl to exercise signature verification against real Ed25519
 # rather than a stub, and a stub would happily agree with an implementation that had the

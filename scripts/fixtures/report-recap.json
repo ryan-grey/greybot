@@ -1,0 +1,5366 @@
+{
+ "code": "FIXTURECODE0001",
+ "title": "Prog Raid",
+ "startTime": 1787879036695,
+ "endTime": 1787900140836,
+ "guild": {
+  "id": 655330,
+  "name": "Scrambled"
+ },
+ "guildTag": null,
+ "zone": {
+  "id": 53,
+  "name": "The Venomous Abyss"
+ },
+ "masterData": {
+  "actors": [
+   {
+    "id": 1,
+    "name": "Ashvale",
+    "server": "Vek'nilash",
+    "type": "Player",
+    "subType": "Priest"
+   },
+   {
+    "id": 2,
+    "name": "Thornwëave",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Warlock"
+   },
+   {
+    "id": 4,
+    "name": "Grimhollow",
+    "server": "Frostmane",
+    "type": "Player",
+    "subType": "Monk"
+   },
+   {
+    "id": 6,
+    "name": "Brightspar",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Rogue"
+   },
+   {
+    "id": 7,
+    "name": "Duskmantle",
+    "server": "Stormrage",
+    "type": "Player",
+    "subType": "Paladin"
+   },
+   {
+    "id": 8,
+    "name": "Ironquill",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Evoker"
+   },
+   {
+    "id": 9,
+    "name": "Sablewind",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Druid"
+   },
+   {
+    "id": 10,
+    "name": "Mosscairn",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "DemonHunter"
+   },
+   {
+    "id": 11,
+    "name": "Hollowfen",
+    "server": "Stormrage",
+    "type": "Player",
+    "subType": "Monk"
+   },
+   {
+    "id": 13,
+    "name": "Emberlyn",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Hunter"
+   },
+   {
+    "id": 16,
+    "name": "Ravenspire",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Shaman"
+   },
+   {
+    "id": 17,
+    "name": "Stonewick",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Shaman"
+   },
+   {
+    "id": 18,
+    "name": "Frostmeadow",
+    "server": "Skullcrusher",
+    "type": "Player",
+    "subType": "Mage"
+   },
+   {
+    "id": 19,
+    "name": "Gildenrose",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Hunter"
+   },
+   {
+    "id": 22,
+    "name": "Nightbarrow",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Mage"
+   },
+   {
+    "id": 23,
+    "name": "Wyrmglass",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Druid"
+   },
+   {
+    "id": 24,
+    "name": "Cinderwell",
+    "server": "EmeraldDream",
+    "type": "Player",
+    "subType": "DeathKnight"
+   },
+   {
+    "id": 28,
+    "name": "Larkspire",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Hunter"
+   },
+   {
+    "id": 1600,
+    "name": "Vaelstrom",
+    "server": "BleedingHollow",
+    "type": "Player",
+    "subType": "DemonHunter"
+   },
+   {
+    "id": 1619,
+    "name": "Marrowgate",
+    "server": "Quel'Thalas",
+    "type": "Player",
+    "subType": "Warrior"
+   },
+   {
+    "id": 1626,
+    "name": "Silverpine",
+    "server": "Shu'halo",
+    "type": "Player",
+    "subType": "Paladin"
+   },
+   {
+    "id": 2095,
+    "name": "Oakenshield",
+    "server": "Dalaran",
+    "type": "Player",
+    "subType": "Paladin"
+   },
+   {
+    "id": 2316,
+    "name": "Stormquill",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Evoker"
+   },
+   {
+    "id": 2335,
+    "name": "Brackwater",
+    "server": "Barthilas",
+    "type": "Player",
+    "subType": "DeathKnight"
+   },
+   {
+    "id": 2877,
+    "name": "Foxglove",
+    "server": "Stormrage",
+    "type": "Player",
+    "subType": "Warlock"
+   },
+   {
+    "id": 2880,
+    "name": "Hearthstone",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Paladin"
+   },
+   {
+    "id": 97,
+    "name": "Dunbarrow",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Unknown"
+   },
+   {
+    "id": 174,
+    "name": "Talonrest",
+    "server": "Area52",
+    "type": "Player",
+    "subType": "Unknown"
+   },
+   {
+    "id": 175,
+    "name": "Winterbourne",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Unknown"
+   },
+   {
+    "id": 176,
+    "name": "Gloamreach",
+    "server": "Llane",
+    "type": "Player",
+    "subType": "Unknown"
+   },
+   {
+    "id": 177,
+    "name": "Bystander001",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Unknown"
+   },
+   {
+    "id": 178,
+    "name": "Bystander002",
+    "server": "Proudmoore",
+    "type": "Player",
+    "subType": "Unknown"
+   }
+  ]
+ },
+ "fights": [
+  {
+   "id": 2,
+   "name": "Nymrissa Wavecaller",
+   "kill": true,
+   "difficulty": 3,
+   "encounterID": 3379,
+   "startTime": 577332,
+   "endTime": 833019,
+   "fightPercentage": 0.02,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    2,
+    1,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 5,
+   "name": "Nymrissa Wavecaller",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3379,
+   "startTime": 1182884,
+   "endTime": 1403998,
+   "fightPercentage": 60.59,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 6,
+   "name": "Nymrissa Wavecaller",
+   "kill": true,
+   "difficulty": 4,
+   "encounterID": 3379,
+   "startTime": 1474727,
+   "endTime": 1948534,
+   "fightPercentage": 0.01,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 11,
+   "name": "Nek'zali the Soulcoiler",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3470,
+   "startTime": 2625983,
+   "endTime": 2884952,
+   "fightPercentage": 44.95,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    2,
+    1,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 12,
+   "name": "Nek'zali the Soulcoiler",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3470,
+   "startTime": 2972361,
+   "endTime": 3489461,
+   "fightPercentage": 7.45,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 13,
+   "name": "Nek'zali the Soulcoiler",
+   "kill": true,
+   "difficulty": 4,
+   "encounterID": 3470,
+   "startTime": 4074052,
+   "endTime": 4571519,
+   "fightPercentage": 0.01,
+   "size": 17,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 20,
+   "name": "Entombed Sentinels",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3445,
+   "startTime": 5149175,
+   "endTime": 5235342,
+   "fightPercentage": 83.14,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 21,
+   "name": "Entombed Sentinels",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3445,
+   "startTime": 5303865,
+   "endTime": 5393104,
+   "fightPercentage": 83.19,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 22,
+   "name": "Entombed Sentinels",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3445,
+   "startTime": 5458183,
+   "endTime": 5626616,
+   "fightPercentage": 68.78,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 26,
+   "name": "The Lost Explorers",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3497,
+   "startTime": 6111429,
+   "endTime": 6251924,
+   "fightPercentage": 69.77,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 27,
+   "name": "The Lost Explorers",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3497,
+   "startTime": 6426027,
+   "endTime": 6622778,
+   "fightPercentage": 53.75,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 28,
+   "name": "The Lost Explorers",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3497,
+   "startTime": 6762797,
+   "endTime": 6999395,
+   "fightPercentage": 48.28,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 29,
+   "name": "The Lost Explorers",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3497,
+   "startTime": 7074492,
+   "endTime": 7318574,
+   "fightPercentage": 44.87,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 30,
+   "name": "The Lost Explorers",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3497,
+   "startTime": 7530713,
+   "endTime": 7884223,
+   "fightPercentage": 41.39,
+   "size": 18,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    8,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 31,
+   "name": "The Lost Explorers",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3497,
+   "startTime": 8485758,
+   "endTime": 8880986,
+   "fightPercentage": 31.28,
+   "size": 17,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 32,
+   "name": "The Lost Explorers",
+   "kill": false,
+   "difficulty": 4,
+   "encounterID": 3497,
+   "startTime": 9086309,
+   "endTime": 9194632,
+   "fightPercentage": 74.13,
+   "size": 17,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 33,
+   "name": "The Lost Explorers",
+   "kill": true,
+   "difficulty": 4,
+   "encounterID": 3497,
+   "startTime": 9285463,
+   "endTime": 9702101,
+   "fightPercentage": 0.01,
+   "size": 17,
+   "friendlyPlayers": [
+    4,
+    16,
+    24,
+    9,
+    22,
+    1,
+    2,
+    10,
+    19,
+    11,
+    23,
+    7,
+    13,
+    28,
+    17,
+    18,
+    6
+   ]
+  },
+  {
+   "id": 35,
+   "name": "Kings' Rest",
+   "kill": true,
+   "difficulty": 10,
+   "encounterID": 61762,
+   "startTime": 13106177,
+   "endTime": 14728806,
+   "fightPercentage": 100,
+   "size": 5,
+   "friendlyPlayers": [
+    4,
+    1600,
+    1619,
+    9,
+    1626
+   ]
+  },
+  {
+   "id": 37,
+   "name": "The Blinding Vale",
+   "kill": true,
+   "difficulty": 10,
+   "encounterID": 12859,
+   "startTime": 15935994,
+   "endTime": 17853260,
+   "fightPercentage": 100,
+   "size": 5,
+   "friendlyPlayers": [
+    4,
+    2095,
+    9,
+    2316,
+    2335
+   ]
+  },
+  {
+   "id": 38,
+   "name": "Altar of Fangs",
+   "kill": true,
+   "difficulty": 10,
+   "encounterID": 12993,
+   "startTime": 19060638,
+   "endTime": 20962455,
+   "fightPercentage": 100,
+   "size": 5,
+   "friendlyPlayers": [
+    4,
+    9,
+    2316,
+    2880,
+    2877
+   ]
+  }
+ ],
+ "damage": {
+  "data": {
+   "entries": [
+    {
+     "name": "Grimhollow",
+     "id": 4,
+     "guid": 177956987,
+     "type": "Monk",
+     "icon": "Monk-Windwalker",
+     "total": 1024432364,
+     "activeTime": 8282565,
+     "abilities": [
+      {
+       "guid": 113656,
+       "name": "Fists of Fury",
+       "total": 283369875,
+       "type": 9,
+       "icon": "monk_ability_fistoffury.jpg"
+      },
+      {
+       "guid": 450615,
+       "name": "Flurry Strikes",
+       "total": 147514689,
+       "type": 9,
+       "icon": "inv_ability_shadopanmonk_flurrystrikes.jpg"
+      }
+     ],
+     "targets": [
+      {
+       "name": "First Mate Nama",
+       "total": 66870534,
+       "type": "Boss"
+      },
+      {
+       "name": "Nek'zali the Soulcoiler",
+       "total": 59259029,
+       "type": "Boss"
+      }
+     ],
+     "gear": [
+      {
+       "id": 250015,
+       "slot": 0,
+       "quality": 4,
+       "icon": "inv_helm_leather_raidmonkmidnight_d_01.jpg",
+       "name": "Fearsome Visage of Ra-den's Chosen",
+       "itemLevel": 289,
+       "permanentEnchant": 8017,
+       "permanentEnchantName": "Enchant Helm - Empowered Rune of Avoidance",
+       "bonusIDs": [
+        13338,
+        13440,
+        6652,
+        12667,
+        13575,
+        12806
+       ],
+       "setID": 1984
+      },
+      {
+       "id": 265739,
+       "slot": 1,
+       "quality": 3,
+       "icon": "inv_12_jewelry_zulaman_troll_necklace_purple2.jpg",
+       "name": "Amani Heartstring Pendant",
+       "itemLevel": 295,
+       "bonusIDs": [
+        6652,
+        13668,
+        12830
+       ],
+       "gems": [
+        {
+         "id": 240890,
+         "itemLevel": 295,
+         "icon": "inv_12_profession_jewelcrafting_rare_gem_cut_fire_green.jpg"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Nightbarrow",
+     "id": 22,
+     "guid": 238297778,
+     "type": "Mage",
+     "icon": "Mage-Arcane",
+     "total": 598021361,
+     "activeTime": 4253210
+    },
+    {
+     "name": "Stonewick",
+     "id": 17,
+     "guid": 247131040,
+     "type": "Shaman",
+     "icon": "Shaman",
+     "total": 569916389,
+     "activeTime": 4524472
+    },
+    {
+     "name": "Thornwëave",
+     "id": 2,
+     "guid": 243929229,
+     "type": "Warlock",
+     "icon": "Warlock",
+     "total": 560890287,
+     "activeTime": 4366203
+    },
+    {
+     "name": "Frostmeadow",
+     "id": 18,
+     "guid": 247830971,
+     "type": "Mage",
+     "icon": "Mage-Arcane",
+     "total": 547006399,
+     "activeTime": 4056822
+    },
+    {
+     "name": "Wyrmglass",
+     "id": 23,
+     "guid": 238807170,
+     "type": "Druid",
+     "icon": "Druid-Balance",
+     "total": 517720522,
+     "activeTime": 4318497
+    },
+    {
+     "name": "Gildenrose",
+     "id": 19,
+     "guid": 240348924,
+     "type": "Hunter",
+     "icon": "Hunter-BeastMastery",
+     "total": 487919234,
+     "activeTime": 4091410
+    },
+    {
+     "name": "Stormquill",
+     "id": 2316,
+     "guid": 243994317,
+     "type": "Evoker",
+     "icon": "Evoker-Devastation",
+     "total": 474687171,
+     "activeTime": 3158562
+    },
+    {
+     "name": "Brightspar",
+     "id": 6,
+     "guid": 243243328,
+     "type": "Rogue",
+     "icon": "Rogue-Assassination",
+     "total": 472057376,
+     "activeTime": 3990815
+    },
+    {
+     "name": "Duskmantle",
+     "id": 7,
+     "guid": 215679266,
+     "type": "Paladin",
+     "icon": "Paladin-Retribution",
+     "total": 450272313,
+     "activeTime": 4374863
+    },
+    {
+     "name": "Emberlyn",
+     "id": 13,
+     "guid": 237069051,
+     "type": "Hunter",
+     "icon": "Hunter-BeastMastery",
+     "total": 430655962,
+     "activeTime": 3448628
+    },
+    {
+     "name": "Larkspire",
+     "id": 28,
+     "guid": 244409291,
+     "type": "Hunter",
+     "icon": "Hunter-Survival",
+     "total": 430012675,
+     "activeTime": 4130299
+    },
+    {
+     "name": "Oakenshield",
+     "id": 2095,
+     "guid": 129959501,
+     "type": "Paladin",
+     "icon": "Paladin-Retribution",
+     "total": 363907267,
+     "activeTime": 1734006
+    },
+    {
+     "name": "Foxglove",
+     "id": 2877,
+     "guid": 266260119,
+     "type": "Warlock",
+     "icon": "Warlock-Demonology",
+     "total": 360329458,
+     "activeTime": 1442781
+    },
+    {
+     "name": "Ironquill",
+     "id": 8,
+     "guid": 239015641,
+     "type": "Evoker",
+     "icon": "Evoker-Augmentation",
+     "total": 357409080,
+     "activeTime": 3558738
+    },
+    {
+     "name": "Mosscairn",
+     "id": 10,
+     "guid": 174952167,
+     "type": "DemonHunter",
+     "icon": "DemonHunter-Vengeance",
+     "total": 292688225,
+     "activeTime": 4437705
+    },
+    {
+     "name": "Cinderwell",
+     "id": 24,
+     "guid": 198359120,
+     "type": "DeathKnight",
+     "icon": "DeathKnight-Blood",
+     "total": 279670520,
+     "activeTime": 4642014
+    },
+    {
+     "name": "Marrowgate",
+     "id": 1619,
+     "guid": 238065829,
+     "type": "Warrior",
+     "icon": "Warrior-Arms",
+     "total": 259956385,
+     "activeTime": 1389916
+    },
+    {
+     "name": "Brackwater",
+     "id": 2335,
+     "guid": 206872029,
+     "type": "DeathKnight",
+     "icon": "DeathKnight-Blood",
+     "total": 251424886,
+     "activeTime": 1778752
+    },
+    {
+     "name": "Silverpine",
+     "id": 1626,
+     "guid": 160592953,
+     "type": "Paladin",
+     "icon": "Paladin-Retribution",
+     "total": 123133610,
+     "activeTime": 1270331
+    },
+    {
+     "name": "Hearthstone",
+     "id": 2880,
+     "guid": 242307689,
+     "type": "Paladin",
+     "icon": "Paladin-Protection",
+     "total": 117633187,
+     "activeTime": 1570552
+    },
+    {
+     "name": "Vaelstrom",
+     "id": 1600,
+     "guid": 256081616,
+     "type": "DemonHunter",
+     "icon": "DemonHunter-Vengeance",
+     "total": 88761051,
+     "activeTime": 1477374
+    },
+    {
+     "name": "Sablewind",
+     "id": 9,
+     "guid": 238356592,
+     "type": "Druid",
+     "icon": "Druid-Restoration",
+     "total": 44209343,
+     "activeTime": 4132876
+    },
+    {
+     "name": "Hollowfen",
+     "id": 11,
+     "guid": 215675884,
+     "type": "Monk",
+     "icon": "Monk-Mistweaver",
+     "total": 40105908,
+     "activeTime": 3322029
+    },
+    {
+     "name": "Ashvale",
+     "id": 1,
+     "guid": 2733902,
+     "type": "Priest",
+     "icon": "Priest-Holy",
+     "total": 28942792,
+     "activeTime": 1908480
+    },
+    {
+     "name": "Ravenspire",
+     "id": 16,
+     "guid": 235262756,
+     "type": "Shaman",
+     "icon": "Shaman-Restoration",
+     "total": 19112202,
+     "activeTime": 2784914
+    },
+    {
+     "name": "Lightspawn Lasher",
+     "id": 48,
+     "guid": 254697,
+     "type": "Pet",
+     "icon": "custom-icon-inv_misc_herb_nightmarevine.jpg",
+     "total": 14021346,
+     "activeTime": 2709367
+    }
+   ],
+   "totalTime": 10101320,
+   "logVersion": 17
+  }
+ },
+ "deaths": {
+  "data": {
+   "entries": [
+    {
+     "name": "Nightbarrow",
+     "id": 22,
+     "type": "Mage",
+     "icon": "Mage-Arcane",
+     "timestamp": 1310978,
+     "fight": 5,
+     "killingBlow": {
+      "name": "Wild Bite"
+     }
+    },
+    {
+     "name": "Ravenspire",
+     "id": 16,
+     "type": "Shaman",
+     "icon": "Shaman-Restoration",
+     "timestamp": 1313176,
+     "fight": 5,
+     "killingBlow": {
+      "name": "Wild Bite"
+     }
+    },
+    {
+     "name": "Brightspar",
+     "id": 6,
+     "type": "Rogue",
+     "icon": "Rogue-Assassination",
+     "timestamp": 1317968,
+     "fight": 5,
+     "killingBlow": {
+      "name": "Shatter"
+     }
+    },
+    {
+     "name": "Hollowfen",
+     "id": 11,
+     "type": "Monk",
+     "icon": "Monk-Mistweaver",
+     "timestamp": 1785327,
+     "fight": 6,
+     "killingBlow": {
+      "name": "Frost Orb"
+     }
+    },
+    {
+     "name": "Grimhollow",
+     "id": 4,
+     "type": "Monk",
+     "icon": "Monk-Windwalker",
+     "timestamp": 1895811,
+     "fight": 6,
+     "killingBlow": {
+      "name": "Abyssal Rain"
+     }
+    },
+    {
+     "name": "Brightspar",
+     "id": 6,
+     "type": "Rogue",
+     "icon": "Rogue-Assassination",
+     "timestamp": 1896316,
+     "fight": 6,
+     "killingBlow": {
+      "name": "Frost Orb"
+     }
+    },
+    {
+     "name": "Emberlyn",
+     "id": 13,
+     "type": "Hunter",
+     "icon": "Hunter-BeastMastery",
+     "timestamp": 2724073,
+     "fight": 11,
+     "killingBlow": {
+      "name": "Essence Rend"
+     }
+    },
+    {
+     "name": "Sablewind",
+     "id": 9,
+     "type": "Druid",
+     "icon": "Druid-Restoration",
+     "timestamp": 2858718,
+     "fight": 11,
+     "killingBlow": {
+      "name": "Vessel of Awakening"
+     }
+    },
+    {
+     "name": "Thornwëave",
+     "id": 2,
+     "type": "Warlock",
+     "icon": "Warlock-Demonology",
+     "timestamp": 2858859,
+     "fight": 11,
+     "killingBlow": {
+      "name": "Vessel of Awakening"
+     }
+    },
+    {
+     "name": "Grimhollow",
+     "id": 4,
+     "type": "Monk",
+     "icon": "Monk-Windwalker",
+     "timestamp": 3148846,
+     "fight": 12,
+     "killingBlow": {
+      "name": "Soul Transfer"
+     }
+    },
+    {
+     "name": "Brightspar",
+     "id": 6,
+     "type": "Rogue",
+     "icon": "Rogue-Assassination",
+     "timestamp": 3168465,
+     "fight": 12,
+     "killingBlow": {
+      "name": "Cremation"
+     }
+    },
+    {
+     "name": "Thornwëave",
+     "id": 2,
+     "type": "Warlock",
+     "icon": "Warlock-Demonology",
+     "timestamp": 3260729,
+     "fight": 12,
+     "killingBlow": {
+      "name": "Hungering Pyre"
+     }
+    },
+    {
+     "name": "Larkspire",
+     "id": 28,
+     "type": "Hunter",
+     "icon": "Hunter-Survival",
+     "timestamp": 4256398,
+     "fight": 13,
+     "killingBlow": {
+      "name": "Soul Transfer"
+     }
+    },
+    {
+     "name": "Hollowfen",
+     "id": 11,
+     "type": "Monk",
+     "icon": "Monk-Mistweaver",
+     "timestamp": 4325793,
+     "fight": 13,
+     "killingBlow": {
+      "name": "Soul Transfer"
+     }
+    },
+    {
+     "name": "Larkspire",
+     "id": 28,
+     "type": "Hunter",
+     "icon": "Hunter-Survival",
+     "timestamp": 5215701,
+     "fight": 20,
+     "killingBlow": {
+      "name": "Helical Toxins"
+     }
+    },
+    {
+     "name": "Wyrmglass",
+     "id": 23,
+     "type": "Druid",
+     "icon": "Druid-Balance",
+     "timestamp": 5215799,
+     "fight": 20,
+     "killingBlow": {
+      "name": "Helical Toxins"
+     }
+    },
+    {
+     "name": "Thornwëave",
+     "id": 2,
+     "type": "Warlock",
+     "icon": "Warlock-Destruction",
+     "timestamp": 5215818,
+     "fight": 20,
+     "killingBlow": {
+      "name": "Helical Toxins"
+     }
+    },
+    {
+     "name": "Wyrmglass",
+     "id": 23,
+     "type": "Druid",
+     "icon": "Druid-Balance",
+     "timestamp": 5379336,
+     "fight": 21,
+     "killingBlow": {
+      "name": "Cultivated Burst"
+     }
+    },
+    {
+     "name": "Sablewind",
+     "id": 9,
+     "type": "Druid",
+     "icon": "Druid-Restoration",
+     "timestamp": 5379438,
+     "fight": 21,
+     "killingBlow": {
+      "name": "Blood Venom"
+     }
+    },
+    {
+     "name": "Nightbarrow",
+     "id": 22,
+     "type": "Mage",
+     "icon": "Mage-Arcane",
+     "timestamp": 5382439,
+     "fight": 21,
+     "killingBlow": {
+      "name": "Blood Venom"
+     }
+    },
+    {
+     "name": "Duskmantle",
+     "id": 7,
+     "type": "Paladin",
+     "icon": "Paladin-Retribution",
+     "timestamp": 5551297,
+     "fight": 22,
+     "killingBlow": {
+      "name": "Mark of Acid"
+     }
+    },
+    {
+     "name": "Thornwëave",
+     "id": 2,
+     "type": "Warlock",
+     "icon": "Warlock-Destruction",
+     "timestamp": 5553288,
+     "fight": 22,
+     "killingBlow": {
+      "name": "Mark of Acid"
+     }
+    },
+    {
+     "name": "Sablewind",
+     "id": 9,
+     "type": "Druid",
+     "icon": "Druid-Restoration",
+     "timestamp": 5553393,
+     "fight": 22,
+     "killingBlow": {
+      "name": "Mark of Blood"
+     }
+    },
+    {
+     "name": "Sablewind",
+     "id": 9,
+     "type": "Druid",
+     "icon": "Druid-Restoration",
+     "timestamp": 6179451,
+     "fight": 26,
+     "killingBlow": {
+      "name": "Malevolent Presence"
+     }
+    },
+    {
+     "name": "Nightbarrow",
+     "id": 22,
+     "type": "Mage",
+     "icon": "Mage-Arcane",
+     "timestamp": 6185854,
+     "fight": 26,
+     "killingBlow": {
+      "name": "Mighty Thud"
+     }
+    },
+    {
+     "name": "Gildenrose",
+     "id": 19,
+     "type": "Hunter",
+     "icon": "Hunter-BeastMastery",
+     "timestamp": 6185855,
+     "fight": 26,
+     "killingBlow": {
+      "name": "Mighty Thud"
+     }
+    },
+    {
+     "name": "Sablewind",
+     "id": 9,
+     "type": "Druid",
+     "icon": "Druid-Restoration",
+     "timestamp": 6500375,
+     "fight": 27,
+     "killingBlow": {
+      "name": "Mighty Thud"
+     }
+    },
+    {
+     "name": "Mosscairn",
+     "id": 10,
+     "type": "DemonHunter",
+     "icon": "DemonHunter-Vengeance",
+     "timestamp": 6540606,
+     "fight": 27,
+     "killingBlow": {
+      "name": "Melee"
+     }
+    },
+    {
+     "name": "Mosscairn",
+     "id": 10,
+     "type": "DemonHunter",
+     "icon": "DemonHunter-Vengeance",
+     "timestamp": 6576306,
+     "fight": 27,
+     "killingBlow": {
+      "name": "Shredding Shards"
+     }
+    },
+    {
+     "name": "Gildenrose",
+     "id": 19,
+     "type": "Hunter",
+     "icon": "Hunter-BeastMastery",
+     "timestamp": 6929907,
+     "fight": 28,
+     "killingBlow": {
+      "name": "Splinters"
+     }
+    },
+    {
+     "name": "Nightbarrow",
+     "id": 22,
+     "type": "Mage",
+     "icon": "Mage-Arcane",
+     "timestamp": 6954298,
+     "fight": 28,
+     "killingBlow": {
+      "name": "Elemental Explosion"
+     }
+    },
+    {
+     "name": "Ravenspire",
+     "id": 16,
+     "type": "Shaman",
+     "icon": "Shaman-Restoration",
+     "timestamp": 6954299,
+     "fight": 28,
+     "killingBlow": {
+      "name": "Elemental Explosion"
+     }
+    },
+    {
+     "name": "Larkspire",
+     "id": 28,
+     "type": "Hunter",
+     "icon": "Hunter-Survival",
+     "timestamp": 7158442,
+     "fight": 29,
+     "killingBlow": {
+      "name": "Mighty Thud"
+     }
+    },
+    {
+     "name": "Sablewind",
+     "id": 9,
+     "type": "Druid",
+     "icon": "Druid-Restoration",
+     "timestamp": 7188523,
+     "fight": 29,
+     "killingBlow": {
+      "name": "Malevolent Presence"
+     }
+    },
+    {
+     "name": "Thornwëave",
+     "id": 2,
+     "type": "Warlock",
+     "icon": "Warlock-Destruction",
+     "timestamp": 7292304,
+     "fight": 29,
+     "killingBlow": {
+      "name": "Elemental Explosion"
+     }
+    },
+    {
+     "name": "Larkspire",
+     "id": 28,
+     "type": "Hunter",
+     "icon": "Hunter-Survival",
+     "timestamp": 7588241,
+     "fight": 30,
+     "killingBlow": {
+      "name": "Evil Eyes"
+     }
+    },
+    {
+     "name": "Gildenrose",
+     "id": 19,
+     "type": "Hunter",
+     "icon": "Hunter-BeastMastery",
+     "timestamp": 7588766,
+     "fight": 30,
+     "killingBlow": {
+      "name": "Malevolent Presence"
+     }
+    },
+    {
+     "name": "Wyrmglass",
+     "id": 23,
+     "type": "Druid",
+     "icon": "Druid-Balance",
+     "timestamp": 7632241,
+     "fight": 30,
+     "killingBlow": {
+      "name": "Mighty Thud"
+     }
+    }
+   ]
+  }
+ },
+ "rankings": {
+  "data": [
+   {
+    "fightID": 2,
+    "encounter": {
+     "id": 3379,
+     "name": "Nymrissa Wavecaller"
+    },
+    "difficulty": 3,
+    "size": 18,
+    "kill": 1,
+    "duration": 255687,
+    "deaths": 0,
+    "roles": {
+     "tanks": {
+      "name": "Tanks",
+      "characters": [
+       {
+        "name": "Cinderwell",
+        "server": {
+         "id": 88,
+         "name": "Emerald Dream",
+         "region": "US"
+        },
+        "class": "DeathKnight",
+        "spec": "Blood",
+        "amount": 47413.564240654,
+        "rankPercent": 67,
+        "bracketPercent": 52
+       },
+       {
+        "name": "Mosscairn",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "DemonHunter",
+        "spec": "Vengeance",
+        "amount": 60907.891288959,
+        "rankPercent": 88,
+        "bracketPercent": 67
+       }
+      ]
+     },
+     "healers": {
+      "name": "Healers",
+      "characters": [
+       {
+        "name": "Sablewind",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Druid",
+        "spec": "Restoration",
+        "amount": 2216.0493102895,
+        "rankPercent": 27,
+        "bracketPercent": 21
+       },
+       {
+        "name": "Hollowfen",
+        "server": {
+         "id": 206,
+         "name": "Stormrage",
+         "region": "US"
+        },
+        "class": "Monk",
+        "spec": "Mistweaver",
+        "amount": 10012.233707619,
+        "rankPercent": 20,
+        "bracketPercent": 12
+       },
+       {
+        "name": "Ashvale",
+        "server": {
+         "id": 234,
+         "name": "Vek'nilash",
+         "region": "US"
+        },
+        "class": "Priest",
+        "spec": "Holy",
+        "amount": 12432.204218439,
+        "rankPercent": 76,
+        "bracketPercent": 72
+       },
+       {
+        "name": "Ravenspire",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Shaman",
+        "spec": "Restoration",
+        "amount": 4340.0603081111,
+        "rankPercent": 32,
+        "bracketPercent": 31
+       }
+      ]
+     },
+     "dps": {
+      "name": "Damage Dealers",
+      "characters": [
+       {
+        "name": "Wyrmglass",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Druid",
+        "spec": "Balance",
+        "amount": 124551.58846558,
+        "rankPercent": 66,
+        "bracketPercent": 51
+       },
+       {
+        "name": "Emberlyn",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Hunter",
+        "spec": "BeastMastery",
+        "amount": 137586.25585188,
+        "rankPercent": 88,
+        "bracketPercent": 61
+       },
+       {
+        "name": "Gildenrose",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Hunter",
+        "spec": "BeastMastery",
+        "amount": 108707.18104558,
+        "rankPercent": 57,
+        "bracketPercent": 15
+       },
+       {
+        "name": "Larkspire",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Hunter",
+        "spec": "Survival",
+        "amount": 103421.92993778,
+        "rankPercent": 62,
+        "bracketPercent": 58
+       }
+      ]
+     }
+    }
+   },
+   {
+    "fightID": 6,
+    "encounter": {
+     "id": 3379,
+     "name": "Nymrissa Wavecaller"
+    },
+    "difficulty": 4,
+    "size": 18,
+    "kill": 1,
+    "duration": 473807,
+    "deaths": 5,
+    "roles": {
+     "tanks": {
+      "name": "Tanks",
+      "characters": [
+       {
+        "name": "Cinderwell",
+        "server": {
+         "id": 88,
+         "name": "Emerald Dream",
+         "region": "US"
+        },
+        "class": "DeathKnight",
+        "spec": "Blood",
+        "amount": 61096.022220018,
+        "rankPercent": 81,
+        "bracketPercent": 82
+       },
+       {
+        "name": "Mosscairn",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "DemonHunter",
+        "spec": "Vengeance",
+        "amount": 60187.899292328,
+        "rankPercent": 64,
+        "bracketPercent": 57
+       }
+      ]
+     },
+     "healers": {
+      "name": "Healers",
+      "characters": [
+       {
+        "name": "Sablewind",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Druid",
+        "spec": "Restoration",
+        "amount": 3990.1478872199,
+        "rankPercent": 56,
+        "bracketPercent": 57
+       },
+       {
+        "name": "Hollowfen",
+        "server": {
+         "id": 206,
+         "name": "Stormrage",
+         "region": "US"
+        },
+        "class": "Monk",
+        "spec": "Mistweaver",
+        "amount": 9097.1598140171,
+        "rankPercent": 12,
+        "bracketPercent": 8
+       },
+       {
+        "name": "Ashvale",
+        "server": {
+         "id": 234,
+         "name": "Vek'nilash",
+         "region": "US"
+        },
+        "class": "Priest",
+        "spec": "Holy",
+        "amount": 9528.5084433113,
+        "rankPercent": 71,
+        "bracketPercent": 73
+       },
+       {
+        "name": "Ravenspire",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Shaman",
+        "spec": "Restoration",
+        "amount": 4759.0305757408,
+        "rankPercent": 39,
+        "bracketPercent": 45
+       }
+      ]
+     },
+     "dps": {
+      "name": "Damage Dealers",
+      "characters": [
+       {
+        "name": "Wyrmglass",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Druid",
+        "spec": "Balance",
+        "amount": 126212.11590373,
+        "rankPercent": 33,
+        "bracketPercent": 36
+       },
+       {
+        "name": "Emberlyn",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Hunter",
+        "spec": "BeastMastery",
+        "amount": 121861.84459073,
+        "rankPercent": 40,
+        "bracketPercent": 26
+       },
+       {
+        "name": "Gildenrose",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Hunter",
+        "spec": "BeastMastery",
+        "amount": 115405.25783705,
+        "rankPercent": 30,
+        "bracketPercent": 18
+       },
+       {
+        "name": "Larkspire",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Hunter",
+        "spec": "Survival",
+        "amount": 103731.56369577,
+        "rankPercent": 24,
+        "bracketPercent": 34
+       }
+      ]
+     }
+    }
+   },
+   {
+    "fightID": 13,
+    "encounter": {
+     "id": 3470,
+     "name": "Nek'zali the Soulcoiler"
+    },
+    "difficulty": 4,
+    "size": 17,
+    "kill": 1,
+    "duration": 497467,
+    "deaths": 2,
+    "roles": {
+     "tanks": {
+      "name": "Tanks",
+      "characters": [
+       {
+        "name": "Cinderwell",
+        "server": {
+         "id": 88,
+         "name": "Emerald Dream",
+         "region": "US"
+        },
+        "class": "DeathKnight",
+        "spec": "Blood",
+        "amount": 46326.228674465,
+        "rankPercent": 54,
+        "bracketPercent": 57
+       },
+       {
+        "name": "Mosscairn",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "DemonHunter",
+        "spec": "Vengeance",
+        "amount": 52296.369407418,
+        "rankPercent": 66,
+        "bracketPercent": 56
+       }
+      ]
+     },
+     "healers": {
+      "name": "Healers",
+      "characters": [
+       {
+        "name": "Sablewind",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Druid",
+        "spec": "Restoration",
+        "amount": 3652.4875016835,
+        "rankPercent": 56,
+        "bracketPercent": 58
+       },
+       {
+        "name": "Hollowfen",
+        "server": {
+         "id": 206,
+         "name": "Stormrage",
+         "region": "US"
+        },
+        "class": "Monk",
+        "spec": "Mistweaver",
+        "amount": 7212.7055663994,
+        "rankPercent": 3,
+        "bracketPercent": 0
+       },
+       {
+        "name": "Ashvale",
+        "server": {
+         "id": 234,
+         "name": "Vek'nilash",
+         "region": "US"
+        },
+        "class": "Priest",
+        "spec": "Holy",
+        "amount": 6026.9545517592,
+        "rankPercent": 59,
+        "bracketPercent": 63
+       },
+       {
+        "name": "Ravenspire",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Shaman",
+        "spec": "Restoration",
+        "amount": 4571.2780948284,
+        "rankPercent": 47,
+        "bracketPercent": 54
+       }
+      ]
+     },
+     "dps": {
+      "name": "Damage Dealers",
+      "characters": [
+       {
+        "name": "Wyrmglass",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Druid",
+        "spec": "Balance",
+        "amount": 107748.19636277,
+        "rankPercent": 27,
+        "bracketPercent": 28
+       },
+       {
+        "name": "Gildenrose",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Hunter",
+        "spec": "BeastMastery",
+        "amount": 107085.15539724,
+        "rankPercent": 18,
+        "bracketPercent": 8
+       },
+       {
+        "name": "Larkspire",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Hunter",
+        "spec": "Survival",
+        "amount": 93208.062042306,
+        "rankPercent": 17,
+        "bracketPercent": 27
+       },
+       {
+        "name": "Nightbarrow",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Mage",
+        "spec": "Arcane",
+        "amount": 135110.08770431,
+        "rankPercent": 44,
+        "bracketPercent": 20
+       }
+      ]
+     }
+    }
+   },
+   {
+    "fightID": 33,
+    "encounter": {
+     "id": 3497,
+     "name": "The Lost Explorers"
+    },
+    "difficulty": 4,
+    "size": 17,
+    "kill": 1,
+    "duration": 416638,
+    "deaths": 3,
+    "roles": {
+     "tanks": {
+      "name": "Tanks",
+      "characters": [
+       {
+        "name": "Cinderwell",
+        "server": {
+         "id": 88,
+         "name": "Emerald Dream",
+         "region": "US"
+        },
+        "class": "DeathKnight",
+        "spec": "Blood",
+        "amount": 78208.336733567,
+        "rankPercent": 76,
+        "bracketPercent": 80
+       },
+       {
+        "name": "Mosscairn",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "DemonHunter",
+        "spec": "Vengeance",
+        "amount": 67626.030270883,
+        "rankPercent": 62,
+        "bracketPercent": 55
+       }
+      ]
+     },
+     "healers": {
+      "name": "Healers",
+      "characters": [
+       {
+        "name": "Sablewind",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Druid",
+        "spec": "Restoration",
+        "amount": 3250.5340367417,
+        "rankPercent": 55,
+        "bracketPercent": 58
+       },
+       {
+        "name": "Hollowfen",
+        "server": {
+         "id": 206,
+         "name": "Stormrage",
+         "region": "US"
+        },
+        "class": "Monk",
+        "spec": "Mistweaver",
+        "amount": 10815.2688905,
+        "rankPercent": 37,
+        "bracketPercent": 33
+       },
+       {
+        "name": "Ashvale",
+        "server": {
+         "id": 234,
+         "name": "Vek'nilash",
+         "region": "US"
+        },
+        "class": "Priest",
+        "spec": "Holy",
+        "amount": 5277.9919258445,
+        "rankPercent": 56,
+        "bracketPercent": 56
+       },
+       {
+        "name": "Ravenspire",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Shaman",
+        "spec": "Restoration",
+        "amount": 4191.2259563458,
+        "rankPercent": 64,
+        "bracketPercent": 72
+       }
+      ]
+     },
+     "dps": {
+      "name": "Damage Dealers",
+      "characters": [
+       {
+        "name": "Wyrmglass",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Druid",
+        "spec": "Balance",
+        "amount": 136511.5711961,
+        "rankPercent": 20,
+        "bracketPercent": 24
+       },
+       {
+        "name": "Emberlyn",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Hunter",
+        "spec": "BeastMastery",
+        "amount": 142003.89306784,
+        "rankPercent": 60,
+        "bracketPercent": 51
+       },
+       {
+        "name": "Gildenrose",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Hunter",
+        "spec": "BeastMastery",
+        "amount": 137299.33419419,
+        "rankPercent": 51,
+        "bracketPercent": 42
+       },
+       {
+        "name": "Larkspire",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Hunter",
+        "spec": "Survival",
+        "amount": 107022.61675603,
+        "rankPercent": 24,
+        "bracketPercent": 39
+       }
+      ]
+     }
+    }
+   },
+   {
+    "fightID": 35,
+    "encounter": {
+     "id": 61762,
+     "name": "King's Rest"
+    },
+    "difficulty": 10,
+    "size": 5,
+    "kill": 1,
+    "duration": 1678876,
+    "deaths": 13,
+    "roles": {
+     "tanks": {
+      "name": "Tanks",
+      "characters": [
+       {
+        "name": "Vaelstrom",
+        "server": {
+         "id": 38,
+         "name": "Bleeding Hollow",
+         "region": "US"
+        },
+        "class": "DemonHunter",
+        "spec": "Vengeance",
+        "amount": 295.70310606061,
+        "rankPercent": 44,
+        "bracketPercent": 36
+       }
+      ]
+     },
+     "healers": {
+      "name": "Healers",
+      "characters": [
+       {
+        "name": "Sablewind",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Druid",
+        "spec": "Restoration",
+        "amount": 295.70310606061,
+        "rankPercent": 49,
+        "bracketPercent": 46
+       }
+      ]
+     },
+     "dps": {
+      "name": "Damage Dealers",
+      "characters": [
+       {
+        "name": "Grimhollow",
+        "server": {
+         "id": 98,
+         "name": "Frostmane",
+         "region": "US"
+        },
+        "class": "Monk",
+        "spec": "Windwalker",
+        "amount": 295.70310606061,
+        "rankPercent": 40,
+        "bracketPercent": 36
+       },
+       {
+        "name": "Silverpine",
+        "server": {
+         "id": 194,
+         "name": "Shu'halo",
+         "region": "US"
+        },
+        "class": "Paladin",
+        "spec": "Retribution",
+        "amount": 295.70310606061,
+        "rankPercent": 42,
+        "bracketPercent": 39
+       },
+       {
+        "name": "Marrowgate",
+        "server": {
+         "id": 174,
+         "name": "Quel'Thalas",
+         "region": "US"
+        },
+        "class": "Warrior",
+        "spec": "Arms",
+        "amount": 295.70310606061,
+        "rankPercent": 37,
+        "bracketPercent": 33
+       }
+      ]
+     }
+    }
+   },
+   {
+    "fightID": 37,
+    "encounter": {
+     "id": 12859,
+     "name": "The Blinding Vale"
+    },
+    "difficulty": 10,
+    "size": 5,
+    "kill": 1,
+    "duration": 1998356,
+    "deaths": 18,
+    "roles": {
+     "tanks": {
+      "name": "Tanks",
+      "characters": [
+       {
+        "name": "Brackwater",
+        "server": {
+         "id": 30,
+         "name": "Barthilas",
+         "region": "US"
+        },
+        "class": "DeathKnight",
+        "spec": "Blood",
+        "amount": 300.86758333333,
+        "rankPercent": 40,
+        "bracketPercent": 5
+       }
+      ]
+     },
+     "healers": {
+      "name": "Healers",
+      "characters": [
+       {
+        "name": "Sablewind",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Druid",
+        "spec": "Restoration",
+        "amount": 300.86758333333,
+        "rankPercent": 55,
+        "bracketPercent": 8
+       }
+      ]
+     },
+     "dps": {
+      "name": "Damage Dealers",
+      "characters": [
+       {
+        "name": "Grimhollow",
+        "server": {
+         "id": 98,
+         "name": "Frostmane",
+         "region": "US"
+        },
+        "class": "Monk",
+        "spec": "Windwalker",
+        "amount": 300.86758333333,
+        "rankPercent": 47,
+        "bracketPercent": 5
+       },
+       {
+        "name": "Oakenshield",
+        "server": {
+         "id": 57,
+         "name": "Dalaran",
+         "region": "US"
+        },
+        "class": "Paladin",
+        "spec": "Retribution",
+        "amount": 300.86758333333,
+        "rankPercent": 49,
+        "bracketPercent": 6
+       }
+      ]
+     }
+    }
+   },
+   {
+    "fightID": 38,
+    "encounter": {
+     "id": 12993,
+     "name": "Altar of Fangs"
+    },
+    "difficulty": 10,
+    "size": 5,
+    "kill": 1,
+    "duration": 1973570,
+    "deaths": 17,
+    "roles": {
+     "tanks": {
+      "name": "Tanks",
+      "characters": [
+       {
+        "name": "Hearthstone",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Paladin",
+        "spec": "Protection",
+        "amount": 271.38395833333,
+        "rankPercent": 33,
+        "bracketPercent": 10
+       }
+      ]
+     },
+     "healers": {
+      "name": "Healers",
+      "characters": [
+       {
+        "name": "Sablewind",
+        "server": {
+         "id": 173,
+         "name": "Proudmoore",
+         "region": "US"
+        },
+        "class": "Druid",
+        "spec": "Restoration",
+        "amount": 271.38395833333,
+        "rankPercent": 39,
+        "bracketPercent": 13
+       }
+      ]
+     },
+     "dps": {
+      "name": "Damage Dealers",
+      "characters": [
+       {
+        "name": "Grimhollow",
+        "server": {
+         "id": 98,
+         "name": "Frostmane",
+         "region": "US"
+        },
+        "class": "Monk",
+        "spec": "Windwalker",
+        "amount": 271.38395833333,
+        "rankPercent": 31,
+        "bracketPercent": 10
+       },
+       {
+        "name": "Foxglove",
+        "server": {
+         "id": 206,
+         "name": "Stormrage",
+         "region": "US"
+        },
+        "class": "Warlock",
+        "spec": "Demonology",
+        "amount": 271.38395833333,
+        "rankPercent": 25,
+        "bracketPercent": 10
+       }
+      ]
+     }
+    }
+   }
+  ]
+ },
+ "heroicFightIDs": [
+  5,
+  6,
+  11,
+  12,
+  13,
+  20,
+  21,
+  22,
+  26,
+  27,
+  28,
+  29,
+  30,
+  31,
+  32,
+  33
+ ],
+ "damageScoped": {
+  "data": {
+   "entries": [
+    {
+     "name": "Nightbarrow",
+     "id": 22,
+     "guid": 238297778,
+     "type": "Mage",
+     "icon": "Mage-Arcane",
+     "total": 565524499,
+     "activeTime": 4001357
+    },
+    {
+     "name": "Stonewick",
+     "id": 17,
+     "guid": 247131040,
+     "type": "Shaman",
+     "icon": "Shaman",
+     "total": 531720221,
+     "activeTime": 4271566
+    },
+    {
+     "name": "Thornwëave",
+     "id": 2,
+     "guid": 243929229,
+     "type": "Warlock",
+     "icon": "Warlock",
+     "total": 528675554,
+     "activeTime": 4111877
+    },
+    {
+     "name": "Frostmeadow",
+     "id": 18,
+     "guid": 247830971,
+     "type": "Mage",
+     "icon": "Mage-Arcane",
+     "total": 518251186,
+     "activeTime": 3806188
+    },
+    {
+     "name": "Wyrmglass",
+     "id": 23,
+     "guid": 238807170,
+     "type": "Druid",
+     "icon": "Druid-Balance",
+     "total": 485874300,
+     "activeTime": 4065793
+    },
+    {
+     "name": "Gildenrose",
+     "id": 19,
+     "guid": 240348924,
+     "type": "Hunter",
+     "icon": "Hunter-BeastMastery",
+     "total": 460124221,
+     "activeTime": 3838238
+    },
+    {
+     "name": "Brightspar",
+     "id": 6,
+     "guid": 243243328,
+     "type": "Rogue",
+     "icon": "Rogue-Assassination",
+     "total": 440238928,
+     "activeTime": 3736391
+    },
+    {
+     "name": "Duskmantle",
+     "id": 7,
+     "guid": 215679266,
+     "type": "Paladin",
+     "icon": "Paladin-Retribution",
+     "total": 425412081,
+     "activeTime": 4121078
+    },
+    {
+     "name": "Larkspire",
+     "id": 28,
+     "guid": 244409291,
+     "type": "Hunter",
+     "icon": "Hunter-Survival",
+     "total": 403569032,
+     "activeTime": 3875652
+    },
+    {
+     "name": "Emberlyn",
+     "id": 13,
+     "guid": 237069051,
+     "type": "Hunter",
+     "icon": "Hunter-BeastMastery",
+     "total": 395476945,
+     "activeTime": 3194921
+    },
+    {
+     "name": "Ironquill",
+     "id": 8,
+     "guid": 239015641,
+     "type": "Evoker",
+     "icon": "Evoker-Augmentation",
+     "total": 331941973,
+     "activeTime": 3307101
+    },
+    {
+     "name": "Grimhollow",
+     "id": 4,
+     "guid": 177956987,
+     "type": "Monk",
+     "icon": "Monk-Windwalker",
+     "total": 312513817,
+     "activeTime": 3472971
+    },
+    {
+     "name": "Mosscairn",
+     "id": 10,
+     "guid": 174952167,
+     "type": "DemonHunter",
+     "icon": "DemonHunter-Vengeance",
+     "total": 277114869,
+     "activeTime": 4183249
+    },
+    {
+     "name": "Cinderwell",
+     "id": 24,
+     "guid": 198359120,
+     "type": "DeathKnight",
+     "icon": "DeathKnight-Blood",
+     "total": 267547488,
+     "activeTime": 4386990
+    },
+    {
+     "name": "Hollowfen",
+     "id": 11,
+     "guid": 215675884,
+     "type": "Monk",
+     "icon": "Monk-Mistweaver",
+     "total": 37545910,
+     "activeTime": 3146508
+    },
+    {
+     "name": "Ashvale",
+     "id": 1,
+     "guid": 2733902,
+     "type": "Priest",
+     "icon": "Priest-Holy",
+     "total": 25764039,
+     "activeTime": 1686079
+    },
+    {
+     "name": "Ravenspire",
+     "id": 16,
+     "guid": 235262756,
+     "type": "Shaman",
+     "icon": "Shaman-Restoration",
+     "total": 18002505,
+     "activeTime": 2656004
+    },
+    {
+     "name": "Lightspawn Lasher",
+     "id": 48,
+     "guid": 254697,
+     "type": "Pet",
+     "icon": "custom-icon-inv_misc_herb_nightmarevine.jpg",
+     "total": 12693334,
+     "activeTime": 2472167
+    },
+    {
+     "name": "Sablewind",
+     "id": 9,
+     "guid": 238356592,
+     "type": "Druid",
+     "icon": "Druid-Restoration",
+     "total": 12121223,
+     "activeTime": 1272148
+    }
+   ]
+  }
+ },
+ "deathPages": [
+  {
+   "data": {
+    "entries": [
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 1310978,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Wild Bite"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 1313176,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Wild Bite"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 1317968,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Shatter"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 1337991,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Shatter"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 1337992,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Shatter"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Elemental",
+      "timestamp": 1338963,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Abyssal Rain"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 1338964,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Abyssal Rain"
+      }
+     },
+     {
+      "name": "Ironquill",
+      "id": 8,
+      "type": "Evoker",
+      "icon": "Evoker-Augmentation",
+      "timestamp": 1376690,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Wild Bite"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 1380954,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Abyssal Rain"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 1381872,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Wild Bite"
+      }
+     },
+     {
+      "name": "Ashvale",
+      "id": 1,
+      "type": "Priest",
+      "icon": "Priest-Holy",
+      "timestamp": 1382010,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Frost Orb"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Demonology",
+      "timestamp": 1383174,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Frost Orb"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 1384960,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Abyssal Rain"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 1384998,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Lingering Frost"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 1385127,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Wild Bite"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 1388962,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Iceblade Flurry"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 1388962,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Abyssal Rain"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 1395275,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Wild Bite"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 1395304,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Wild Bite"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 1397552,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Elemental",
+      "timestamp": 1403987,
+      "fight": 5,
+      "killingBlow": {
+       "name": "Swirling Whirlpools"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 1785327,
+      "fight": 6,
+      "killingBlow": {
+       "name": "Frost Orb"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 1895811,
+      "fight": 6,
+      "killingBlow": {
+       "name": "Abyssal Rain"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 1896316,
+      "fight": 6,
+      "killingBlow": {
+       "name": "Frost Orb"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 1947765,
+      "fight": 6,
+      "killingBlow": {
+       "name": "Unending Tides"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 1947767,
+      "fight": 6,
+      "killingBlow": {
+       "name": "Unending Tides"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 2724073,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Essence Rend"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 2858718,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Demonology",
+      "timestamp": 2858859,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 2859170,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 2859171,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Ironquill",
+      "id": 8,
+      "type": "Evoker",
+      "icon": "Evoker-Augmentation",
+      "timestamp": 2859304,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 2859305,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 2859305,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 2859307,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 2859470,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 2859471,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 2859711,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 2859712,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 2860160,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Elemental",
+      "timestamp": 2860264,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 2861299,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Vessel of Awakening"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 2880147,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Hungering Pyre"
+      }
+     },
+     {
+      "name": "Ashvale",
+      "id": 1,
+      "type": "Priest",
+      "icon": "Priest-Holy",
+      "timestamp": 2882512,
+      "fight": 11,
+      "killingBlow": {
+       "name": null
+      }
+     },
+     {
+      "name": "Ashvale",
+      "id": 1,
+      "type": "Priest",
+      "icon": "Priest-Holy",
+      "timestamp": 2882835,
+      "fight": 11,
+      "killingBlow": {
+       "name": null
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 2884569,
+      "fight": 11,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 3148846,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Soul Transfer"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 3168465,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Cremation"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Demonology",
+      "timestamp": 3260729,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Hungering Pyre"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 3260731,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Hungering Pyre"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 3446019,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Soulcoil Rite"
+      }
+     },
+     {
+      "name": "Ironquill",
+      "id": 8,
+      "type": "Evoker",
+      "icon": "Evoker-Augmentation",
+      "timestamp": 3446817,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Latent Cultist"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 3468079,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 3475576,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Latent Cultist"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 3478680,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Latent Cultist"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 3478681,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Latent Cultist"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 3479122,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Latent Cultist"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 3480845,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Latent Cultist"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 3481013,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 3482438,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 3483888,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 3485415,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Soulcoil Well"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 3485739,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Soulcoil Well"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Elemental",
+      "timestamp": 3485886,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Demonology",
+      "timestamp": 3488270,
+      "fight": 12,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 4256398,
+      "fight": 13,
+      "killingBlow": {
+       "name": "Soul Transfer"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 4325793,
+      "fight": 13,
+      "killingBlow": {
+       "name": "Soul Transfer"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 5215701,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Helical Toxins"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 5215799,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Helical Toxins"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Destruction",
+      "timestamp": 5215818,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Helical Toxins"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 5217721,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Helical Toxins"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 5219755,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Helical Toxins"
+      }
+     },
+     {
+      "name": "Ironquill",
+      "id": 8,
+      "type": "Evoker",
+      "icon": "Evoker-Augmentation",
+      "timestamp": 5223696,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Cultivated Burst"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 5223735,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Helical Toxins"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 5223770,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Helical Toxins"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 5223813,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Cultivated Burst"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 5223857,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Cultivated Burst"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 5227891,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Unstable Miasma"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 5227891,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Unstable Miasma"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 5227892,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Unstable Miasma"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 5230553,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Elemental",
+      "timestamp": 5231572,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Contaminate"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 5232099,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 5235314,
+      "fight": 20,
+      "killingBlow": {
+       "name": "Noxious Blast"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 5379336,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Cultivated Burst"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 5379438,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 5382439,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Ironquill",
+      "id": 8,
+      "type": "Evoker",
+      "icon": "Evoker-Augmentation",
+      "timestamp": 5383084,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Mark of Blood"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 5383216,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Mark of Acid"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 5383292,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 5384294,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Cultivated Burst"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Destruction",
+      "timestamp": 5385092,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Mark of Acid"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 5385092,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Mark of Acid"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 5385218,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Mark of Blood"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 5385444,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 5385975,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 5387233,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Mark of Blood"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 5389456,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Elemental",
+      "timestamp": 5390895,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 5391056,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Unstable Miasma"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 5393084,
+      "fight": 21,
+      "killingBlow": {
+       "name": "Mark of Blood"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 5551297,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Mark of Acid"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Destruction",
+      "timestamp": 5553288,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Mark of Acid"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 5553393,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Mark of Blood"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 5584368,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Unstable Miasma"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 5584370,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Unstable Miasma"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 5584371,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Unstable Miasma"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 5584371,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Unstable Miasma"
+      }
+     },
+     {
+      "name": "Ironquill",
+      "id": 8,
+      "type": "Evoker",
+      "icon": "Evoker-Augmentation",
+      "timestamp": 5617192,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 5620402,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 5622010,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Bloodvenom Injection"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 5622168,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 5623573,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 5623707,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Empowering Slam"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 5624411,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Mark of Acid"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 5625388,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Elemental",
+      "timestamp": 5625414,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Mark of Acid"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 5625677,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Ashvale",
+      "id": 1,
+      "type": "Priest",
+      "icon": "Priest-Holy",
+      "timestamp": 5626521,
+      "fight": 22,
+      "killingBlow": {
+       "name": "Blood Venom"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 6179451,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 6185854,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 6185855,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 6217847,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 6217848,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 6225235,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Throw Junk"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 6229271,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Throw Junk"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 6229271,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Throw Junk"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 6229461,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 6233269,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Splinters"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 6234917,
+      "fight": 26,
+      "killingBlow": {
+       "name": null
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Enhancement",
+      "timestamp": 6239459,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Destruction",
+      "timestamp": 6241444,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 6243737,
+      "fight": 26,
+      "killingBlow": {
+       "name": null
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 6245299,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Blink Nova"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 6245453,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Ironquill",
+      "id": 8,
+      "type": "Evoker",
+      "icon": "Evoker-Augmentation",
+      "timestamp": 6251448,
+      "fight": 26,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 6500375,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 6540606,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 6576306,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Shredding Shards"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 6603888,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Splinters"
+      }
+     },
+     {
+      "name": "Ironquill",
+      "id": 8,
+      "type": "Evoker",
+      "icon": "Evoker-Augmentation",
+      "timestamp": 6604683,
+      "fight": 27,
+      "killingBlow": {
+       "name": null
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 6606530,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Splinters"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Enhancement",
+      "timestamp": 6607959,
+      "fight": 27,
+      "killingBlow": {
+       "name": null
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 6608025,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Splinters"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 6609156,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Final Ascension"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 6609797,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Splinters"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Destruction",
+      "timestamp": 6609931,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Final Ascension"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 6610790,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Final Ascension"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 6610791,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Final Ascension"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 6611404,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Final Ascension"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 6611733,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Final Ascension"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 6612096,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Final Ascension"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 6614050,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Final Ascension"
+      }
+     },
+     {
+      "name": "Ashvale",
+      "id": 1,
+      "type": "Priest",
+      "icon": "Priest-Holy",
+      "timestamp": 6616033,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 6622165,
+      "fight": 27,
+      "killingBlow": {
+       "name": "Final Ascension"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 6929907,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Splinters"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 6954298,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Elemental Explosion"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 6954299,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Elemental Explosion"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 6955753,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Throw Junk"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 6960469,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Splinters"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 6961300,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Fire Patch"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Destruction",
+      "timestamp": 6966746,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Blink Nova"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 6967159,
+      "fight": 28,
+      "killingBlow": {
+       "name": null
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 6970151,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Ironquill",
+      "id": 8,
+      "type": "Evoker",
+      "icon": "Evoker-Augmentation",
+      "timestamp": 6972898,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Frost Patch"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 6973395,
+      "fight": 28,
+      "killingBlow": {
+       "name": null
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Enhancement",
+      "timestamp": 6978744,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Throw Junk"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 6981480,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Relic Rupture"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 6981481,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Relic Rupture"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 6982823,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 6994677,
+      "fight": 28,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 7158442,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 7188523,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Destruction",
+      "timestamp": 7292304,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Elemental Explosion"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 7292304,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Elemental Explosion"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 7292305,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Elemental Explosion"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Enhancement",
+      "timestamp": 7292305,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Elemental Explosion"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 7292498,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 7292619,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Relic Rupture"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 7292619,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Relic Rupture"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 7292620,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Relic Rupture"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 7292620,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Relic Rupture"
+      }
+     },
+     {
+      "name": "Ironquill",
+      "id": 8,
+      "type": "Evoker",
+      "icon": "Evoker-Augmentation",
+      "timestamp": 7292816,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Elemental Explosion"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 7292816,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Elemental Explosion"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 7292818,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Elemental Explosion"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 7292818,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Elemental Explosion"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 7292819,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Elemental Explosion"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 7301243,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Ashvale",
+      "id": 1,
+      "type": "Priest",
+      "icon": "Priest-Holy",
+      "timestamp": 7308500,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 7318486,
+      "fight": 29,
+      "killingBlow": {
+       "name": "Icebound Flames"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 7588241,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Evil Eyes"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 7588766,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 7632241,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 7632242,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 7856501,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Spreading Flames"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Destruction",
+      "timestamp": 7857323,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 7858434,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 7858533,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Enhancement",
+      "timestamp": 7858912,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 7859016,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "data": {
+    "entries": [
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 7859051,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 7859291,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 7859620,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Ironquill",
+      "id": 8,
+      "type": "Evoker",
+      "icon": "Evoker-Augmentation",
+      "timestamp": 7862686,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Spreading Flames"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 7874743,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 7875962,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Spreading Flames"
+      }
+     },
+     {
+      "name": "Ashvale",
+      "id": 1,
+      "type": "Priest",
+      "icon": "Priest-Holy",
+      "timestamp": 7880729,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 7884075,
+      "fight": 30,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 8565010,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 8565011,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 8664527,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Evil Eyes"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 8791929,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Evil Eyes"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 8824927,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Enhancement",
+      "timestamp": 8824940,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Destruction",
+      "timestamp": 8857641,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 8858657,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 8858755,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 8861355,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 8861658,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 8865767,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 8867766,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 8869278,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Spreading Flames"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 8874935,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Spreading Flames"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 8876970,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Spreading Flames"
+      }
+     },
+     {
+      "name": "Ashvale",
+      "id": 1,
+      "type": "Priest",
+      "icon": "Priest-Holy",
+      "timestamp": 8880937,
+      "fight": 31,
+      "killingBlow": {
+       "name": "Shredding Shards"
+      }
+     },
+     {
+      "name": "Gildenrose",
+      "id": 19,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 9157789,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Final Ascension"
+      }
+     },
+     {
+      "name": "Emberlyn",
+      "id": 13,
+      "type": "Hunter",
+      "icon": "Hunter-BeastMastery",
+      "timestamp": 9158327,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Brightspar",
+      "id": 6,
+      "type": "Rogue",
+      "icon": "Rogue-Assassination",
+      "timestamp": 9172752,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Larkspire",
+      "id": 28,
+      "type": "Hunter",
+      "icon": "Hunter-Survival",
+      "timestamp": 9172753,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Duskmantle",
+      "id": 7,
+      "type": "Paladin",
+      "icon": "Paladin-Retribution",
+      "timestamp": 9174615,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 9174616,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Frostmeadow",
+      "id": 18,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 9176424,
+      "fight": 32,
+      "killingBlow": {
+       "name": null
+      }
+     },
+     {
+      "name": "Thornwëave",
+      "id": 2,
+      "type": "Warlock",
+      "icon": "Warlock-Destruction",
+      "timestamp": 9176653,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 9176654,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Mighty Thud"
+      }
+     },
+     {
+      "name": "Stonewick",
+      "id": 17,
+      "type": "Shaman",
+      "icon": "Shaman-Enhancement",
+      "timestamp": 9184326,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Malevolent Presence"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 9185093,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Throw Junk"
+      }
+     },
+     {
+      "name": "Sablewind",
+      "id": 9,
+      "type": "Druid",
+      "icon": "Druid-Restoration",
+      "timestamp": 9186028,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Aftershock"
+      }
+     },
+     {
+      "name": "Ashvale",
+      "id": 1,
+      "type": "Priest",
+      "icon": "Priest-Holy",
+      "timestamp": 9189122,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Throw Junk"
+      }
+     },
+     {
+      "name": "Hollowfen",
+      "id": 11,
+      "type": "Monk",
+      "icon": "Monk-Mistweaver",
+      "timestamp": 9190182,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Splinters"
+      }
+     },
+     {
+      "name": "Wyrmglass",
+      "id": 23,
+      "type": "Druid",
+      "icon": "Druid-Balance",
+      "timestamp": 9191766,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Splinters"
+      }
+     },
+     {
+      "name": "Ravenspire",
+      "id": 16,
+      "type": "Shaman",
+      "icon": "Shaman-Restoration",
+      "timestamp": 9192137,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Splinters"
+      }
+     },
+     {
+      "name": "Cinderwell",
+      "id": 24,
+      "type": "DeathKnight",
+      "icon": "DeathKnight-Blood",
+      "timestamp": 9194509,
+      "fight": 32,
+      "killingBlow": {
+       "name": "Aftershock"
+      }
+     },
+     {
+      "name": "Nightbarrow",
+      "id": 22,
+      "type": "Mage",
+      "icon": "Mage-Arcane",
+      "timestamp": 9633881,
+      "fight": 33,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     },
+     {
+      "name": "Mosscairn",
+      "id": 10,
+      "type": "DemonHunter",
+      "icon": "DemonHunter-Vengeance",
+      "timestamp": 9644194,
+      "fight": 33,
+      "killingBlow": {
+       "name": "Melee"
+      }
+     },
+     {
+      "name": "Grimhollow",
+      "id": 4,
+      "type": "Monk",
+      "icon": "Monk-Windwalker",
+      "timestamp": 9665276,
+      "fight": 33,
+      "killingBlow": {
+       "name": "Blast Wave"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}
