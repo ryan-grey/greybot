@@ -945,6 +945,36 @@ def test_end_to_end():
     check("an unranked new tier omits the rank line",
           posts and "Ranked server" not in posts[0]["embeds"][0]["description"])
 
+    # --- preview renders a real card and records absolutely nothing ----------
+    # A preview that took the ordinary path would claim the boss, and the guild's real
+    # first kill would then be correctly, silently and permanently skipped -- the bot's
+    # entire purpose defeated by the demo of it.
+    posts.clear()
+    import copy as _copy
+    before = _copy.deepcopy(FAKE_DDB.items)
+
+    res = handler.handler({"preview": {"dry": True, "slug": "the-venomous-abyss"}}, None)
+    check("a dry preview posts nothing at all", posts == [], f"{len(posts)} posts")
+    check("a dry preview still renders a card",
+          "payload" in res and "just killed" in res["payload"]["embeds"][0]["title"])
+    check("a dry preview writes no state", FAKE_DDB.items == before)
+
+    res = handler.handler({"preview": {"slug": "the-venomous-abyss"}}, None)
+    check("a live preview posts exactly one card", len(posts) == 1, len(posts))
+    check("the preview card reads as a first kill",
+          posts and "**1** of **8**" in posts[0]["embeds"][0]["description"],
+          posts[0]["embeds"][0]["description"] if posts else "")
+    check("the preview is dated by the REAL kill, not by now",
+          posts and posts[0]["embeds"][0]["timestamp"] == res["killedAt"])
+    check("a live preview writes NO dedupe state whatsoever",
+          FAKE_DDB.items == before,
+          "state changed — a preview would silence the real first kill")
+
+    check("previewing picks the tier's EARLIEST kill",
+          res["boss"] == ABYSS[0], res["boss"])
+    check("the preview never fires AOTC", not any(
+        "AOTC" in p["embeds"][0]["title"] for p in posts))
+
 
 def main():
     print("greyBot self-test")

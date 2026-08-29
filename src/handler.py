@@ -279,6 +279,72 @@ def announce_aotc(cfg, pk, slug, raid_label, state, when):
     return True
 
 
+def preview(spec, cfg, token, gid, profile, index):
+    """Render a kill card from REAL data without recording anything.
+
+    Invoke with {"preview": {}} to see what an announcement will look like before a raid
+    night produces one. It reads the guild's actual first Heroic kill of the current tier
+    and dates the card with the real timestamp of that kill.
+
+    It touches no state, by construction: nothing in this function calls store, so it
+    cannot claim a boss. That matters more than it might appear -- a preview that took the
+    ordinary path would mark the boss announced, and the guild's real first kill would then
+    be correctly, silently, and permanently skipped. The whole point of the bot, defeated
+    by the demo of it.
+
+    {"preview": {"dry": true}} returns the payload instead of posting it.
+    """
+    kills, _rate = wcl.heroic_kills_since(
+        token, gid, (datetime.now(timezone.utc)
+                     - timedelta(days=SEED_LOOKBACK_DAYS)).timestamp() * 1000,
+        limit=SEED_REPORT_LIMIT, max_pages=SEED_MAX_PAGES)
+
+    attributed = []
+    for k in kills:
+        slug, meta, how = raiderio.resolve_raid(profile, k["name"], k.get("zoneName"),
+                                                _at(k["killedAtMs"]), cfg["guild_region"],
+                                                index)
+        if slug:
+            attributed.append((slug, meta, k))
+    if not attributed:
+        raise RuntimeError("No attributable Heroic kills found to preview.")
+
+    # "The current tier" is the tier of the most recent kill -- derived from the logs, the
+    # same way the announcer decides, rather than guessed from Raider.IO's progression.
+    slug = spec.get("slug") or attributed[-1][0]
+    in_tier = [(m, k) for s, m, k in attributed if s == slug]
+    if spec.get("boss"):
+        want = raiderio.normalize(spec["boss"])
+        in_tier = [(m, k) for m, k in in_tier
+                   if raiderio.normalize(k["name"]) == want] or in_tier
+
+    # Earliest kill in that tier: the guild's actual first Heroic boss there.
+    meta, kill = min(in_tier, key=lambda mk: mk[1]["killedAtMs"])
+    _killed, total = raiderio.progress_for(profile, slug)
+    rank = raiderio.realm_rank(profile, slug, "heroic")
+    raid_label = kill.get("zoneName") or (meta or {}).get("name") or slug
+    killed_at = _at(kill["killedAtMs"])
+
+    payload = discord.kill_embed(
+        cfg["guild_name"], kill["name"], int(spec.get("count", 1)), total or "?",
+        raid_label, rank, report_url=report_url(kill.get("reportCode")),
+        iso_ts=_iso(killed_at))
+
+    info = {"boss": kill["name"], "raid": raid_label, "slug": slug,
+            "killedAt": _iso(killed_at), "localTime": _when_text(killed_at),
+            "count": int(spec.get("count", 1)), "total": total, "realmRank": rank,
+            "report": kill.get("reportCode")}
+
+    if spec.get("dry"):
+        log("preview_dry_run", **info, stateWritten=False)
+        return {"ok": True, "preview": True, "posted": False, "payload": payload, **info}
+
+    discord.post(cfg["webhook"], payload)
+    log("preview_posted", **info, stateWritten=False,
+        note="PREVIEW — posted to Discord, no dedupe state was written")
+    return {"ok": True, "preview": True, "posted": True, **info}
+
+
 def handler(event, context):
     started = time.time()
     cfg = config.load()
@@ -290,6 +356,15 @@ def handler(event, context):
     pk = store.guild_pk(cfg["guild_region"], cfg["guild_realm"], cfg["guild_name"])
 
     gid, rate = guild_id(token, cfg)
+
+    # The preview branch returns before any of the announcing machinery, so it cannot
+    # reach a claim even by accident.
+    if isinstance(event, dict) and event.get("preview") is not None:
+        profile = raiderio.guild_profile(cfg["guild_region"], cfg["guild_realm"],
+                                         cfg["guild_name"])
+        index, _exp = raiderio.build_index(profile, EXPANSION_HINT)
+        return preview(event["preview"] or {}, cfg, token, gid, profile, index)
+
     if rate is None:
         rate = wcl.rate_limit(wcl.query(token, wcl.RATE_ONLY_Q))
     if rate and rate["fraction"] >= POINTS_CEILING:
