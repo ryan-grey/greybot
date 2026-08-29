@@ -164,6 +164,7 @@ import wcl                # noqa: E402
 RAIDS = [
     {
         "slug": "tier-mn-1",
+        "icon": "inv_achievement_raid_darkwell",
         "name": "MN Tier 1 (VS / DR / MQD)",
         "short_name": "VS/DR/MQD",
         "starts": {
@@ -204,6 +205,7 @@ RAIDS = [
     },
     {
         "slug": "sporefall",
+        "icon": "inv_1207_achievement_raid_fungariangiant_fungalgiant",
         "name": "Sporefall",
         "short_name": "SF",
         "starts": {
@@ -220,6 +222,7 @@ RAIDS = [
     },
     {
         "slug": "the-tidebound-grotto",
+        "icon": "achievement_boss_elitenagamale",
         "name": "The Tidebound Grotto",
         "short_name": "TG",
         "starts": {
@@ -236,6 +239,7 @@ RAIDS = [
     },
     {
         "slug": "the-venomous-abyss",
+        "icon": "8039569",
         "name": "The Venomous Abyss",
         "short_name": "VA",
         "starts": {
@@ -308,6 +312,7 @@ INDEX = raiderio.RaidIndex(RAIDS)
 PREV_RAIDS = [
     {
         "slug": "manaforge-omega",
+        "icon": "inv_112_achievement_raid_manaforgeomega",
         "name": "Manaforge Omega",
         "starts": {
             "us": "2025-08-12T15:00:00Z"
@@ -661,6 +666,28 @@ def test_discord_payloads():
           "They are now **3** of **8** in Heroic The Venomous Abyss" in body["description"])
     check("rank line matches the spec", "Ranked server **#66**" in body["description"])
     check("a kill card mentions nobody", p["allowed_mentions"] == {"parse": []})
+    check("a card with no art is still a valid card", "thumbnail" not in body)
+
+    art = discord.kill_embed("Scrambled", ABYSS[2], 3, 8, "The Venomous Abyss", 66,
+                             thumbnail_url="https://example.test/i.jpg")
+    check("art rides along as a thumbnail when there is one",
+          art["embeds"][0]["thumbnail"] == {"url": "https://example.test/i.jpg"})
+
+    # Raider.IO hands out an icon NAME for some raids and a bare FileDataID for others,
+    # with no apparent rule. Blizzard's CDN resolves both; Wowhead's resolves only one.
+    check("an icon name builds a URL",
+          raiderio.icon_url({"icon": "inv_achievement_raid_darkwell"})
+          == "https://render.worldofwarcraft.com/us/icons/56/inv_achievement_raid_darkwell.jpg")
+    check("a bare FileDataID builds one too",
+          raiderio.icon_url({"icon": "8039569"})
+          == "https://render.worldofwarcraft.com/us/icons/56/8039569.jpg")
+    check("a raid with no icon yields no URL and no crash",
+          raiderio.icon_url({}) is None and raiderio.icon_url(None) is None)
+    check("a path-like icon value is refused rather than interpolated",
+          raiderio.icon_url({"icon": "../../evil"}) is None)
+    check("every live raid in the fixture has usable art",
+          all(raiderio.icon_url(m) for m in INDEX.raids.values()),
+          [k for k, m in INDEX.raids.items() if not raiderio.icon_url(m)])
 
     unranked = discord.kill_embed("Scrambled", ABYSS[0], 1, 8, "The Venomous Abyss", None)
     check("an unranked guild is not 'Ranked server #0'",

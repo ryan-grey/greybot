@@ -107,6 +107,7 @@ class RaidIndex:
             encounters = [e.get("name", "") for e in (raid.get("encounters") or [])]
             meta = {"slug": slug, "name": raid.get("name") or slug,
                     "shortName": raid.get("short_name") or "",
+                    "icon": raid.get("icon") or "",
                     "encounters": encounters,
                     "starts": raid.get("starts") or {}, "ends": raid.get("ends") or {}}
             self.raids[slug] = meta
@@ -284,3 +285,20 @@ def seed_names(meta, killed, total, history_names):
         return names, "assumed-kill-order"
 
     return names, "history-only"
+
+
+# Blizzard's own icon CDN rather than Wowhead's. It is first-party, and it happens to
+# accept BOTH forms Raider.IO hands out -- some raids give an icon name
+# ("inv_achievement_raid_darkwell") and others a bare FileDataID ("8039569"), with no
+# apparent rule. Both resolve here; only one of them resolves on Wowhead's.
+ICON_CDN = "https://render.worldofwarcraft.com/us/icons/56/{}.jpg"
+
+
+def icon_url(meta):
+    """Raid icon URL, or None. 56px is the largest size this CDN publishes for icons --
+    real per-boss portraits need the Blizzard Game Data API and its credentials."""
+    icon = (meta or {}).get("icon") or ""
+    icon = str(icon).strip()
+    if not icon or "/" in icon or ".." in icon:
+        return None
+    return ICON_CDN.format(icon)

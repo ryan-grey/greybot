@@ -67,7 +67,7 @@ def post(webhook_url, payload, timeout=10, sleep=time.sleep):
 
 
 def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
-               report_url=None, iso_ts=None):
+               report_url=None, iso_ts=None, thumbnail_url=None):
     """The three lines from the spec, as a card.
 
     The rank line is omitted entirely when the rank is unknown rather than rendered as
@@ -87,10 +87,15 @@ def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
         embed["url"] = report_url
     if iso_ts:
         embed["timestamp"] = iso_ts
+    # Art is decoration: a missing or dead image URL must never cost an announcement, and
+    # Discord simply omits a thumbnail it cannot fetch rather than rejecting the message.
+    if thumbnail_url:
+        embed["thumbnail"] = {"url": thumbnail_url}
     return {"embeds": [embed], "allowed_mentions": {"parse": []}}
 
 
-def aotc_payload(guild_name, raid_name, when_text, role_id, iso_ts=None):
+def aotc_payload(guild_name, raid_name, when_text, role_id, iso_ts=None,
+                 thumbnail_url=None):
     """The AOTC card, and the only message in the bot that pings anyone."""
     embed = {
         "title": f"{guild_name} just got AOTC on {when_text}",
@@ -100,6 +105,8 @@ def aotc_payload(guild_name, raid_name, when_text, role_id, iso_ts=None):
     }
     if iso_ts:
         embed["timestamp"] = iso_ts
+    if thumbnail_url:
+        embed["thumbnail"] = {"url": thumbnail_url}
     payload = {"embeds": [embed],
                "allowed_mentions": {"parse": []}}
     if role_id:

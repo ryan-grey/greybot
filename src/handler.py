@@ -227,7 +227,7 @@ def seed_new_tier(token, gid, pk, cfg, slug, raid_label, profile, index,
     return silent
 
 
-def announce_kill(cfg, pk, slug, raid_label, kill, state, profile):
+def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None):
     """Claim, then post. In that order -- see store.claim_boss."""
     key = boss_key(kill["name"])
     if not store.claim_boss(pk, slug, key):
@@ -242,7 +242,8 @@ def announce_kill(cfg, pk, slug, raid_label, kill, state, profile):
 
     payload = discord.kill_embed(
         cfg["guild_name"], kill["name"], count, total or "?", raid_label, rank,
-        report_url=report_url(kill.get("reportCode")), iso_ts=_iso(killed_at))
+        report_url=report_url(kill.get("reportCode")), iso_ts=_iso(killed_at),
+        thumbnail_url=thumb)
     try:
         discord.post(cfg["webhook"], payload)
     except discord.DiscordError as exc:
@@ -261,12 +262,12 @@ def announce_kill(cfg, pk, slug, raid_label, kill, state, profile):
     return True
 
 
-def announce_aotc(cfg, pk, slug, raid_label, state, when):
+def announce_aotc(cfg, pk, slug, raid_label, state, when, thumb=None):
     if not store.claim_aotc(pk, slug):
         log("skip_aotc_already", slug=slug)
         return False
     payload = discord.aotc_payload(cfg["guild_name"], raid_label, _when_text(when),
-                                   cfg["role_id"], iso_ts=_iso(when))
+                                   cfg["role_id"], iso_ts=_iso(when), thumbnail_url=thumb)
     try:
         discord.post(cfg["webhook"], payload)
     except discord.DiscordError as exc:
@@ -328,7 +329,7 @@ def preview(spec, cfg, token, gid, profile, index):
     payload = discord.kill_embed(
         cfg["guild_name"], kill["name"], int(spec.get("count", 1)), total or "?",
         raid_label, rank, report_url=report_url(kill.get("reportCode")),
-        iso_ts=_iso(killed_at))
+        iso_ts=_iso(killed_at), thumbnail_url=raiderio.icon_url(meta))
 
     info = {"boss": kill["name"], "raid": raid_label, "slug": slug,
             "killedAt": _iso(killed_at), "localTime": _when_text(killed_at),
@@ -413,13 +414,15 @@ def handler(event, context):
             continue
         k["_how"] = how
         label = (meta or {}).get("name") or k.get("zoneName") or slug
-        grouped.setdefault(slug, {"label": label, "kills": []})["kills"].append(k)
+        grouped.setdefault(slug, {"label": label, "meta": meta,
+                                  "kills": []})["kills"].append(k)
 
     announced = 0
     for slug, bundle in grouped.items():
         # Prefer the Warcraft Logs zone name in the message: it is the name raiders use.
         # Raider.IO's is a data label and reads like one ("MN Tier 1 (VS / DR / MQD)").
         raid_label = bundle["kills"][0].get("zoneName") or bundle["label"]
+        thumb = raiderio.icon_url(bundle.get("meta"))
 
         state = store.load_tier(pk, slug)
         if state is None:
@@ -431,7 +434,7 @@ def handler(event, context):
 
         last_announced_ms = None
         for kill in bundle["kills"]:
-            if announce_kill(cfg, pk, slug, raid_label, kill, state, profile):
+            if announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb):
                 announced += 1
                 last_announced_ms = kill["killedAtMs"]
 
