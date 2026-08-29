@@ -106,4 +106,5 @@ echo
 echo "Function: $FN  ($REGION)"
 echo "Logs:     aws logs tail /aws/lambda/$FN --follow --region $REGION"
 echo "Dry run:  aws lambda invoke --function-name $FN --region $REGION /dev/stdout"
+echo "Identity: scripts/set-webhook-identity.py --check"
 [ "$DRIFT" = "0" ] || { echo; echo "Drift detected — fix in CloudShell as admin (infra/iam-setup.sh)."; exit 1; }

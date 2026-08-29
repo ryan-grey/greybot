@@ -195,6 +195,44 @@ own webhook.
 
 ---
 
+## The greyBot identity
+
+The avatar people actually see beside each announcement is the **webhook's**, not the bot
+user's. This bot has no gateway connection, so nothing ever logs in as a bot user — every
+announcement is an HTTP POST, and Discord renders those under the webhook's own name and
+avatar. Setting the application icon in the Developer Portal changes the icon on the *app*;
+it does not change the face in `#bots`.
+
+So there are two places, and they are set two different ways:
+
+| what | where | how |
+|---|---|---|
+| application / bot user icon | Developer Portal → the app → Bot → Icon | by hand — there is no API for it with a bot token |
+| **the face beside each announcement** | the `#bots` webhook | `scripts/set-webhook-identity.py` |
+
+```sh
+scripts/set-webhook-identity.py --check    # report current identity, change nothing
+scripts/set-webhook-identity.py            # apply the name and avatar
+```
+
+It reads the webhook URL from `--webhook-url`, then `$DISCORD_WEBHOOK_URL`, then SSM. It is
+idempotent, and it never prints the URL — `PATCH /webhooks/{id}/{token}` takes no
+`Authorization` header, so the token in the URL *is* the credential.
+
+Set once on the webhook rather than per message. The alternative — `username` and
+`avatar_url` in every POST — requires the PNG served from a publicly reachable URL, which
+means hosting it somewhere; the obvious somewhere is `ryangrey.dev`, which is deliberately a
+zero-external-request single-file site. Setting it once sidesteps that entirely and keeps
+the announcement payloads clean.
+
+`assets/greyBot-avatar.png` is the canonical asset, version controlled alongside the code:
+1024×1024 RGBA, `#12151A` field, `#8DBCEB` highlight outline with glow, `#6AA8E0` accent.
+Discord never renders a webhook avatar above 128px and has historically rejected oversized
+data URIs, so the script downscales to 256px for the upload (328 KiB → 47 KiB) and leaves
+the master untouched.
+
+---
+
 ## Cost
 
 | | basis | $/mo |
@@ -218,8 +256,10 @@ src/wcl.py           Warcraft Logs v2: OAuth, GraphQL, rate-limit accounting
 src/raiderio.py      Raider.IO: profile, static raid data, slug resolution
 src/store.py         DynamoDB: the announce-once claim
 src/discord.py       webhook payloads and retries
+assets/              greyBot-avatar.png — the canonical icon, 1024x1024
 scripts/selftest.py  the gate; no AWS, no boto3, no network
 scripts/deploy.sh    package + ship the Lambda, then verify admin-owned wiring
+scripts/set-webhook-identity.py   name + avatar on the announcing webhook
 infra/iam-setup.sh   one-time admin setup: table, role, secrets, schedule
 ```
 
