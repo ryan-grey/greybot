@@ -118,11 +118,15 @@ class FakeDynamo:
 
 
 FAKE_DDB = FakeDynamo()
+# Fixture values, not real ones. The guild name and realm are the public subject of the
+# project, but the OAuth client id and the Discord role id are account identifiers with no
+# reason to be in a public repo -- the tests never care what they contain, only that they
+# are carried through intact.
 SSM_VALUES = {
-    "/greybot/wcl/client_id": "01a04b33-1cfc-7281-a20c-97bdc7f4d165",
+    "/greybot/wcl/client_id": "00000000-0000-0000-0000-000000000000",
     "/greybot/wcl/client_secret": "not-a-real-secret",
     "/greybot/discord/webhook_url": "https://discord.com/api/webhooks/1/tok",
-    "/greybot/discord/prog_role_id": "947697732192182272",
+    "/greybot/discord/prog_role_id": "111111111111111111",
     "/greybot/guild/name": "Scrambled",
     "/greybot/guild/realm": "proudmoore",
     "/greybot/guild/region": "us",
@@ -413,7 +417,7 @@ def test_config():
           (cfg["guild_name"], cfg["guild_realm"], cfg["guild_region"])
           == ("Scrambled", "proudmoore", "us"))
     check("the prog role id is carried through",
-          cfg["role_id"] == "947697732192182272")
+          cfg["role_id"] == "111111111111111111")
     check("redacted config never carries the secret or the webhook",
           "not-a-real-secret" not in json.dumps(config.redacted(cfg))
           and "discord.com/api/webhooks" not in json.dumps(config.redacted(cfg)))
@@ -665,10 +669,10 @@ def test_discord_payloads():
           raiderio.realm_rank(PROFILE, "the-venomous-abyss") == 66)
 
     a = discord.aotc_payload("Scrambled", "The Venomous Abyss",
-                             "August 28, 2026 at 11:14 PM EDT", "947697732192182272")
-    check("the role is mentioned in content", a["content"] == "<@&947697732192182272>")
+                             "August 28, 2026 at 11:14 PM EDT", "111111111111111111")
+    check("the role is mentioned in content", a["content"] == "<@&111111111111111111>")
     check("the role is allow-listed so the ping actually fires",
-          a["allowed_mentions"]["roles"] == ["947697732192182272"])
+          a["allowed_mentions"]["roles"] == ["111111111111111111"])
     check("nothing else can be mentioned", a["allowed_mentions"]["parse"] == [])
     check("AOTC title matches the spec",
           a["embeds"][0]["title"]
@@ -911,9 +915,9 @@ def test_end_to_end():
           len([p for p in posts if "just got AOTC on" in p["embeds"][0]["title"]]) == 1)
     aotc = [p for p in posts if "just got AOTC on" in p["embeds"][0]["title"]][0]
     check("AOTC pings Prog Raiders and nothing else",
-          aotc.get("content") == "<@&947697732192182272>"
+          aotc.get("content") == "<@&111111111111111111>"
           and aotc["allowed_mentions"] == {"parse": [],
-                                           "roles": ["947697732192182272"]})
+                                           "roles": ["111111111111111111"]})
 
     posts.clear()
     window = [kill(ABYSS[7], 0.001)]
