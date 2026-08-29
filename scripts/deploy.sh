@@ -22,10 +22,14 @@ ROLE="arn:aws:iam::${ACCOUNT}:role/${ROLE_NAME:-ryangrey-greybot-role}"
 TABLE="${STATE_TABLE:-ryangrey-greybot}"
 SCHEDULE="${SCHEDULE_NAME:-ryangrey-greybot-poll}"
 ANNOUNCE_TZ="${ANNOUNCE_TZ:-America/New_York}"
+# Credited on the AOTC card only. Left empty until the repository is actually public --
+# a credit that 404s is worse than no credit.
+REPO_URL="${REPO_URL:-}"
 
 PARAMS=(/greybot/wcl/client_id /greybot/wcl/client_secret /greybot/discord/webhook_url
         /greybot/discord/prog_role_id /greybot/guild/name /greybot/guild/realm
-        /greybot/guild/region)
+        /greybot/guild/region /greybot/blizzard/client_id
+        /greybot/blizzard/client_secret)
 
 echo "==> Self-test (blocks the deploy on failure)"
 python3 "$ROOT/scripts/selftest.py"
@@ -36,10 +40,11 @@ cp "$ROOT/src/"*.py "$TMP/"
 ( cd "$TMP" && zip -qr package.zip ./*.py )
 echo "    package: $(du -h "$TMP/package.zip" | cut -f1)  (no dependencies — stdlib + boto3)"
 
-ENV="$(python3 - "$TABLE" "$ANNOUNCE_TZ" <<'PY'
+ENV="$(python3 - "$TABLE" "$ANNOUNCE_TZ" "$REPO_URL" <<'PY'
 import json, sys
-table, tz = sys.argv[1:3]
-print(json.dumps({"Variables": {"STATE_TABLE": table, "ANNOUNCE_TZ": tz}}))
+table, tz, repo = sys.argv[1:4]
+print(json.dumps({"Variables": {"STATE_TABLE": table, "ANNOUNCE_TZ": tz,
+                                "REPO_URL": repo}}))
 PY
 )"
 

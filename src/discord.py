@@ -66,8 +66,23 @@ def post(webhook_url, payload, timeout=10, sleep=time.sleep):
     raise DiscordError(f"gave up after {MAX_ATTEMPTS} attempts: {last}")
 
 
+def _author(guild_label, guild_url):
+    """Attribution, not promotion.
+
+    Raider.IO require a link back from anything public using their data, and a footer
+    cannot carry one -- embed footers render as plain text, so a link there is dead
+    characters. The author block is the one place a link fits without touching the three
+    lines of the message itself, and it happens to be useful: one click to the guild's
+    progress page.
+    """
+    if not guild_url:
+        return None
+    return {"name": guild_label or "Raider.IO", "url": guild_url}
+
+
 def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
-               report_url=None, iso_ts=None, thumbnail_url=None):
+               report_url=None, iso_ts=None, thumbnail_url=None,
+               guild_label=None, guild_url=None):
     """The three lines from the spec, as a card.
 
     The rank line is omitted entirely when the rank is unknown rather than rendered as
@@ -91,15 +106,27 @@ def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
     # Discord simply omits a thumbnail it cannot fetch rather than rejecting the message.
     if thumbnail_url:
         embed["thumbnail"] = {"url": thumbnail_url}
+    author = _author(guild_label, guild_url)
+    if author:
+        embed["author"] = author
     return {"embeds": [embed], "allowed_mentions": {"parse": []}}
 
 
 def aotc_payload(guild_name, raid_name, when_text, role_id, iso_ts=None,
-                 thumbnail_url=None):
-    """The AOTC card, and the only message in the bot that pings anyone."""
+                 thumbnail_url=None, guild_label=None, guild_url=None, repo_url=None):
+    """The AOTC card, and the only message in the bot that pings anyone.
+
+    This is also the only card carrying a credit line. A kill card goes out several times
+    a tier into a channel shared with the raid team, and a developer plug on every one of
+    them is noise in someone else's room. AOTC fires once per tier and is celebratory,
+    which is the one moment where a small "built by" reads as charm rather than adverts.
+    """
+    description = "Congratulations to the team!"
+    if repo_url:
+        description += f"\n\n[greyBot]({repo_url})"
     embed = {
         "title": f"{guild_name} just got AOTC on {when_text}",
-        "description": "Congratulations to the team!",
+        "description": description,
         "color": AOTC_GOLD,
         "footer": {"text": f"Ahead of the Curve — Heroic {raid_name}"},
     }
@@ -107,6 +134,9 @@ def aotc_payload(guild_name, raid_name, when_text, role_id, iso_ts=None,
         embed["timestamp"] = iso_ts
     if thumbnail_url:
         embed["thumbnail"] = {"url": thumbnail_url}
+    author = _author(guild_label, guild_url)
+    if author:
+        embed["author"] = author
     payload = {"embeds": [embed],
                "allowed_mentions": {"parse": []}}
     if role_id:

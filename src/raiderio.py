@@ -302,3 +302,24 @@ def icon_url(meta):
     if not icon or "/" in icon or ".." in icon:
         return None
     return ICON_CDN.format(icon)
+
+
+def profile_url(profile, region, realm, name):
+    """The guild's Raider.IO page.
+
+    Raider.IO's API terms require that a public-facing application using their data links
+    back to raider.io, and this bot's "n of X" and realm rank both come from them. The
+    response already carries the canonical URL, so use that and only construct one if it
+    is ever absent.
+    """
+    url = (profile or {}).get("profile_url")
+    if url:
+        return url
+    return (f"https://raider.io/guilds/{region}/{realm}/"
+            + urllib.parse.quote(name))
+
+
+def guild_display(profile, name, realm_slug):
+    """'Scrambled · Proudmoore' -- the realm as Raider.IO spells it, not the slug."""
+    realm = (profile or {}).get("realm") or realm_slug.replace("-", " ").title()
+    return f"{name} \u00b7 {realm}"

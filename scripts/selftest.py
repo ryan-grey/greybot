@@ -747,6 +747,34 @@ def test_discord_payloads():
           "They are now **3** of **8** in Heroic The Venomous Abyss" in body["description"])
     check("rank line matches the spec", "Ranked server **#66**" in body["description"])
     check("a kill card mentions nobody", p["allowed_mentions"] == {"parse": []})
+
+    # Raider.IO's terms require a link back from anything public using their data, and
+    # both the count and the rank come from them. A footer cannot carry it -- embed
+    # footers are plain text, so a link there is dead characters.
+    attributed = discord.kill_embed("Scrambled", ABYSS[2], 3, 8, "The Venomous Abyss", 66,
+                                    guild_label="Scrambled \u00b7 Proudmoore",
+                                    guild_url="https://raider.io/guilds/us/proudmoore/Scrambled")
+    check("the card carries a clickable link back to Raider.IO",
+          attributed["embeds"][0]["author"]["url"]
+          == "https://raider.io/guilds/us/proudmoore/Scrambled")
+    check("and it is labelled with the guild, not an advert",
+          attributed["embeds"][0]["author"]["name"] == "Scrambled \u00b7 Proudmoore")
+    check("no attribution URL means no empty author block",
+          "author" not in discord.kill_embed("S", "B", 1, 8, "R", 1)["embeds"][0])
+    check("the profile URL comes from Raider.IO's own response",
+          raiderio.profile_url({"profile_url": "https://raider.io/x"}, "us", "p", "S")
+          == "https://raider.io/x")
+    check("...and is constructed only if that is missing",
+          raiderio.profile_url({}, "us", "proudmoore", "Scrambled")
+          == "https://raider.io/guilds/us/proudmoore/Scrambled")
+    check("the guild label uses Raider.IO's realm spelling, not the slug",
+          raiderio.guild_display({"realm": "Proudmoore"}, "Scrambled", "proudmoore")
+          == "Scrambled \u00b7 Proudmoore")
+
+    # A kill card is for the raid team. A developer plug on every one of them is noise in
+    # a channel shared with other people.
+    check("a kill card carries NO developer credit",
+          "greyBot](" not in json.dumps(attributed))
     check("a card with no art is still a valid card", "thumbnail" not in body)
 
     art = discord.kill_embed("Scrambled", ABYSS[2], 3, 8, "The Venomous Abyss", 66,
@@ -790,6 +818,17 @@ def test_discord_payloads():
 
     noping = discord.aotc_payload("Scrambled", "R", "when", "")
     check("an unset role id posts without a broken mention", "content" not in noping)
+
+    credited = discord.aotc_payload("Scrambled", "R", "when", "1",
+                                    repo_url="https://github.com/ryan-grey/greybot")
+    check("AOTC — once per tier — is where the credit goes",
+          "[greyBot](https://github.com/ryan-grey/greybot)"
+          in credited["embeds"][0]["description"])
+    check("...and it still leads with the line from the spec",
+          credited["embeds"][0]["description"].startswith("Congratulations to the team!"))
+    check("no repo URL means no credit line, not a dead link",
+          discord.aotc_payload("S", "R", "w", "1")["embeds"][0]["description"]
+          == "Congratulations to the team!")
 
 
 def test_wcl_parsing():

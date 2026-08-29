@@ -45,6 +45,9 @@ import wcl
 # Tuning knobs, not provisioned configuration. Everything that identifies the guild or
 # grants access to something comes from SSM via config.load().
 ANNOUNCE_TZ = os.environ.get("ANNOUNCE_TZ", "America/New_York")
+# Credited on the AOTC card only. Empty means no credit line at all, which is what should
+# happen until the repository is actually public rather than a link that 404s.
+REPO_URL = os.environ.get("REPO_URL", "")
 EXPANSION_HINT = int(os.environ.get("EXPANSION_HINT", "11"))
 
 # How far back a routine poll looks. Generous relative to the schedule so a few missed
@@ -288,7 +291,10 @@ def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None,
     payload = discord.kill_embed(
         cfg["guild_name"], kill["name"], count, total or "?", raid_label, rank,
         report_url=report_url(kill.get("reportCode")), iso_ts=_iso(killed_at),
-        thumbnail_url=thumb)
+        thumbnail_url=thumb,
+        guild_label=raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
+        guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
+                                       cfg["guild_name"]))
     try:
         discord.post(cfg["webhook"], payload)
     except discord.DiscordError as exc:
@@ -307,12 +313,16 @@ def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None,
     return True
 
 
-def announce_aotc(cfg, pk, slug, raid_label, state, when, thumb=None):
+def announce_aotc(cfg, pk, slug, raid_label, state, when, thumb=None, profile=None):
     if not store.claim_aotc(pk, slug):
         log("skip_aotc_already", slug=slug)
         return False
-    payload = discord.aotc_payload(cfg["guild_name"], raid_label, _when_text(when),
-                                   cfg["role_id"], iso_ts=_iso(when), thumbnail_url=thumb)
+    payload = discord.aotc_payload(
+        cfg["guild_name"], raid_label, _when_text(when), cfg["role_id"],
+        iso_ts=_iso(when), thumbnail_url=thumb, repo_url=REPO_URL,
+        guild_label=raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
+        guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
+                                       cfg["guild_name"]))
     try:
         discord.post(cfg["webhook"], payload)
     except discord.DiscordError as exc:
@@ -376,7 +386,10 @@ def preview(spec, cfg, token, gid, profile, index):
         raid_label, rank, report_url=report_url(kill.get("reportCode")),
         iso_ts=_iso(killed_at),
         thumbnail_url=boss_art(cfg, kill["name"], _iso(datetime.now(timezone.utc)),
-                               fallback=raiderio.icon_url(meta)))
+                               fallback=raiderio.icon_url(meta)),
+        guild_label=raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
+        guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
+                                       cfg["guild_name"]))
 
     info = {"boss": kill["name"], "raid": raid_label, "slug": slug,
             "killedAt": _iso(killed_at), "localTime": _when_text(killed_at),
