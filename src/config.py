@@ -1,5 +1,13 @@
 """Runtime configuration, read from SSM Parameter Store.
 
+Cached with a TTL rather than forever. Caching for the life of the container looks
+harmless -- the values rarely change -- but it means a rotated secret does not take
+effect until that container happens to recycle, with no signal that anything is stale.
+Rotating a credential and watching the bot keep using the old one, with a correct-looking
+config_loaded line in the log, is a genuinely hard thing to debug. A few minutes of TTL
+costs one GetParameters call per container per interval and removes the whole class of
+problem.
+
 Everything that identifies the guild or grants access to something lives here, not in the
 Lambda's environment. Two reasons. The webhook URL and the Warcraft Logs secret are
 credentials -- a webhook URL is a post-anything-to-#bots capability, and environment
@@ -12,12 +20,14 @@ arrive in a single call rather than seven.
 """
 
 import os
+import time
 
 import boto3
 from botocore.config import Config
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 PREFIX = os.environ.get("SSM_PREFIX", "/greybot")
+TTL_SECONDS = float(os.environ.get("CONFIG_TTL_SECONDS", "300"))
 
 WCL_CLIENT_ID = f"{PREFIX}/wcl/client_id"
 WCL_CLIENT_SECRET = f"{PREFIX}/wcl/client_secret"
@@ -41,16 +51,18 @@ _cfg = Config(retries={"max_attempts": 3, "mode": "standard"}, read_timeout=10)
 ssm = boto3.client("ssm", region_name=REGION, config=_cfg)
 
 _cache = {}
+_fetched_at = {"t": 0.0}
 
 
-def load():
+def load(now=None):
     """All seven parameters, or a failure naming exactly which are missing.
 
     SSM answers a request for a parameter that does not exist by simply omitting it from
     Parameters and listing it under InvalidParameters, with a 200. Not checking that turns
     a missing realm slug into a KeyError somewhere much further along.
     """
-    if _cache:
+    now = now if now is not None else time.time()
+    if _cache and (now - _fetched_at["t"]) < TTL_SECONDS:
         return _cache
 
     res = ssm.get_parameters(Names=NAMES + OPTIONAL_NAMES, WithDecryption=True)
@@ -59,6 +71,8 @@ def load():
     if missing:
         raise RuntimeError("missing or empty SSM parameters: " + ", ".join(missing))
 
+    _cache.clear()
+    _fetched_at["t"] = now
     _cache.update({
         "wcl_client_id": got[WCL_CLIENT_ID].strip(),
         "wcl_client_secret": got[WCL_CLIENT_SECRET].strip(),

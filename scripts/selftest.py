@@ -439,6 +439,20 @@ def test_config():
           config.load()["guild_realm"] == "aerie-peak")
     SSM_VALUES["/greybot/guild/realm"] = "proudmoore"
 
+    # A rotated secret must actually take effect. Caching config for the life of the
+    # container means a rotation silently does nothing until that container recycles,
+    # while config_loaded keeps logging a perfectly correct-looking line.
+    config._cache.clear()
+    config.load(now=1000.0)
+    SSM_VALUES["/greybot/wcl/client_secret"] = "rotated-value"
+    check("a rotation is NOT picked up within the TTL",
+          config.load(now=1000.0 + config.TTL_SECONDS - 1)["wcl_client_secret"]
+          != "rotated-value")
+    check("a rotation IS picked up once the TTL expires",
+          config.load(now=1000.0 + config.TTL_SECONDS + 1)["wcl_client_secret"]
+          == "rotated-value")
+    SSM_VALUES["/greybot/wcl/client_secret"] = "not-a-real-secret"
+
     config._cache.clear()
     saved = SSM_VALUES.pop("/greybot/guild/realm")
     try:
