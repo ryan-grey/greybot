@@ -13,6 +13,7 @@ Everything else here is a pure function fed a fixture captured from the live API
 slugify into.
 """
 
+import json
 import os
 import sys
 import types
@@ -117,7 +118,24 @@ class FakeDynamo:
 
 
 FAKE_DDB = FakeDynamo()
-FAKE_SSM = types.SimpleNamespace(get_parameters=lambda **kw: {"Parameters": []})
+SSM_VALUES = {
+    "/greybot/wcl/client_id": "01a04b33-1cfc-7281-a20c-97bdc7f4d165",
+    "/greybot/wcl/client_secret": "not-a-real-secret",
+    "/greybot/discord/webhook_url": "https://discord.com/api/webhooks/1/tok",
+    "/greybot/discord/prog_role_id": "947697732192182272",
+    "/greybot/guild/name": "Scrambled",
+    "/greybot/guild/realm": "proudmoore",
+    "/greybot/guild/region": "us",
+}
+
+
+def _fake_get_parameters(Names=None, WithDecryption=False):
+    return {"Parameters": [{"Name": n, "Value": SSM_VALUES[n]}
+                           for n in (Names or []) if n in SSM_VALUES],
+            "InvalidParameters": [n for n in (Names or []) if n not in SSM_VALUES]}
+
+
+FAKE_SSM = types.SimpleNamespace(get_parameters=_fake_get_parameters)
 
 boto3 = types.ModuleType("boto3")
 boto3.client = lambda service, **kw: FAKE_DDB if service == "dynamodb" else FAKE_SSM
@@ -130,6 +148,7 @@ sys.modules.update({"boto3": boto3, "botocore": botocore,
                     "botocore.config": botocore.config,
                     "botocore.exceptions": botocore.exceptions})
 
+import config             # noqa: E402
 import discord            # noqa: E402
 import raiderio           # noqa: E402
 import store              # noqa: E402
@@ -139,42 +158,141 @@ import wcl                # noqa: E402
 # Captured live from raider.io on 2026-08-28.
 
 RAIDS = [
-    {"slug": "tier-mn-1", "name": "MN Tier 1 (VS / DR / MQD)", "short_name": "VS/DR/MQD",
-     "starts": {"us": "2026-03-17T15:00:00Z"}, "ends": {"us": "2026-08-18T15:00:00Z"},
-     "encounters": [{"name": "Imperator Averzian"}, {"name": "Vorasius"},
-                    {"name": "Fallen-King Salhadaar"}, {"name": "Vaelgor & Ezzorak"},
-                    {"name": "Lightblinded Vanguard"}, {"name": "Crown of the Cosmos"},
-                    {"name": "Chimaerus the Undreamt God"},
-                    {"name": "Belo'ren, Child of Al'ar"}, {"name": "Midnight Falls"}]},
-    {"slug": "the-tidebound-grotto", "name": "The Tidebound Grotto",
-     "starts": {"us": "2026-08-18T15:00:00Z"}, "ends": {"us": "2030-01-01T00:00:00Z"},
-     "encounters": [{"name": "Tidewarden Kelsara"}]},
-    {"slug": "the-venomous-abyss", "name": "The Venomous Abyss",
-     "starts": {"us": "2026-08-18T15:00:00Z"}, "ends": {"us": "2030-01-01T00:00:00Z"},
-     "encounters": [{"name": "Sirensong"}, {"name": "Broodmother Vysska"},
-                    {"name": "The Drowned Court"}, {"name": "Grimscale Tidecaller"},
-                    {"name": "Abyssal Maw"}, {"name": "Venomlord Xar'guul"},
-                    {"name": "The Sunken Throne"}, {"name": "Nazj'vora the Envenomed"}]},
+    {
+        "slug": "tier-mn-1",
+        "name": "MN Tier 1 (VS / DR / MQD)",
+        "short_name": "VS/DR/MQD",
+        "starts": {
+            "us": "2026-03-17T15:00:00Z"
+        },
+        "ends": {
+            "us": "2026-08-18T15:00:00Z"
+        },
+        "encounters": [
+            {
+                "name": "Imperator Averzian"
+            },
+            {
+                "name": "Vorasius"
+            },
+            {
+                "name": "Fallen-King Salhadaar"
+            },
+            {
+                "name": "Vaelgor & Ezzorak"
+            },
+            {
+                "name": "Lightblinded Vanguard"
+            },
+            {
+                "name": "Crown of the Cosmos"
+            },
+            {
+                "name": "Chimaerus the Undreamt God"
+            },
+            {
+                "name": "Belo'ren, Child of Al'ar"
+            },
+            {
+                "name": "Midnight Falls"
+            }
+        ]
+    },
+    {
+        "slug": "sporefall",
+        "name": "Sporefall",
+        "short_name": "SF",
+        "starts": {
+            "us": "2026-06-16T15:00:00Z"
+        },
+        "ends": {
+            "us": "2026-08-18T15:00:00Z"
+        },
+        "encounters": [
+            {
+                "name": "Rotmire"
+            }
+        ]
+    },
+    {
+        "slug": "the-tidebound-grotto",
+        "name": "The Tidebound Grotto",
+        "short_name": "TG",
+        "starts": {
+            "us": "2026-08-18T15:00:00Z"
+        },
+        "ends": {
+            "us": "2030-01-01T00:00:00Z"
+        },
+        "encounters": [
+            {
+                "name": "Nymrissa Wavecaller"
+            }
+        ]
+    },
+    {
+        "slug": "the-venomous-abyss",
+        "name": "The Venomous Abyss",
+        "short_name": "VA",
+        "starts": {
+            "us": "2026-08-18T15:00:00Z"
+        },
+        "ends": {
+            "us": "2030-01-01T00:00:00Z"
+        },
+        "encounters": [
+            {
+                "name": "Nek'zali the Soulcoiler"
+            },
+            {
+                "name": "Entombed Sentinels"
+            },
+            {
+                "name": "The Lost Explorers"
+            },
+            {
+                "name": "Vashnik the Malignant"
+            },
+            {
+                "name": "Sszorak"
+            },
+            {
+                "name": "The Twin Fangs"
+            },
+            {
+                "name": "The Coiled Altar"
+            },
+            {
+                "name": "Ula'tek"
+            }
+        ]
+    }
 ]
 
 PROFILE = {
-    "name": "Scrambled", "region": "us", "realm": "Area 52",
+    "name": "Scrambled", "region": "us", "realm": "Proudmoore", "faction": "alliance",
     "raid_progression": {
         "tier-mn-1": {"summary": "9/9 H", "total_bosses": 9, "normal_bosses_killed": 9,
                       "heroic_bosses_killed": 9, "mythic_bosses_killed": 0},
+        "sporefall": {"summary": "1/1 H", "total_bosses": 1, "normal_bosses_killed": 1,
+                      "heroic_bosses_killed": 1, "mythic_bosses_killed": 0},
         "the-tidebound-grotto": {"summary": "1/1 H", "total_bosses": 1,
                                  "normal_bosses_killed": 1, "heroic_bosses_killed": 1,
                                  "mythic_bosses_killed": 0},
-        "the-venomous-abyss": {"summary": "5/8 H", "total_bosses": 8,
-                               "normal_bosses_killed": 8, "heroic_bosses_killed": 5,
+        "the-venomous-abyss": {"summary": "2/8 H", "total_bosses": 8,
+                               "normal_bosses_killed": 8, "heroic_bosses_killed": 2,
                                "mythic_bosses_killed": 0},
     },
     "raid_rankings": {
-        "tier-mn-1": {"heroic": {"world": 4210, "region": 1880, "realm": 74}},
-        "the-tidebound-grotto": {"heroic": {"world": 0, "region": 0, "realm": 0}},
-        "the-venomous-abyss": {"heroic": {"world": 6600, "region": 2400, "realm": 118}},
+        "tier-mn-1": {"heroic": {"world": 3094, "region": 1107, "realm": 34}},
+        "sporefall": {"heroic": {"world": 8480, "region": 3523, "realm": 120}},
+        "the-tidebound-grotto": {"heroic": {"world": 5307, "region": 1702, "realm": 64}},
+        "the-venomous-abyss": {"heroic": {"world": 5776, "region": 1879, "realm": 66}},
     },
 }
+
+ABYSS = [e["name"] for e in RAIDS[3]["encounters"]]
+MN1 = [e["name"] for e in RAIDS[0]["encounters"]]
 
 INDEX = raiderio.RaidIndex(RAIDS)
 
@@ -188,24 +306,72 @@ def dt(s):
     return datetime.fromisoformat(s)
 
 
+# Prime the static-data cache so build_index resolves from the fixture instead of calling
+# Raider.IO. Without this the offline guard fires, which is exactly what it is for.
+raiderio._static_cache.update({10: [], 11: RAIDS, 12: [], 13: []})
+INDEX = raiderio.RaidIndex(RAIDS)
+
+
 # ---------------------------------------------------------------- tests
+
+def test_config():
+    print("\nConfig from SSM")
+    config._cache.clear()
+    cfg = config.load()
+    check("all seven parameters are read in one call",
+          set(cfg) == {"wcl_client_id", "wcl_client_secret", "webhook", "role_id",
+                       "guild_name", "guild_realm", "guild_region"}, sorted(cfg))
+    check("guild identity comes from SSM, not the environment",
+          (cfg["guild_name"], cfg["guild_realm"], cfg["guild_region"])
+          == ("Scrambled", "proudmoore", "us"))
+    check("the prog role id is carried through",
+          cfg["role_id"] == "947697732192182272")
+    check("redacted config never carries the secret or the webhook",
+          "not-a-real-secret" not in json.dumps(config.redacted(cfg))
+          and "discord.com/api/webhooks" not in json.dumps(config.redacted(cfg)))
+
+    # A realm typed as a display name is the single most likely misconfiguration, and it
+    # fails as a 404 from Raider.IO rather than as anything that names the cause.
+    config._cache.clear()
+    SSM_VALUES["/greybot/guild/realm"] = "Aerie Peak"
+    check("a display-name realm is normalised to a slug",
+          config.load()["guild_realm"] == "aerie-peak")
+    SSM_VALUES["/greybot/guild/realm"] = "proudmoore"
+
+    config._cache.clear()
+    saved = SSM_VALUES.pop("/greybot/guild/realm")
+    try:
+        config.load()
+        check("a missing parameter fails loudly", False, "no error raised")
+    except RuntimeError as exc:
+        check("a missing parameter fails loudly and names itself",
+              "/greybot/guild/realm" in str(exc), str(exc))
+    SSM_VALUES["/greybot/guild/realm"] = saved
+    config._cache.clear()
+    config.load()
+
 
 def test_name_normalisation():
     print("\nBoss-name normalisation")
     check("'&' and 'and' fold together",
           raiderio.normalize("Vaelgor & Ezzorak") == raiderio.normalize("Vaelgor and Ezzorak"))
     check("apostrophes and commas are ignored",
-          raiderio.normalize("Belo'ren, Child of Al'ar") == raiderio.normalize("Beloren Child of Alar"))
+          raiderio.normalize("Belo'ren, Child of Al'ar")
+          == raiderio.normalize("Beloren Child of Alar"))
     check("a typographic apostrophe matches a straight one",
           raiderio.normalize("Belo\u2019ren") == raiderio.normalize("Belo'ren"))
     check("case is ignored",
-          raiderio.normalize("SIRENSONG") == raiderio.normalize("Sirensong"))
+          raiderio.normalize("NEK'ZALI THE SOULCOILER")
+          == raiderio.normalize("Nek'zali the Soulcoiler"))
+    check("every live boss name normalises to something non-empty and unique",
+          len({raiderio.normalize(n) for r in RAIDS for e in r["encounters"]
+               for n in [e["name"]]}) == sum(len(r["encounters"]) for r in RAIDS))
 
 
 def test_slug_resolution():
     print("\nRaid-slug resolution")
-    # The case the whole design turns on: slugifying the zone name gives
-    # "vault-of-shadows"-ish nonsense, never "tier-mn-1".
+    # The case the whole design turns on: no slugification of any zone name produces
+    # "tier-mn-1", so a zone-name approach misattributes those kills silently.
     slug, meta, how = raiderio.resolve_raid(PROFILE, "Midnight Falls", "MN Tier 1 Raid",
                                             dt("2026-07-01T02:00:00+00:00"), "us", INDEX)
     check("boss name resolves tier-mn-1, which no slugify can reach",
@@ -213,47 +379,77 @@ def test_slug_resolution():
     check("slugify really would have missed it",
           raiderio.slugify("MN Tier 1 Raid") not in PROFILE["raid_progression"])
 
-    slug, meta, how = raiderio.resolve_raid(PROFILE, "Nazj'vora the Envenomed",
-                                            "The Venomous Abyss",
+    slug, meta, how = raiderio.resolve_raid(PROFILE, "Ula'tek", "The Venomous Abyss",
                                             dt("2026-08-28T02:00:00+00:00"), "us", INDEX)
     check("current-tier boss resolves by name",
           (slug, how) == ("the-venomous-abyss", "encounter-name"), f"got {slug!r}/{how!r}")
 
-    # An unknown boss (a tier newer than the static data) still resolves via the zone name.
+    check("every live boss resolves to its own raid by name",
+          all(raiderio.resolve_raid(PROFILE, e["name"], "", None, "us", INDEX)[0]
+              == r["slug"] for r in RAIDS for e in r["encounters"]))
+
     slug, meta, how = raiderio.resolve_raid(PROFILE, "Some Brand New Boss",
                                             "The Venomous Abyss",
                                             dt("2026-08-28T02:00:00+00:00"), "us", INDEX)
-    check("unknown boss falls back to the zone slug",
+    check("an unknown boss falls back to the zone slug",
           (slug, how) == ("the-venomous-abyss", "zone-slug"), f"got {slug!r}/{how!r}")
 
-    # Neither name known: the live window is the next rung. Only one 8-boss raid and one
-    # 1-boss raid are live, so this is ambiguous by design -- assert it does NOT guess.
-    slug, meta, how = raiderio.resolve_raid(PROFILE, "Unknown", "Unknown Zone",
-                                            dt("2026-08-28T02:00:00+00:00"), "us", INDEX)
-    check("two live raids means no live-window guess; falls to last key",
-          how == "last-key-fallback", f"got {how!r}")
-
-    # With only one raid live, the window rung should fire.
-    solo = raiderio.RaidIndex([RAIDS[0], RAIDS[2]])
+    solo = raiderio.RaidIndex([RAIDS[0], RAIDS[3]])
     slug, meta, how = raiderio.resolve_raid(PROFILE, "Unknown", "Unknown Zone",
                                             dt("2026-05-01T02:00:00+00:00"), "us", solo)
     check("a single live raid resolves by window",
           (slug, how) == ("tier-mn-1", "live-window"), f"got {slug!r}/{how!r}")
 
-    check("expansion search anchors on the profile's own slugs",
-          raiderio.build_index(PROFILE, 11)[0] is not None)
+    # The heuristic this design deliberately does NOT use: "the tier that is neither
+    # cleared nor untouched". It works today and stops working at the worst moment.
+    neither = [k for k, v in PROFILE["raid_progression"].items()
+               if 0 < v["heroic_bosses_killed"] < v["total_bosses"]]
+    check("the 'neither cleared nor untouched' heuristic happens to work today",
+          neither == ["the-venomous-abyss"], neither)
+    cleared = {k: dict(v) for k, v in PROFILE["raid_progression"].items()}
+    cleared["the-venomous-abyss"]["heroic_bosses_killed"] = 8
+    check("...and identifies NO tier the moment the guild clears it, which is AOTC night",
+          [k for k, v in cleared.items()
+           if 0 < v["heroic_bosses_killed"] < v["total_bosses"]] == [])
+
+
+def test_seed_names():
+    print("\nSeeding a tier from Raider.IO when the logs cannot help")
+    mn1 = INDEX.raids["tier-mn-1"]
+    abyss = INDEX.raids["the-venomous-abyss"]
+
+    names, basis = raiderio.seed_names(mn1, 9, 9, [])
+    check("a cleared tier seeds every boss even with no log history at all",
+          len(names) == 9 and basis == "cleared-tier", f"{len(names)} / {basis}")
+    check("...which is what stops a transmog run announcing nine ancient first kills",
+          raiderio.normalize("Midnight Falls") in names)
+
+    names, basis = raiderio.seed_names(abyss, 2, 8, [])
+    check("a partly cleared tier with no history seeds the first N in published order",
+          names == {raiderio.normalize(n) for n in ABYSS[:2]} and basis == "assumed-kill-order",
+          f"{sorted(names)} / {basis}")
+
+    names, basis = raiderio.seed_names(abyss, 2, 8, [ABYSS[0], ABYSS[1]])
+    check("history that already accounts for the count is used as-is",
+          len(names) == 2 and basis == "history-only", basis)
+
+    names, basis = raiderio.seed_names(abyss, 2, 8, [ABYSS[4]])
+    check("history and the count are unioned, never subtracted",
+          raiderio.normalize(ABYSS[4]) in names and len(names) == 3, sorted(names))
+
+    names, basis = raiderio.seed_names(None, 2, 8, [ABYSS[0]])
+    check("no static data still seeds whatever history saw",
+          names == {raiderio.normalize(ABYSS[0])} and basis == "history-only")
 
 
 def test_progress_count():
     print("\n'n of total' derivation")
-    # Bot seeded at 5, has since announced the 6th. Raider.IO still reports 5.
-    state = {"announced": {"1", "2", "3", "4", "5", "6"}, "seedSize": 5, "baseline": 5}
+    state = {"announced": {"a", "b", "c", "d", "e", "f"}, "seedSize": 5, "baseline": 5}
     check("stale Raider.IO does not produce a stale count",
           store.progress_count(state, 5, 8) == 6, store.progress_count(state, 5, 8))
     check("Raider.IO wins when it is ahead of us",
           store.progress_count(state, 7, 8) == 7)
 
-    # Mid-tier deploy: log history only reached 3 of the 6 already dead, Raider.IO knew 6.
     seeded = {"announced": {"a", "b", "c"}, "seedSize": 3, "baseline": 6}
     check("baseline absorbs history the log window missed",
           store.progress_count(seeded, 6, 8) == 6)
@@ -267,10 +463,7 @@ def test_progress_count():
     check("no Raider.IO at all still yields our own count",
           store.progress_count(seeded, None, 8) == 7)
 
-    # Tier rollover: the announced set starts empty and every kill is earned by a claim,
-    # so the baseline is 0. A baseline carried over from Raider.IO would double-count and
-    # announce the first boss of a new tier as "2 of 8".
-    fresh = {"announced": {"1"}, "seedSize": 0, "baseline": 0}
+    fresh = {"announced": {"a"}, "seedSize": 0, "baseline": 0}
     check("first kill of a new tier is 1 of 8, not 2",
           store.progress_count(fresh, 1, 8) == 1, store.progress_count(fresh, 1, 8))
     check("...and still 1 when Raider.IO has not caught up at all",
@@ -280,34 +473,39 @@ def test_progress_count():
 def test_dedupe():
     print("\nDedupe and the announce-once claim")
     FAKE_DDB.items.clear()
-    pk = store.guild_pk("us", "area-52", "Scrambled")
+    pk = store.guild_pk("us", "proudmoore", "Scrambled")
     slug = "the-venomous-abyss"
 
-    check("seeding creates the tier", store.seed_tier(pk, slug, {"1", "2"}, 5,
-                                                      "The Venomous Abyss", "now"))
+    check("seeding creates the tier",
+          store.seed_tier(pk, slug, {"a", "b"}, 2, "The Venomous Abyss", "now"))
     check("seeding twice does not clobber",
-          store.seed_tier(pk, slug, {"9"}, 99, "x", "now") is False)
+          store.seed_tier(pk, slug, {"z"}, 99, "x", "now") is False)
     state = store.load_tier(pk, slug)
-    check("seeded set is preserved", state["announced"] == {"1", "2"}, state["announced"])
-    check("baseline is max(Raider.IO, history)", state["baseline"] == 5, state["baseline"])
+    check("seeded set is preserved", state["announced"] == {"a", "b"}, state["announced"])
+    check("baseline is max(Raider.IO, history)", state["baseline"] == 2, state["baseline"])
 
-    check("a new boss can be claimed", store.claim_boss(pk, slug, "6"))
-    check("the same boss cannot be claimed twice", store.claim_boss(pk, slug, "6") is False)
-    check("a seeded boss is never announced", store.claim_boss(pk, slug, "1") is False)
+    check("a new boss can be claimed", store.claim_boss(pk, slug, "c"))
+    check("the same boss cannot be claimed twice", store.claim_boss(pk, slug, "c") is False)
+    check("a seeded boss is never announced", store.claim_boss(pk, slug, "a") is False)
 
-    store.release_boss(pk, slug, "6")
-    check("a released boss is retried on the next poll", store.claim_boss(pk, slug, "6"))
+    store.release_boss(pk, slug, "c")
+    check("a released boss is retried on the next poll", store.claim_boss(pk, slug, "c"))
 
     check("a tier that was never seeded refuses claims",
-          store.claim_boss(pk, "some-future-tier", "1") is False)
+          store.claim_boss(pk, "some-future-tier", "a") is False)
+
+    check("the bootstrap marker starts absent", store.is_bootstrapped(pk) is False)
+    check("marking it works", store.mark_bootstrapped(pk, "now", 4))
+    check("it cannot be marked twice", store.mark_bootstrapped(pk, "now", 4) is False)
+    check("and it reads back as done", store.is_bootstrapped(pk))
 
 
 def test_aotc_guard():
     print("\nAOTC fires once")
     FAKE_DDB.items.clear()
-    pk = store.guild_pk("us", "area-52", "Scrambled")
+    pk = store.guild_pk("us", "proudmoore", "Scrambled")
     slug = "the-venomous-abyss"
-    store.seed_tier(pk, slug, {"1"}, 1, "The Venomous Abyss", "now")
+    store.seed_tier(pk, slug, {"a"}, 1, "The Venomous Abyss", "now")
 
     check("AOTC can be claimed once", store.claim_aotc(pk, slug))
     check("a re-kill of the final boss does not re-fire it",
@@ -317,9 +515,8 @@ def test_aotc_guard():
     store.release_aotc(pk, slug)
     check("a failed webhook lets AOTC retry", store.claim_aotc(pk, slug))
 
-    # A tier already cleared before the bot existed must never be celebrated.
     FAKE_DDB.items.clear()
-    store.seed_tier(pk, "tier-mn-1", {"1"}, 9, "MN Tier 1", "now", aotc_already=True)
+    store.seed_tier(pk, "tier-mn-1", {"a"}, 9, "MN Tier 1", "now", aotc_already=True)
     check("seeding a finished tier pre-sets the AOTC flag",
           store.load_tier(pk, "tier-mn-1")["aotcAnnounced"])
     check("so no retroactive AOTC is possible",
@@ -328,31 +525,31 @@ def test_aotc_guard():
 
 def test_discord_payloads():
     print("\nDiscord payloads")
-    p = discord.kill_embed("Scrambled", "Abyssal Maw", 6, 8, "The Venomous Abyss", 118,
+    p = discord.kill_embed("Scrambled", ABYSS[2], 3, 8, "The Venomous Abyss", 66,
                            report_url="https://www.warcraftlogs.com/reports/abc")
     body = p["embeds"][0]
     check("title matches the spec line",
-          body["title"] == "Scrambled just killed Abyssal Maw", body["title"])
+          body["title"] == f"Scrambled just killed {ABYSS[2]}", body["title"])
     check("count line matches the spec",
-          "They are now **6** of **8** in Heroic The Venomous Abyss" in body["description"])
-    check("rank line matches the spec", "Ranked server **#118**" in body["description"])
+          "They are now **3** of **8** in Heroic The Venomous Abyss" in body["description"])
+    check("rank line matches the spec", "Ranked server **#66**" in body["description"])
     check("a kill card mentions nobody", p["allowed_mentions"] == {"parse": []})
 
-    unranked = discord.kill_embed("Scrambled", "Sirensong", 1, 8, "The Venomous Abyss", None)
+    unranked = discord.kill_embed("Scrambled", ABYSS[0], 1, 8, "The Venomous Abyss", None)
     check("an unranked guild is not 'Ranked server #0'",
           "Ranked server" not in unranked["embeds"][0]["description"])
-    check("rank 0 from Raider.IO reads as unranked",
-          raiderio.realm_rank(PROFILE, "the-tidebound-grotto") is None)
-    check("a real rank is returned", raiderio.realm_rank(PROFILE, "the-venomous-abyss") == 118)
+    check("a real rank is read from the live shape",
+          raiderio.realm_rank(PROFILE, "the-venomous-abyss") == 66)
 
     a = discord.aotc_payload("Scrambled", "The Venomous Abyss",
-                             "August 28, 2026 at 11:14 PM EDT", "12345")
-    check("the role is mentioned in content", a["content"] == "<@&12345>")
+                             "August 28, 2026 at 11:14 PM EDT", "947697732192182272")
+    check("the role is mentioned in content", a["content"] == "<@&947697732192182272>")
     check("the role is allow-listed so the ping actually fires",
-          a["allowed_mentions"]["roles"] == ["12345"])
+          a["allowed_mentions"]["roles"] == ["947697732192182272"])
     check("nothing else can be mentioned", a["allowed_mentions"]["parse"] == [])
     check("AOTC title matches the spec",
-          a["embeds"][0]["title"] == "Scrambled just got AOTC on August 28, 2026 at 11:14 PM EDT")
+          a["embeds"][0]["title"]
+          == "Scrambled just got AOTC on August 28, 2026 at 11:14 PM EDT")
     check("AOTC body matches the spec",
           a["embeds"][0]["description"] == "Congratulations to the team!")
 
@@ -370,9 +567,9 @@ def test_wcl_parsing():
             "code": "aBcD", "startTime": base, "endTime": base + 9_000_000,
             "zone": {"id": 44, "name": "The Venomous Abyss"},
             "fights": [
-                {"id": 9, "encounterID": 3010, "name": "Abyssal Maw", "kill": True,
+                {"id": 9, "encounterID": 3010, "name": ABYSS[2], "kill": True,
                  "difficulty": 4, "startTime": 300_000, "endTime": 600_000},
-                {"id": 4, "encounterID": 3009, "name": "Grimscale Tidecaller", "kill": True,
+                {"id": 4, "encounterID": 3009, "name": ABYSS[1], "kill": True,
                  "difficulty": 4, "startTime": 100_000, "endTime": 200_000},
                 {"id": 2, "encounterID": 3011, "name": "Mythic Thing", "kill": True,
                  "difficulty": 5, "startTime": 50_000, "endTime": 60_000},
@@ -389,8 +586,8 @@ def test_wcl_parsing():
     finally:
         wcl.query = saved
 
-    check("only Heroic boss kills survive", [k["name"] for k in kills] ==
-          ["Grimscale Tidecaller", "Abyssal Maw"], [k["name"] for k in kills])
+    check("only Heroic boss kills survive",
+          [k["name"] for k in kills] == [ABYSS[1], ABYSS[2]], [k["name"] for k in kills])
     check("kills come back oldest-first",
           kills[0]["killedAtMs"] < kills[1]["killedAtMs"])
     check("fight time is an offset from the report start, not an absolute stamp",
@@ -405,114 +602,132 @@ def test_wcl_parsing():
 
 # ---------------------------------------------------------------- end to end
 
-ABYSS = [e["name"] for e in RAIDS[2]["encounters"]]
-
-
 def test_end_to_end():
-    """The two guarantees worth wiring the whole thing together for: a mid-tier deploy
-    announces nothing, and a re-kill announces nothing."""
-    print("\nEnd to end")
+    """Scrambled's real starting position: three cleared tiers, 2 of 8 in the current one.
+
+    The first assertion is the one this whole path exists for. Run one must post nothing --
+    not one retroactive kill card, and above all no AOTC for tier-mn-1, which was cleared
+    months ago.
+    """
+    print("\nEnd to end, from Scrambled's real starting position")
     import copy
     from datetime import datetime, timedelta, timezone
 
-    os.environ.update({"GUILD_NAME": "Scrambled", "GUILD_REALM": "area-52",
-                       "GUILD_REGION": "us", "PROG_RAIDER_ROLE_ID": "12345",
-                       "ANNOUNCE_TZ": "America/New_York"})
     import handler
-    handler._secrets.update({"client_id": "id", "client_secret": "sec",
-                             "webhook": "https://discord.test/hook"})
+    config._cache.clear()
 
     now = datetime.now(timezone.utc)
     ms = lambda days_ago: int((now - timedelta(days=days_ago)).timestamp() * 1000)
 
     posts = []
     profile = copy.deepcopy(PROFILE)
+    window, history = [], []
 
-    def kill(idx, days_ago):
-        return {"encounterID": 3000 + idx, "name": ABYSS[idx], "zoneID": 44,
-                "zoneName": "The Venomous Abyss", "reportCode": "aBcD",
-                "killedAtMs": ms(days_ago)}
-
-    window = []          # kills inside the routine poll window
-    history = []         # everything the deep seed pass can see
+    def kill(name, days_ago, zone="The Venomous Abyss"):
+        return {"encounterID": 3000 + (hash(name) % 900), "name": name, "zoneID": 44,
+                "zoneName": zone, "reportCode": "aBcD", "killedAtMs": ms(days_ago)}
 
     def fake_kills(token, gid, since_ms, limit=12, difficulty=4):
         deep = since_ms < ms(handler.LOOKBACK_DAYS + 1)
         src = history if deep else window
-        return sorted([k for k in src if k["killedAtMs"] >= since_ms],
-                      key=lambda k: k["killedAtMs"]), {"limit": 3600, "spent": 10.0,
-                                                       "resetsIn": 60, "fraction": 0.003}
+        return (sorted([k for k in src if k["killedAtMs"] >= since_ms],
+                       key=lambda k: k["killedAtMs"]),
+                {"limit": 3600, "spent": 10.0, "resetsIn": 60, "fraction": 0.003})
 
     handler.wcl.get_token = lambda *a, **kw: "tok"
     handler.wcl.find_guild = lambda *a, **kw: ({"id": 777, "name": "Scrambled"},
                                                {"limit": 3600, "spent": 10.0,
                                                 "resetsIn": 60, "fraction": 0.003})
-    handler.wcl.heroic_kills_since = fake_kills
-    # A warm container skips the guild lookup, so the rate check falls through to a bare
-    # rateLimitData query. Left unstubbed it is a live call, which the offline guard above
-    # catches -- but the point of the test is the flow, so give it an answer.
     handler.wcl.query = lambda token, doc, variables=None: {
         "rateLimitData": {"limitPerHour": 3600, "pointsSpentThisHour": 10.0,
                           "pointsResetIn": 60}}
+    handler.wcl.heroic_kills_since = fake_kills
     handler.raiderio.guild_profile = lambda *a, **kw: profile
     handler.raiderio.static_raids = lambda exp: RAIDS if exp == 11 else []
     handler.discord.post = lambda hook, payload, **kw: posts.append(payload) or 204
 
-    # --- cold start, five bosses already dead, a sixth killed an hour ago -----
+    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+
+    # --- run one. Warcraft Logs can only still see the two current-tier kills; the
+    # --- tier-mn-1 clear is older than the lookback, exactly as it would be in reality.
     FAKE_DDB.items.clear()
     handler._guild_id["value"] = None
-    history = [kill(i, 30 - i) for i in range(5)] + [kill(5, 0.04)]
-    window = [kill(5, 0.04)]
-    profile["raid_progression"]["the-venomous-abyss"]["heroic_bosses_killed"] = 6
+    history = [kill(ABYSS[0], 6), kill(ABYSS[1], 5)]
+    window = []
     handler.handler({}, None)
-    check("a mid-tier deploy announces nothing at all", posts == [], f"{len(posts)} posts")
-    seeded = store.load_tier(store.guild_pk("us", "area-52", "Scrambled"),
-                             "the-venomous-abyss")
-    check("...but it remembers every boss already dead",
-          len(seeded["announced"]) == 6, seeded["announced"])
 
-    # --- the seventh boss dies -----------------------------------------------
+    check("the first run posts NOTHING", posts == [], f"{len(posts)} posts")
+    check("it recorded that it bootstrapped", store.is_bootstrapped(pk))
+    check("every tier in the profile was seeded",
+          all(store.load_tier(pk, s) for s in profile["raid_progression"]),
+          [s for s in profile["raid_progression"] if not store.load_tier(pk, s)])
+
+    mn1 = store.load_tier(pk, "tier-mn-1")
+    check("tier-mn-1 seeded all nine bosses despite no log history for it",
+          len(mn1["announced"]) == 9, len(mn1["announced"]))
+    check("tier-mn-1 has its AOTC flag PRE-SET, so no false AOTC is possible",
+          mn1["aotcAnnounced"])
+    abyss = store.load_tier(pk, "the-venomous-abyss")
+    check("the current tier seeded its two kills with AOTC unset",
+          len(abyss["announced"]) == 2 and abyss["aotcAnnounced"] is False,
+          f"{len(abyss['announced'])} / {abyss['aotcAnnounced']}")
+
+    # --- run two, unchanged. Must not re-bootstrap and must not announce.
     posts.clear()
-    window = [kill(5, 0.04), kill(6, 0.01)]
-    history = history + [kill(6, 0.01)]
-    profile["raid_progression"]["the-venomous-abyss"]["heroic_bosses_killed"] = 6   # lagging
+    handler.handler({}, None)
+    check("the second run neither re-seeds nor announces", posts == [], f"{len(posts)} posts")
+
+    # --- a transmog run through the old, long-cleared tier -------------------
+    posts.clear()
+    window = [kill(MN1[0], 0.02, zone="MN Tier 1"), kill(MN1[8], 0.01, zone="MN Tier 1")]
+    handler.handler({}, None)
+    check("farming a cleared tier announces nothing and fires no AOTC",
+          posts == [], f"{len(posts)} posts")
+
+    # --- the third boss of the current tier goes down ------------------------
+    posts.clear()
+    window = [kill(ABYSS[2], 0.01)]
+    profile["raid_progression"]["the-venomous-abyss"]["heroic_bosses_killed"] = 2  # lagging
     handler.handler({}, None)
     check("a genuinely new kill is announced exactly once", len(posts) == 1, len(posts))
-    check("only the new boss is announced, not the six already known",
-          posts and posts[0]["embeds"][0]["title"] == f"Scrambled just killed {ABYSS[6]}")
+    check("and it names the right boss",
+          posts and posts[0]["embeds"][0]["title"] == f"Scrambled just killed {ABYSS[2]}")
     check("the count comes from the bot, not from lagging Raider.IO",
-          posts and "**7** of **8**" in posts[0]["embeds"][0]["description"],
+          posts and "**3** of **8**" in posts[0]["embeds"][0]["description"],
           posts[0]["embeds"][0]["description"] if posts else "")
+    check("the realm rank is carried through",
+          posts and "Ranked server **#66**" in posts[0]["embeds"][0]["description"])
 
-    # --- the same poll runs again --------------------------------------------
     posts.clear()
     handler.handler({}, None)
     check("polling again announces nothing", posts == [], f"{len(posts)} posts")
 
-    # --- the final boss dies: kill card, then AOTC ----------------------------
+    # --- the rest of the tier falls, ending on the final boss ----------------
     posts.clear()
-    window = [kill(6, 0.01), kill(7, 0.005)]
-    history = history + [kill(7, 0.005)]
+    window = [kill(n, 0.005) for n in ABYSS[3:]]
+    profile["raid_progression"]["the-venomous-abyss"]["heroic_bosses_killed"] = 8
     handler.handler({}, None)
-    check("the final boss gets its own kill card", len(posts) == 2, len(posts))
-    check("and it reads 8 of 8",
-          posts and "**8** of **8**" in posts[0]["embeds"][0]["description"])
-    check("AOTC follows it", posts and "just got AOTC on" in posts[1]["embeds"][0]["title"])
+    check("the remaining five bosses each get a card",
+          len([p for p in posts if "just killed" in p["embeds"][0]["title"]]) == 5,
+          len(posts))
+    check("AOTC follows, exactly once",
+          len([p for p in posts if "just got AOTC on" in p["embeds"][0]["title"]]) == 1)
+    aotc = [p for p in posts if "just got AOTC on" in p["embeds"][0]["title"]][0]
     check("AOTC pings Prog Raiders and nothing else",
-          posts and posts[1].get("content") == "<@&12345>"
-          and posts[1]["allowed_mentions"] == {"parse": [], "roles": ["12345"]})
+          aotc.get("content") == "<@&947697732192182272>"
+          and aotc["allowed_mentions"] == {"parse": [],
+                                           "roles": ["947697732192182272"]})
 
-    # --- farm night: the final boss dies again -------------------------------
     posts.clear()
-    window = [kill(7, 0.001)]
+    window = [kill(ABYSS[7], 0.001)]
     handler.handler({}, None)
-    check("a re-kill of the final boss announces nothing, and no second AOTC",
+    check("re-killing the final boss announces nothing and no second AOTC",
           posts == [], f"{len(posts)} posts")
 
-    # --- new tier next week ---------------------------------------------------
+    # --- next patch: a tier that did not exist at bootstrap ------------------
     posts.clear()
     profile["raid_progression"]["a-brand-new-raid"] = {
-        "total_bosses": 8, "heroic_bosses_killed": 0, "normal_bosses_killed": 1,
+        "total_bosses": 8, "heroic_bosses_killed": 1, "normal_bosses_killed": 3,
         "mythic_bosses_killed": 0}
     profile["raid_rankings"]["a-brand-new-raid"] = {"heroic": {"world": 0, "region": 0,
                                                                "realm": 0}}
@@ -531,10 +746,10 @@ def test_end_to_end():
 
 
 def main():
-    print("scrambled-raid-bot self-test")
-    for fn in (test_name_normalisation, test_slug_resolution, test_progress_count,
-               test_dedupe, test_aotc_guard, test_discord_payloads, test_wcl_parsing,
-               test_end_to_end):
+    print("greyBot self-test")
+    for fn in (test_config, test_name_normalisation, test_slug_resolution,
+               test_seed_names, test_progress_count, test_dedupe, test_aotc_guard,
+               test_discord_payloads, test_wcl_parsing, test_end_to_end):
         fn()
     print()
     if FAILED:

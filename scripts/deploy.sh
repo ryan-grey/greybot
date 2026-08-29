@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Ship the Lambda, then verify the admin-owned wiring around it.
 #
-# Same split as the study engine: the deploy identity has no IAM write, no EventBridge
-# Scheduler write and no SSM write, so the role, the table, the secrets and the schedule
-# are created once from infra/iam-setup.sh by an admin and then left alone. Everything
-# below that this identity cannot change is checked and reported rather than reconciled --
-# an update it can only ever be denied is noise, but silent drift on the schedule means
-# the bot quietly stops announcing.
+# The deploy identity has no IAM write, no SSM write and no EventBridge Scheduler write, so
+# the role, the table, the parameters and the schedule are created once by an admin
+# (infra/iam-setup.sh) and then left alone. Everything below that this identity cannot
+# change is checked and reported rather than reconciled -- an update it can only ever be
+# denied is noise, but silent drift on the schedule means the bot quietly stops announcing.
+#
+# Note what is NOT here: no guild name, realm, region, role id or webhook. All seven live
+# in SSM and are read at runtime, so a deploy cannot disagree with what the bot is using.
 #
 # Idempotent: safe to re-run.
 set -euo pipefail
@@ -15,17 +17,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ -f "$ROOT/.env" ] && . "$ROOT/.env"
 REGION="${REGION:-us-east-1}"
 ACCOUNT="${ACCOUNT_ID:?set ACCOUNT_ID}"
-FN=ryangrey-scrambled-bot
-ROLE="arn:aws:iam::${ACCOUNT}:role/${ROLE_NAME:-ryangrey-scrambled-role}"
-TABLE="${STATE_TABLE:-ryangrey-scrambled}"
-SCHEDULE="${SCHEDULE_NAME:-ryangrey-scrambled-poll}"
-
-GUILD_NAME="${GUILD_NAME:?set GUILD_NAME}"
-GUILD_REALM="${GUILD_REALM:?set GUILD_REALM (lowercase-hyphenated realm slug)}"
-GUILD_REGION="${GUILD_REGION:-us}"
-PROG_RAIDER_ROLE_ID="${PROG_RAIDER_ROLE_ID:-}"
+FN="${FUNCTION_NAME:-ryangrey-greybot}"
+ROLE="arn:aws:iam::${ACCOUNT}:role/${ROLE_NAME:-ryangrey-greybot-role}"
+TABLE="${STATE_TABLE:-ryangrey-greybot}"
+SCHEDULE="${SCHEDULE_NAME:-ryangrey-greybot-poll}"
 ANNOUNCE_TZ="${ANNOUNCE_TZ:-America/New_York}"
-SEED_ONLY="${SEED_ONLY:-}"
+
+PARAMS=(/greybot/wcl/client_id /greybot/wcl/client_secret /greybot/discord/webhook_url
+        /greybot/discord/prog_role_id /greybot/guild/name /greybot/guild/realm
+        /greybot/guild/region)
 
 echo "==> Self-test (blocks the deploy on failure)"
 python3 "$ROOT/scripts/selftest.py"
@@ -36,16 +36,10 @@ cp "$ROOT/src/"*.py "$TMP/"
 ( cd "$TMP" && zip -qr package.zip ./*.py )
 echo "    package: $(du -h "$TMP/package.zip" | cut -f1)  (no dependencies — stdlib + boto3)"
 
-# JSON form rather than shorthand: PROG_RAIDER_ROLE_ID and SEED_ONLY are legitimately
-# empty most of the time, and shorthand cannot express an empty value.
-ENV="$(python3 - "$TABLE" "$GUILD_NAME" "$GUILD_REALM" "$GUILD_REGION" \
-        "$PROG_RAIDER_ROLE_ID" "$ANNOUNCE_TZ" "$SEED_ONLY" <<'PY'
+ENV="$(python3 - "$TABLE" "$ANNOUNCE_TZ" <<'PY'
 import json, sys
-t, name, realm, region, role, tz, seed = sys.argv[1:8]
-print(json.dumps({"Variables": {
-    "STATE_TABLE": t, "GUILD_NAME": name, "GUILD_REALM": realm,
-    "GUILD_REGION": region, "PROG_RAIDER_ROLE_ID": role,
-    "ANNOUNCE_TZ": tz, "SEED_ONLY": seed}}))
+table, tz = sys.argv[1:3]
+print(json.dumps({"Variables": {"STATE_TABLE": table, "ANNOUNCE_TZ": tz}}))
 PY
 )"
 
@@ -57,6 +51,7 @@ if aws lambda get-function --function-name "$FN" --region "$REGION" >/dev/null 2
   aws lambda update-function-configuration --function-name "$FN" --region "$REGION" \
     --environment "$ENV" --timeout 60 --memory-size 256 >/dev/null
   aws lambda wait function-updated --function-name "$FN" --region "$REGION"
+  FIRST_DEPLOY=0
 else
   echo "[+] Creating $FN"
   aws lambda create-function --function-name "$FN" --region "$REGION" \
@@ -64,6 +59,7 @@ else
     --zip-file "fileb://$TMP/package.zip" \
     --environment "$ENV" --timeout 60 --memory-size 256 >/dev/null
   aws lambda wait function-active-v2 --function-name "$FN" --region "$REGION"
+  FIRST_DEPLOY=1
 fi
 rm -rf "$TMP"
 
@@ -84,7 +80,7 @@ else
   DRIFT=1
 fi
 
-for P in /scrambled/wcl/client_id /scrambled/wcl/client_secret /scrambled/discord/webhook_url; do
+for P in "${PARAMS[@]}"; do
   if aws ssm get-parameter --name "$P" --region "$REGION" >/dev/null 2>&1; then
     echo "    [ok] $P"
   else
@@ -107,4 +103,18 @@ echo "Function: $FN  ($REGION)"
 echo "Logs:     aws logs tail /aws/lambda/$FN --follow --region $REGION"
 echo "Dry run:  aws lambda invoke --function-name $FN --region $REGION /dev/stdout"
 echo "Identity: scripts/set-webhook-identity.py --check"
+
+if [ "$FIRST_DEPLOY" = "1" ]; then
+  cat <<'NOTE'
+
+FIRST DEPLOY — the next invocation SEEDS and announces nothing.
+Scrambled arrives with three cleared tiers and a fourth in progress, so run one must
+record all of that silently. Invoke it once by hand and confirm the log says:
+
+    {"event":"bootstrap_complete", ... "announced":0, "note":"SEEDED, did not announce..."}
+
+If you see announced_kill or announced_aotc on the first run, stop the schedule.
+NOTE
+fi
+
 [ "$DRIFT" = "0" ] || { echo; echo "Drift detected — fix in CloudShell as admin (infra/iam-setup.sh)."; exit 1; }

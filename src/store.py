@@ -23,10 +23,21 @@ execution role again grants no Scan and no DeleteItem. Removing a set member is 
 UpdateItem with DELETE, so the rollback path stays inside that grant.
 
     item              pk                             sk
+    bootstrap marker  GUILD#<region>#<realm>#<name>  BOOTSTRAP
     tier state        GUILD#<region>#<realm>#<name>  TIER#<raid-slug>
 
 One item per tier is also what makes tier rollover free: a new slug is a new sk, so the
 announced set starts empty on its own and nothing has to detect the rollover or clean up.
+
+The members of `announced` are NORMALISED BOSS NAMES, not Warcraft Logs encounter ids.
+An encounter id is the more stable identifier and would be the obvious choice, but it
+exists only in Warcraft Logs -- and the one situation where cold-start seeding matters
+most is precisely the one where Warcraft Logs history is unavailable (private logs, or a
+tier cleared longer ago than the lookback reaches). The boss NAME is the only identifier
+both APIs share, so keying on it is what lets a tier be seeded from Raider.IO's ordered
+encounter list alone. It also makes the stored state readable, which matters at 1am when
+the question is "why did it post that". Names are compared through raiderio.normalize, so
+punctuation drift between the two APIs cannot split one boss into two members.
 """
 
 import os
@@ -36,7 +47,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
-TABLE = os.environ.get("STATE_TABLE", "ryangrey-scrambled")
+TABLE = os.environ.get("STATE_TABLE", "ryangrey-greybot")
 
 _cfg = Config(retries={"max_attempts": 3, "mode": "standard"}, read_timeout=10)
 ddb = boto3.client("dynamodb", region_name=REGION, config=_cfg)
@@ -60,6 +71,33 @@ def tier_sk(slug):
 
 def _key(pk, slug):
     return {"pk": _s(pk), "sk": _s(tier_sk(slug))}
+
+
+def _bootstrap_key(pk):
+    return {"pk": _s(pk), "sk": _s("BOOTSTRAP")}
+
+
+def is_bootstrapped(pk):
+    """Has this guild ever been seeded? One marker item, checked before anything can be
+    announced, so 'first run announces nothing' is a branch rather than an emergent
+    property of several other rules agreeing with each other."""
+    res = ddb.get_item(TableName=TABLE, Key=_bootstrap_key(pk), ConsistentRead=True)
+    return bool(res.get("Item"))
+
+
+def mark_bootstrapped(pk, now_iso, tiers, note=""):
+    """Record that seeding happened. Conditional, so two invocations racing the first run
+    cannot both seed."""
+    try:
+        ddb.put_item(TableName=TABLE,
+                     Item={**_bootstrap_key(pk), "bootstrappedAt": _s(now_iso),
+                           "tiers": _n(tiers), "note": _s(note or "")},
+                     ConditionExpression="attribute_not_exists(pk)")
+        return True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
 
 
 def load_tier(pk, slug):

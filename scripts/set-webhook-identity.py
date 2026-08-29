@@ -35,7 +35,7 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AVATAR = os.path.join(ROOT, "assets", "greyBot-avatar.png")
 BOT_NAME = "greyBot"
-SSM_PARAM = "/scrambled/discord/webhook_url"
+SSM_PARAM = "/greybot/discord/webhook_url"
 
 # Discord documents no size cap for data-URI images, but it has historically rejected
 # large ones, and a webhook avatar is never rendered above 128px. Downscaling a 1024px

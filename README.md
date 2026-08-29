@@ -1,7 +1,8 @@
-# Scrambled Raid Bot
+# greyBot — Scrambled raid progress
 
-Announces in Discord when the WoW guild **Scrambled** kills a Heroic raid boss for the
-first time, and posts a separate AOTC card tagging Prog Raiders when the tier is cleared.
+Announces in Discord when the WoW guild **Scrambled** (Proudmoore-US) kills a Heroic raid
+boss for the first time, and posts a separate AOTC card tagging Prog Raiders when the tier
+is cleared.
 
 EventBridge Scheduler → Lambda → Discord webhook. No gateway connection, no server,
 about **$0.02/month**.
@@ -41,6 +42,64 @@ proving: **a mid-tier deploy announces nothing**, and **a re-kill announces noth
 
 ---
 
+## The first run announces nothing
+
+Scrambled does not arrive as a blank slate. Its live Raider.IO profile is three cleared
+tiers and a fourth in progress:
+
+| slug | progress | |
+|---|---|---|
+| `tier-mn-1` | 9/9 H | AOTC earned months ago |
+| `sporefall` | 1/1 H | cleared |
+| `the-tidebound-grotto` | 1/1 H | cleared |
+| `the-venomous-abyss` | 2/8 H | current |
+
+A bot that starts polling against that and applies its ordinary rules posts a dozen
+retroactive kill cards and a **false AOTC for a tier finished months ago**, in a live guild
+channel, before anyone can stop it. So the first run is a separate code path rather than an
+emergent consequence of the dedupe rules happening to agree:
+
+```python
+if not store.is_bootstrapped(pk):
+    bootstrap(...)      # seeds every tier, never calls discord.post
+    return              # handler exits here
+```
+
+`bootstrap()` writes one item per raid in `raid_progression` — the killed set, the count
+baseline, and the AOTC flag pre-set on every tier already cleared — then records a
+`BOOTSTRAP` marker so it happens once. It contains no call to `discord.post` and `handler()`
+returns immediately after it, so "posts nothing" is structural, not a rule that could be
+outvoted. It logs what it did rather than staying quiet:
+
+```json
+{"event":"bootstrap_complete","tiers":4,"announced":0,
+ "note":"SEEDED, did not announce — no messages were posted on this run"}
+```
+
+**Seeding cannot depend on Warcraft Logs history**, which is the subtlety. The tier that
+most needs seeding is `tier-mn-1`, cleared long enough ago that the log lookback may not
+reach it at all — and a guild with private logs has no history at any depth. Seeded empty,
+the next transmog run through it announces nine "first kills" from months ago. So
+Raider.IO's count fills the gap against its published encounter order:
+
+- **fully cleared** → seed every boss. No guessing: `killed == total` says they are all
+  dead, whatever order they died in. This covers all three of Scrambled's finished tiers
+  exactly.
+- **partly cleared** → seed the first *N* in published order, unioned with whatever history
+  did show, and log `seed_assumption` so the assumption is on the record rather than silent.
+
+This is also why the dedupe key is the **normalised boss name** and not the Warcraft Logs
+encounter id. The encounter id is the more stable identifier, but it exists only in
+Warcraft Logs — and the case where seeding matters most is exactly the case where Warcraft
+Logs has nothing to say. The boss name is the only identifier both APIs share.
+
+A tier appearing *later* is a rollover, and takes the opposite approach: Raider.IO's count
+must **not** seed it, because at rollover that count is describing the very kills about to
+be announced. It seeds only from history older than the poll window, so a new tier's first
+kill is announced rather than swallowed.
+
+---
+
 ## Why not the #logs channel
 
 Scraping posted Warcraft Logs links out of `#logs` only catches the kills somebody
@@ -55,10 +114,38 @@ single distinction this bot exists to make.
 ```
 EventBridge Scheduler ──rate(15 min)──▶ Lambda ──▶ Discord webhook  (#bots)
                                           │
-                                          ├─▶ Warcraft Logs v2   what died, and when
-                                          ├─▶ Raider.IO          how many, what rank
-                                          └─▶ DynamoDB           has it been announced
+                                          ├─▶ SSM Parameter Store  who and what secrets
+                                          ├─▶ Warcraft Logs v2     what died, and when
+                                          ├─▶ Raider.IO            how many, what rank
+                                          └─▶ DynamoDB             already announced?
 ```
+
+### Configuration
+
+Seven parameters under `/greybot`, read at runtime, cached per container, fetched in one
+`GetParameters` call:
+
+| parameter | type | |
+|---|---|---|
+| `/greybot/wcl/client_id` | String | Warcraft Logs OAuth client |
+| `/greybot/wcl/client_secret` | SecureString | |
+| `/greybot/discord/webhook_url` | SecureString | post-anything-to-`#bots` capability |
+| `/greybot/discord/prog_role_id` | String | the role AOTC pings |
+| `/greybot/guild/name` | String | `Scrambled` |
+| `/greybot/guild/realm` | String | realm **slug**, lowercase-hyphenated |
+| `/greybot/guild/region` | String | `us` |
+
+None of this is a Lambda environment variable. The two secrets are credentials, and
+environment variables are readable by anything that can call `GetFunctionConfiguration`;
+the guild identity sits with them so there is exactly one place to look when the realm slug
+is wrong rather than two that can disagree. The execution role names all seven ARNs
+individually — a `/greybot/*` wildcard would also grant whatever gets added under that
+prefix later.
+
+`config.load()` fails loudly and names the missing parameters, because SSM answers a
+request for a parameter that does not exist with a **200** and a quiet omission. The realm
+is lowercased and hyphenated on the way in, since a display name (`Aerie Peak`) 404s the
+Raider.IO call without saying why.
 
 The bot only ever announces. It takes no commands and handles no interactions, so there is
 nothing for a persistent gateway connection to do except cost money to stay open and turn a
@@ -127,6 +214,22 @@ Nothing is hardcoded to a tier. `build_index` widens its expansion search until 
 the raids the guild's own profile reports, so the day `raid_progression` names a raid the
 hinted expansion has never heard of, the search walks forward and finds it.
 
+Note there is no "current tier" variable anywhere. The tempting shortcut — *the current
+tier is the one that is neither fully cleared nor untouched* — works on today's data and
+stops working at the worst possible moment:
+
+| | today | the night they clear it |
+|---|---|---|
+| `tier-mn-1` | 9/9, cleared | 9/9, cleared |
+| `the-venomous-abyss` | **2/8 ← current** | 8/8, cleared |
+| tiers matching "neither" | 1 | **0** |
+
+The heuristic returns nothing on AOTC night, which is the single most important
+announcement the bot makes. It also returns nothing for a brand-new tier at 0/8. Resolving
+per kill has neither failure mode, and handles the raid night that clears the new tier and
+then farms an old one for mounts — one report, two raids, which no single current-tier
+answer gets right.
+
 ---
 
 ## State
@@ -137,6 +240,7 @@ stays inside that grant.
 
 | item | pk | sk |
 |---|---|---|
+| bootstrap marker | `GUILD#<region>#<realm>#<name>` | `BOOTSTRAP` |
 | tier state | `GUILD#<region>#<realm>#<name>` | `TIER#<raid-slug>` |
 
 Held per tier: the set of announced bosses, the seed size, the count baseline, and the
@@ -153,16 +257,9 @@ licence: "they are now 5 of 8" underneath "just killed the 6th boss" is visibly 
 the count is `max(what Raider.IO says, what the bot knows from its own claims)`, and the
 bot's own figure is its seed baseline plus every boss claimed since.
 
-**First run must not announce the back catalogue.** The first time a tier is seen, the bot
-reaches back across the whole tier and records what is already dead without announcing any
-of it — otherwise its debut in `#bots` is eight cards for bosses that died in July. The
-distinction from a genuine tier rollover is whether any of that history is *older than the
-current poll window*: a rollover has only fresh kills, and those are announced. `SEED_ONLY=1`
-forces silent seeding regardless.
-
-**A tier already cleared before the bot existed.** Seeding sets the AOTC flag when
-Raider.IO already reports `heroic_bosses_killed == total_bosses`, so no achievement earned
-before the bot was watching gets celebrated retroactively.
+**First run must not announce the back catalogue.** See *The first run announces nothing*
+above — it is the largest single risk in the project and has its own code path and its own
+tests.
 
 **The final boss dies every week after AOTC.** Every one of those re-kills satisfies
 "kills == total". The persisted flag is claimed conditionally, so only the first wins.
@@ -252,6 +349,7 @@ Warcraft Logs and Raider.IO are free. Nothing is provisioned; no NAT, no VPC.
 
 ```
 src/handler.py       poll, resolve, announce — the orchestration
+src/config.py        the seven SSM parameters
 src/wcl.py           Warcraft Logs v2: OAuth, GraphQL, rate-limit accounting
 src/raiderio.py      Raider.IO: profile, static raid data, slug resolution
 src/store.py         DynamoDB: the announce-once claim
@@ -269,10 +367,21 @@ package is a handful of `.py` files and the deploy is a zip.
 ## Running it
 
 ```sh
-cp .env.example .env      # fill in; .env is gitignored
-scripts/selftest.py       # no AWS needed
+cp .env.example .env      # deploy-time values only; .env is gitignored
+scripts/selftest.py       # no AWS, no boto3, no network
 scripts/deploy.sh
 ```
+
+**On first deploy, invoke it once by hand before letting the schedule run**, and confirm
+the log line says it seeded:
+
+```sh
+aws lambda invoke --function-name ryangrey-greybot --region us-east-1 /dev/stdout
+aws logs tail /aws/lambda/ryangrey-greybot --region us-east-1 --since 5m
+```
+
+Expect `{"event":"bootstrap_complete", ... "announced":0}`. If that first run produces an
+`announced_kill` or `announced_aotc`, something is wrong — stop the schedule.
 
 `infra/iam-setup.sh` covers the one-time table, role, secrets and schedule. It is
 deliberately separate: the deploy identity has no IAM write, no SSM write and no Scheduler

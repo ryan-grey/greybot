@@ -205,3 +205,41 @@ def realm_rank(profile, slug, difficulty="heroic"):
     except (TypeError, ValueError):
         return None
     return rank if rank > 0 else None
+
+
+def seed_names(meta, killed, total, history_names):
+    """Which bosses should a tier be seeded as already-killed?
+
+    Warcraft Logs history is the exact answer when it is available. It often is not: a
+    tier cleared longer ago than the lookback reaches, or a guild whose logs are private,
+    both return nothing. That is the dangerous case rather than a harmless one -- seeding
+    a tier as empty when the guild has actually cleared it means the next transmog run
+    through it announces nine "first kills" that happened months ago.
+
+    So Raider.IO's count fills the gap, against its ordered encounter list:
+
+      * fully cleared  -> seed every boss. No guessing involved; killed == total says
+                          all of them are dead, whatever order they died in.
+      * partly cleared -> seed the first `killed` bosses in the published order, unioned
+                          with whatever history did show. Heroic is cleared in order in
+                          all but the rarest cases, and the union means history always
+                          wins where it exists.
+
+    Returns (names, basis) so the caller can log which of those actually happened rather
+    than leaving an assumption unrecorded.
+    """
+    names = {normalize(n) for n in (history_names or []) if n}
+    encounters = [e for e in ((meta or {}).get("encounters") or []) if e]
+    if not encounters or killed is None:
+        return names, "history-only"
+
+    if total and killed >= total:
+        before = len(names)
+        names |= {normalize(e) for e in encounters}
+        return names, ("history-only" if len(names) == before else "cleared-tier")
+
+    if killed > len(names):
+        names |= {normalize(e) for e in encounters[:killed]}
+        return names, "assumed-kill-order"
+
+    return names, "history-only"
