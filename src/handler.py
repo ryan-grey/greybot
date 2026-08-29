@@ -35,6 +35,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
+import blizzard
 import config
 import discord
 import raiderio
@@ -107,6 +108,47 @@ def boss_key(name):
     """The dedupe key. A normalised boss name -- the only identifier Warcraft Logs and
     Raider.IO share. See the store module docstring for why not the encounter id."""
     return raiderio.normalize(name)
+
+
+def boss_art(cfg, boss_name, now_iso, fallback=None):
+    """Per-boss art URL, falling back to the raid icon.
+
+    Cached in DynamoDB permanently: a boss's creature display id never changes, so this is
+    one Blizzard lookup per boss ever and none at all in steady state. Failures are cached
+    too -- a boss Blizzard cannot resolve would otherwise be looked up again on every
+    single announcement, spending the API budget to be told "no" repeatedly.
+
+    Every failure path here returns the fallback. Art is decoration, and nothing about it
+    is allowed to cost an announcement.
+    """
+    key = boss_key(boss_name)
+    try:
+        cached = store.get_art(key)
+    except Exception as exc:                                   # noqa: BLE001
+        log("art_cache_read_failed", boss=boss_name, error=repr(exc))
+        return fallback
+    if cached is not None:
+        return cached["url"] or fallback
+
+    if not (cfg.get("blizzard_client_id") and cfg.get("blizzard_client_secret")):
+        return fallback
+
+    try:
+        token = blizzard.get_token(cfg["blizzard_client_id"], cfg["blizzard_client_secret"])
+        display, url = blizzard.resolve(token, boss_name, raiderio.normalize)
+    except blizzard.BlizzardError as exc:
+        # Not cached: a transient Blizzard failure should be retried next time, unlike a
+        # definitive "no such encounter", which is.
+        log("art_lookup_failed", boss=boss_name, error=str(exc))
+        return fallback
+
+    try:
+        store.put_art(key, display, url or "", now_iso)
+    except Exception as exc:                                   # noqa: BLE001
+        log("art_cache_write_failed", boss=boss_name, error=repr(exc))
+    log("art_resolved", boss=boss_name, displayId=display, url=url or None,
+        found=bool(url))
+    return url or fallback
 
 
 def guild_id(token, cfg):
@@ -227,7 +269,8 @@ def seed_new_tier(token, gid, pk, cfg, slug, raid_label, profile, index,
     return silent
 
 
-def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None):
+def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None,
+                  now_iso=None):
     """Claim, then post. In that order -- see store.claim_boss."""
     key = boss_key(kill["name"])
     if not store.claim_boss(pk, slug, key):
@@ -235,6 +278,8 @@ def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None):
         return False
 
     state["announced"].add(key)
+    thumb = boss_art(cfg, kill["name"], now_iso or _iso(datetime.now(timezone.utc)),
+                     fallback=thumb)
     r_killed, total = raiderio.progress_for(profile, slug)
     count = store.progress_count(state, r_killed, total)
     rank = raiderio.realm_rank(profile, slug, "heroic")
@@ -329,7 +374,9 @@ def preview(spec, cfg, token, gid, profile, index):
     payload = discord.kill_embed(
         cfg["guild_name"], kill["name"], int(spec.get("count", 1)), total or "?",
         raid_label, rank, report_url=report_url(kill.get("reportCode")),
-        iso_ts=_iso(killed_at), thumbnail_url=raiderio.icon_url(meta))
+        iso_ts=_iso(killed_at),
+        thumbnail_url=boss_art(cfg, kill["name"], _iso(datetime.now(timezone.utc)),
+                               fallback=raiderio.icon_url(meta)))
 
     info = {"boss": kill["name"], "raid": raid_label, "slug": slug,
             "killedAt": _iso(killed_at), "localTime": _when_text(killed_at),
@@ -434,7 +481,8 @@ def handler(event, context):
 
         last_announced_ms = None
         for kill in bundle["kills"]:
-            if announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb):
+            if announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb,
+                             now_iso):
                 announced += 1
                 last_announced_ms = kill["killedAtMs"]
 

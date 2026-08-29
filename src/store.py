@@ -212,6 +212,33 @@ def touch(pk, slug, now_iso, raid_name=None):
                     ExpressionAttributeValues=vals)
 
 
+ART_PK = "ART#GLOBAL"
+
+
+def get_art(boss_key):
+    """Cached art URL for a boss, or None if never resolved.
+
+    Returns a dict so a resolved-but-absent answer is distinguishable from an unresolved
+    one: {"url": ""} means Blizzard was asked and had nothing, and must not be asked again
+    on every future kill. Boss art is the same for everyone, so this partition is shared
+    across guilds rather than kept per guild.
+    """
+    res = ddb.get_item(TableName=TABLE,
+                       Key={"pk": _s(ART_PK), "sk": _s(f"BOSS#{boss_key}")})
+    item = res.get("Item")
+    if not item:
+        return None
+    return {"url": (item.get("url") or {}).get("S") or "",
+            "displayId": int((item.get("displayId") or {}).get("N") or 0)}
+
+
+def put_art(boss_key, display_id, url, now_iso):
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(ART_PK), "sk": _s(f"BOSS#{boss_key}"),
+        "displayId": _n(int(display_id or 0)), "url": _s(url or ""),
+        "resolvedAt": _s(now_iso)})
+
+
 def progress_count(state, raider_killed, total):
     """The "n" in "n of total".
 

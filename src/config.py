@@ -30,6 +30,13 @@ GUILD_REGION = f"{PREFIX}/guild/region"
 NAMES = [WCL_CLIENT_ID, WCL_CLIENT_SECRET, DISCORD_WEBHOOK, DISCORD_ROLE_ID,
          GUILD_NAME, GUILD_REALM, GUILD_REGION]
 
+# Optional. Boss art is decoration, so the bot must run perfectly well without these --
+# missing Blizzard credentials cost the card its portrait and nothing else. Making them
+# required would let an unset parameter take the announcements down.
+BLIZZARD_CLIENT_ID = f"{PREFIX}/blizzard/client_id"
+BLIZZARD_CLIENT_SECRET = f"{PREFIX}/blizzard/client_secret"
+OPTIONAL_NAMES = [BLIZZARD_CLIENT_ID, BLIZZARD_CLIENT_SECRET]
+
 _cfg = Config(retries={"max_attempts": 3, "mode": "standard"}, read_timeout=10)
 ssm = boto3.client("ssm", region_name=REGION, config=_cfg)
 
@@ -46,7 +53,7 @@ def load():
     if _cache:
         return _cache
 
-    res = ssm.get_parameters(Names=NAMES, WithDecryption=True)
+    res = ssm.get_parameters(Names=NAMES + OPTIONAL_NAMES, WithDecryption=True)
     got = {p["Name"]: p["Value"] for p in res.get("Parameters", [])}
     missing = [n for n in NAMES if n not in got or not got[n].strip()]
     if missing:
@@ -63,6 +70,8 @@ def load():
         # normalise here rather than depending on how the parameter was typed.
         "guild_realm": got[GUILD_REALM].strip().lower().replace(" ", "-"),
         "guild_region": got[GUILD_REGION].strip().lower(),
+        "blizzard_client_id": got.get(BLIZZARD_CLIENT_ID, "").strip(),
+        "blizzard_client_secret": got.get(BLIZZARD_CLIENT_SECRET, "").strip(),
     })
     return _cache
 
@@ -71,4 +80,6 @@ def redacted(cfg):
     """A form of the config that is safe to log."""
     return {"guild": cfg["guild_name"], "realm": cfg["guild_realm"],
             "region": cfg["guild_region"], "roleId": cfg["role_id"],
-            "wclClientId": cfg["wcl_client_id"], "webhookSet": bool(cfg["webhook"])}
+            "wclClientId": cfg["wcl_client_id"], "webhookSet": bool(cfg["webhook"]),
+            "bossArtEnabled": bool(cfg.get("blizzard_client_id")
+                                   and cfg.get("blizzard_client_secret"))}

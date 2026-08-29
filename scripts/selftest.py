@@ -152,6 +152,7 @@ sys.modules.update({"boto3": boto3, "botocore": botocore,
                     "botocore.config": botocore.config,
                     "botocore.exceptions": botocore.exceptions})
 
+import blizzard           # noqa: E402
 import config             # noqa: E402
 import discord            # noqa: E402
 import raiderio           # noqa: E402
@@ -415,9 +416,12 @@ def test_config():
     print("\nConfig from SSM")
     config._cache.clear()
     cfg = config.load()
-    check("all seven parameters are read in one call",
-          set(cfg) == {"wcl_client_id", "wcl_client_secret", "webhook", "role_id",
-                       "guild_name", "guild_realm", "guild_region"}, sorted(cfg))
+    check("the seven required parameters are read in one call",
+          {"wcl_client_id", "wcl_client_secret", "webhook", "role_id",
+           "guild_name", "guild_realm", "guild_region"} <= set(cfg), sorted(cfg))
+    check("Blizzard credentials are optional, and absent means art is simply off",
+          cfg["blizzard_client_id"] == ""
+          and config.redacted(cfg)["bossArtEnabled"] is False)
     check("guild identity comes from SSM, not the environment",
           (cfg["guild_name"], cfg["guild_realm"], cfg["guild_region"])
           == ("Scrambled", "proudmoore", "us"))
@@ -446,6 +450,69 @@ def test_config():
     SSM_VALUES["/greybot/guild/realm"] = saved
     config._cache.clear()
     config.load()
+
+
+def test_boss_art():
+    """Art is decoration. Every failure path has to end in a card, not an exception."""
+    print("\nBoss art")
+    import handler
+    FAKE_DDB.items.clear()
+    config._cache.clear()
+
+    calls = []
+    handler.blizzard.get_token = lambda *a, **kw: "tok"
+
+    def resolver(result):
+        def fake(token, name, normalize):
+            calls.append(name)
+            return result
+        return fake
+
+    # No credentials: the raid icon stands in, and Blizzard is never called.
+    cfg = dict(config.load())
+    handler.blizzard.resolve = resolver((1, "https://never.test/x.jpg"))
+    calls.clear()
+    got = handler.boss_art(cfg, "Sszorak", "now", fallback="RAID_ICON")
+    check("without credentials the raid icon stands in", got == "RAID_ICON", got)
+    check("...and Blizzard is not called at all", calls == [], calls)
+
+    # With credentials: resolved once, then served from cache forever.
+    cfg["blizzard_client_id"] = "id"
+    cfg["blizzard_client_secret"] = "secret"
+    handler.blizzard.resolve = resolver((4242, "https://render.test/4242.jpg"))
+    calls.clear()
+    got = handler.boss_art(cfg, "Sszorak", "now", fallback="RAID_ICON")
+    check("a resolved boss gets its own art", got == "https://render.test/4242.jpg", got)
+    got = handler.boss_art(cfg, "Sszorak", "now", fallback="RAID_ICON")
+    check("the second call is served from cache", len(calls) == 1, calls)
+    check("cache survives a reload",
+          store.get_art(handler.boss_key("Sszorak"))["displayId"] == 4242)
+
+    # A boss Blizzard has no answer for is cached as a miss, not re-asked forever.
+    handler.blizzard.resolve = resolver((None, None))
+    calls.clear()
+    got = handler.boss_art(cfg, "The Coiled Altar", "now", fallback="RAID_ICON")
+    check("an unresolvable boss falls back to the raid icon", got == "RAID_ICON", got)
+    handler.boss_art(cfg, "The Coiled Altar", "now", fallback="RAID_ICON")
+    check("...and is not looked up again on every future kill", len(calls) == 1, calls)
+
+    # A transient Blizzard failure must NOT be cached -- it should retry next time.
+    def boom(token, name, normalize):
+        calls.append(name)
+        raise handler.blizzard.BlizzardError("HTTP 503")
+    handler.blizzard.resolve = boom
+    calls.clear()
+    got = handler.boss_art(cfg, "Ula'tek", "now", fallback="RAID_ICON")
+    check("a Blizzard outage still produces a card", got == "RAID_ICON", got)
+    handler.boss_art(cfg, "Ula'tek", "now", fallback="RAID_ICON")
+    check("...and is retried rather than cached as a miss", len(calls) == 2, calls)
+
+    check("art URLs are built from the display id",
+          blizzard.art_url(4242)
+          == "https://render.worldofwarcraft.com/us/npcs/zoom/creature-display-4242.jpg")
+    check("no display id means no URL", blizzard.art_url(None) is None)
+    FAKE_DDB.items.clear()
+    config._cache.clear()
 
 
 def test_name_normalisation():
@@ -1005,7 +1072,7 @@ def test_end_to_end():
 
 def main():
     print("greyBot self-test")
-    for fn in (test_config, test_name_normalisation, test_slug_resolution,
+    for fn in (test_config, test_boss_art, test_name_normalisation, test_slug_resolution,
                test_seed_names, test_progress_count, test_dedupe, test_aotc_guard,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
                test_end_to_end):

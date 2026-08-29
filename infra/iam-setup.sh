@@ -20,6 +20,8 @@
 #   /greybot/guild/name            String
 #   /greybot/guild/realm           String        (slug: lowercase, hyphenated)
 #   /greybot/guild/region          String
+#   /greybot/blizzard/client_id    String        (optional -- per-boss art)
+#   /greybot/blizzard/client_secret SecureString (optional -- per-boss art)
 #
 # Export ACCT before running:  export ACCT=123456789012
 set -euo pipefail
@@ -68,7 +70,9 @@ cat > /tmp/policy.json <<J
               "arn:aws:ssm:$REGION:$ACCT:parameter/greybot/discord/prog_role_id",
               "arn:aws:ssm:$REGION:$ACCT:parameter/greybot/guild/name",
               "arn:aws:ssm:$REGION:$ACCT:parameter/greybot/guild/realm",
-              "arn:aws:ssm:$REGION:$ACCT:parameter/greybot/guild/region"]},
+              "arn:aws:ssm:$REGION:$ACCT:parameter/greybot/guild/region",
+              "arn:aws:ssm:$REGION:$ACCT:parameter/greybot/blizzard/client_id",
+              "arn:aws:ssm:$REGION:$ACCT:parameter/greybot/blizzard/client_secret"]},
  {"Sid":"DecryptThoseSecretsOnly","Effect":"Allow","Action":"kms:Decrypt",
   "Resource":"$SSM_KEY",
   "Condition":{"StringEquals":{"kms:ViaService":"ssm.$REGION.amazonaws.com"}}}]}
