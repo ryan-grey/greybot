@@ -29,16 +29,38 @@ REPO_URL="${REPO_URL:-}"
 PARAMS=(/greybot/wcl/client_id /greybot/wcl/client_secret /greybot/discord/webhook_url
         /greybot/discord/prog_role_id /greybot/guild/name /greybot/guild/realm
         /greybot/guild/region /greybot/blizzard/client_id
-        /greybot/blizzard/client_secret)
+        /greybot/blizzard/client_secret /greybot/discord/bot_token
+        /greybot/discord/public_key /greybot/discord/guild_id)
+
+# The self-test needs PyNaCl to exercise signature verification against real Ed25519
+# rather than a stub, and a stub would happily agree with an implementation that had the
+# arguments the wrong way round. Kept in a venv so nothing is installed system-wide.
+VENV="$ROOT/.venv"
+if [ ! -x "$VENV/bin/python" ]; then
+  echo "==> Creating .venv for test dependencies"
+  python3 -m venv "$VENV"
+  "$VENV/bin/pip" install --quiet --upgrade pip
+fi
+"$VENV/bin/python" -c 'import nacl' 2>/dev/null || "$VENV/bin/pip" install --quiet pynacl
 
 echo "==> Self-test (blocks the deploy on failure)"
-python3 "$ROOT/scripts/selftest.py"
+"$VENV/bin/python" "$ROOT/scripts/selftest.py"
 
 echo "==> Packaging"
 TMP="$(mktemp -d)"
 cp "$ROOT/src/"*.py "$TMP/"
-( cd "$TMP" && zip -qr package.zip ./*.py )
-echo "    package: $(du -h "$TMP/package.zip" | cut -f1)  (no dependencies — stdlib + boto3)"
+
+# PyNaCl is the one dependency, and it is native, so the wheel has to match the Lambda's
+# architecture rather than this laptop's. Downloading the aarch64 wheel directly avoids
+# needing Docker to cross-build. Signature verification is not somewhere to hand-roll
+# crypto: libsodium is the audited implementation and this is the audited binding to it.
+echo "    vendoring PyNaCl (linux/aarch64)"
+python3 -m pip install --quiet --platform manylinux2014_aarch64 --implementation cp \
+  --python-version 3.12 --only-binary=:all: --target "$TMP" pynacl
+rm -rf "$TMP"/bin "$TMP"/*.dist-info
+
+( cd "$TMP" && zip -qr package.zip . )
+echo "    package: $(du -h "$TMP/package.zip" | cut -f1)  (stdlib + boto3 + PyNaCl)"
 
 ENV="$(python3 - "$TABLE" "$ANNOUNCE_TZ" "$REPO_URL" <<'PY'
 import json, sys
@@ -50,30 +72,40 @@ PY
 
 if aws lambda get-function --function-name "$FN" --region "$REGION" >/dev/null 2>&1; then
   echo "[=] Updating $FN"
-  aws lambda update-function-code --function-name "$FN" --region "$REGION" \
-    --zip-file "fileb://$TMP/package.zip" >/dev/null
-  aws lambda wait function-updated --function-name "$FN" --region "$REGION"
+  # Architecture first, code second. The currently deployed code is pure Python and runs
+  # on either architecture, so this ordering never leaves arm64 metadata pointing at an
+  # x86_64 binary. Doing it the other way round would.
   aws lambda update-function-configuration --function-name "$FN" --region "$REGION" \
-    --environment "$ENV" --timeout 60 --memory-size 256 >/dev/null
+    --environment "$ENV" --timeout 60 --memory-size 512 >/dev/null
+  aws lambda wait function-updated --function-name "$FN" --region "$REGION"
+  CUR_ARCH="$(aws lambda get-function-configuration --function-name "$FN" \
+    --region "$REGION" --query 'Architectures[0]' --output text)"
+  if [ "$CUR_ARCH" != "arm64" ]; then
+    echo "    switching architecture $CUR_ARCH -> arm64"
+    aws lambda update-function-configuration --function-name "$FN" --region "$REGION" \
+      --architectures arm64 >/dev/null
+    aws lambda wait function-updated --function-name "$FN" --region "$REGION"
+  fi
+  aws lambda update-function-code --function-name "$FN" --region "$REGION" \
+    --zip-file "fileb://$TMP/package.zip" --architectures arm64 >/dev/null
   aws lambda wait function-updated --function-name "$FN" --region "$REGION"
   FIRST_DEPLOY=0
 else
   echo "[+] Creating $FN"
   aws lambda create-function --function-name "$FN" --region "$REGION" \
     --runtime python3.12 --handler handler.handler --role "$ROLE" \
+    --architectures arm64 \
     --zip-file "fileb://$TMP/package.zip" \
-    --environment "$ENV" --timeout 60 --memory-size 256 >/dev/null
+    --environment "$ENV" --timeout 60 --memory-size 512 >/dev/null
   aws lambda wait function-active-v2 --function-name "$FN" --region "$REGION"
   FIRST_DEPLOY=1
 fi
 rm -rf "$TMP"
 
-# One invocation at a time. The conditional writes already make overlap safe, but a poll
-# that outruns its schedule has nothing useful to add and only spends Warcraft Logs points.
-aws lambda put-function-concurrency --function-name "$FN" --region "$REGION" \
-  --reserved-concurrent-executions 1 >/dev/null 2>&1 \
-  && echo "    reserved concurrency: 1" \
-  || echo "    [skip] no permission to set reserved concurrency (set it in the console)"
+# Deliberately NOT reserving concurrency of 1 any more. It was harmless when this function
+# only polled, but the same function now serves Discord interactions on a three-second
+# deadline, and a slash command queued behind a running poll would fail visibly in chat.
+# The conditional writes are what make overlapping polls safe, not the concurrency cap.
 
 echo "==> Verifying admin-managed resources"
 DRIFT=0

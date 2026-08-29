@@ -45,7 +45,16 @@ NAMES = [WCL_CLIENT_ID, WCL_CLIENT_SECRET, DISCORD_WEBHOOK, DISCORD_ROLE_ID,
 # required would let an unset parameter take the announcements down.
 BLIZZARD_CLIENT_ID = f"{PREFIX}/blizzard/client_id"
 BLIZZARD_CLIENT_SECRET = f"{PREFIX}/blizzard/client_secret"
-OPTIONAL_NAMES = [BLIZZARD_CLIENT_ID, BLIZZARD_CLIENT_SECRET]
+
+# Also optional, and for the same reason: slash commands are an addition to the bot, not a
+# prerequisite for it. A missing public key disables the interactions endpoint; it must
+# never stop the announcer from announcing.
+DISCORD_BOT_TOKEN = f"{PREFIX}/discord/bot_token"
+DISCORD_PUBLIC_KEY = f"{PREFIX}/discord/public_key"
+DISCORD_GUILD_ID = f"{PREFIX}/discord/guild_id"
+
+OPTIONAL_NAMES = [BLIZZARD_CLIENT_ID, BLIZZARD_CLIENT_SECRET,
+                  DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID]
 
 _cfg = Config(retries={"max_attempts": 3, "mode": "standard"}, read_timeout=10)
 ssm = boto3.client("ssm", region_name=REGION, config=_cfg)
@@ -86,6 +95,9 @@ def load(now=None):
         "guild_region": got[GUILD_REGION].strip().lower(),
         "blizzard_client_id": got.get(BLIZZARD_CLIENT_ID, "").strip(),
         "blizzard_client_secret": got.get(BLIZZARD_CLIENT_SECRET, "").strip(),
+        "bot_token": got.get(DISCORD_BOT_TOKEN, "").strip(),
+        "public_key": got.get(DISCORD_PUBLIC_KEY, "").strip(),
+        "discord_guild_id": got.get(DISCORD_GUILD_ID, "").strip(),
     })
     return _cache
 
@@ -96,4 +108,6 @@ def redacted(cfg):
             "region": cfg["guild_region"], "roleId": cfg["role_id"],
             "wclClientId": cfg["wcl_client_id"], "webhookSet": bool(cfg["webhook"]),
             "bossArtEnabled": bool(cfg.get("blizzard_client_id")
-                                   and cfg.get("blizzard_client_secret"))}
+                                   and cfg.get("blizzard_client_secret")),
+            "interactionsEnabled": bool(cfg.get("public_key")),
+            "botTokenSet": bool(cfg.get("bot_token"))}

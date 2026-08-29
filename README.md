@@ -339,6 +339,74 @@ sips -Z 256 assets/greyBot-avatar.png --out assets/greyBot-avatar-256.png
 
 ---
 
+## The /progress slash command
+
+The announcer needs no gateway connection, and neither does a slash command: Discord POSTs
+each interaction to an HTTPS endpoint, so this is API Gateway → the same Lambda.
+
+```
+/progress → Scrambled — 2 of 8 in Heroic The Venomous Abyss, ranked server #67
+```
+
+Ephemeral by default (`EPHEMERAL_REPLIES=0` to make replies public), and styled exactly
+like a kill card so the two read as one product.
+
+Three parts of Discord's contract are unforgiving, and each shapes the code:
+
+**The signature covers the raw body bytes.** Parsing the JSON and re-serialising it changes
+the byte sequence and every signature then fails in a way that looks exactly like a wrong
+public key. API Gateway may also deliver the body base64-encoded, so `isBase64Encoded` is
+honoured *before* verification. There is a test asserting that re-serialising would have
+broken it, so nobody later "tidies" that into a parse-and-dump.
+
+**Discord probes with deliberately invalid signatures.** An endpoint that ever answers 200
+to one is removed, with an email and a system DM about it. The rejection path is therefore
+tested as hard as the acceptance path — against real Ed25519, because a stub would happily
+agree with an implementation that had the arguments the wrong way round. A missing public
+key rejects too: an endpoint that cannot verify must never wave anything through.
+
+**Three seconds, including cold start.** A Lambda cannot answer "deferred" and then keep
+working — execution stops when the handler returns. So the fast path avoids deferring
+entirely: the poller already calls Raider.IO every fifteen minutes and leaves a small
+snapshot behind, and `/progress` answers from a single `GetItem`. When that snapshot is
+missing or stale, the slow path responds deferred and asynchronously invokes a second copy
+of the function to fetch live and PATCH the follow-up, which is why the role grants
+`lambda:InvokeFunction` on itself.
+
+This is also why the function no longer reserves a concurrency of 1. That was harmless
+when it only polled; with a slash command sharing it, a command queued behind a running
+poll would fail visibly in chat.
+
+Commands are registered **per guild**, not globally — guild commands appear instantly,
+global ones take up to an hour to propagate, and this bot lives in one server. `PUT`
+replaces the whole set, so re-registering cannot accumulate duplicates.
+
+```sh
+aws lambda invoke --function-name ryangrey-greybot --region us-east-1 \
+  --cli-binary-format raw-in-base64-out --payload '{"admin":"register_commands"}' /dev/stdout
+```
+
+The application id is read from `/users/@me` rather than configured — for a bot, the user
+id *is* the application id, which removes a fourth parameter to keep in step.
+
+### Active Developer Badge
+
+Requires an owned app with a registered slash command actually invoked, claimed at
+`discord.com/developers/active-developer`:
+
+1. Register the command (above)
+2. Run `/progress` in the server
+3. Wait up to 24 hours for Discord to notice the invocation
+4. Claim the badge
+
+**The badge lapses if no command is invoked for ~30 days**, so it needs an occasional
+`/progress` to stay current.
+
+The verified checkmark is a different thing and needs the bot in 100+ servers. This one is
+single-guild by design and will never qualify; there is deliberately no code chasing it.
+
+---
+
 ## Cost
 
 | | basis | $/mo |
@@ -363,16 +431,27 @@ src/wcl.py           Warcraft Logs v2: OAuth, GraphQL, rate-limit accounting
 src/raiderio.py      Raider.IO: profile, static raid data, slug resolution
 src/store.py         DynamoDB: the announce-once claim
 src/discord.py       webhook payloads and retries
+src/interactions.py  slash commands: Ed25519 verification, PING/PONG, /progress
 assets/              greyBot-avatar.png — the canonical icon, 1024x1024
 scripts/selftest.py  the gate; no AWS, no boto3, no network
 scripts/deploy.sh    package + ship the Lambda, then verify admin-owned wiring
 scripts/set-webhook-identity.py   name + avatar on the announcing webhook
 infra/iam-setup.sh   one-time admin setup (1 of 2): table, execution + scheduler roles
 infra/create-schedule.sh   admin setup (2 of 2): the 15-minute poll, created last
+infra/create-interactions-api.sh  the HTTPS endpoint Discord posts interactions to
+infra/grant-interactions.sh       widen the role for slash commands
 ```
 
-No dependencies beyond the standard library and the boto3 already in the runtime, so the
-package is a handful of `.py` files and the deploy is a zip.
+One dependency: **PyNaCl**, for Ed25519 signature verification. Signature checking is not
+somewhere to hand-roll crypto, so the package vendors the audited binding to libsodium.
+The wheel has to match the Lambda's architecture rather than the laptop's, so `deploy.sh`
+downloads the `linux/aarch64` build directly — no Docker needed — and the function runs on
+**arm64**. It is lazily imported, so the scheduled poller never pays for it on a cold start.
+
+Everything else is the standard library plus the boto3 already in the runtime.
+
+The self-test needs PyNaCl too, to exercise signature verification against real Ed25519.
+`deploy.sh` creates a `.venv` for it; nothing is installed system-wide.
 
 ## Running it
 

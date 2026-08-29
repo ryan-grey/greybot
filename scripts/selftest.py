@@ -154,6 +154,7 @@ sys.modules.update({"boto3": boto3, "botocore": botocore,
 
 import blizzard           # noqa: E402
 import config             # noqa: E402
+import interactions       # noqa: E402
 import discord            # noqa: E402
 import raiderio           # noqa: E402
 import store              # noqa: E402
@@ -940,6 +941,133 @@ def test_wcl_pagination():
         wcl.query = saved
 
 
+def test_interactions():
+    """Signature verification, which is the one place a bug is punished by Discord.
+
+    Discord sends deliberately invalid signatures as a routine probe and removes the
+    interactions URL from any app that answers 200 to one. So the rejection path is
+    tested here as thoroughly as the acceptance path, against real Ed25519 rather than a
+    stub -- a stub would happily agree with an implementation that had the arguments the
+    wrong way round.
+    """
+    print("\nDiscord interactions")
+    try:
+        from nacl.signing import SigningKey
+    except ImportError:
+        check("PyNaCl available for real signature tests", False,
+              "missing — run scripts/deploy.sh (it builds .venv), or "
+              "python3 -m venv .venv && .venv/bin/pip install pynacl, "
+              "then .venv/bin/python scripts/selftest.py")
+        return
+
+    key = SigningKey.generate()
+    public_key = key.verify_key.encode().hex()
+    body = json.dumps({"type": 1}).encode()
+    ts = "1735689600"
+    sig = key.sign(ts.encode() + body).signature.hex()
+
+    check("a genuine signature verifies",
+          interactions.verify(public_key, sig, ts, body))
+    check("a tampered BODY is rejected",
+          not interactions.verify(public_key, sig, ts, body + b" "))
+    check("a tampered TIMESTAMP is rejected",
+          not interactions.verify(public_key, sig, "1735689601", body))
+    check("a signature from a different key is rejected",
+          not interactions.verify(SigningKey.generate().verify_key.encode().hex(),
+                                  sig, ts, body))
+    check("a malformed signature is rejected, not raised",
+          not interactions.verify(public_key, "zzzz", ts, body))
+    check("a malformed public key is rejected, not raised",
+          not interactions.verify("nothex", sig, ts, body))
+    check("a missing signature header is rejected",
+          not interactions.verify(public_key, None, ts, body))
+    check("a missing public key is rejected",
+          not interactions.verify("", sig, ts, body))
+
+    # The base64 trap: API Gateway may deliver the body encoded, and verifying the encoded
+    # string instead of the decoded bytes fails every signature in a way that looks
+    # exactly like a wrong key.
+    import base64 as _b64
+    encoded = {"body": _b64.b64encode(body).decode(), "isBase64Encoded": True}
+    check("a base64 body is decoded to the bytes Discord signed",
+          interactions.raw_body(encoded) == body)
+    check("a plain body passes through unchanged",
+          interactions.raw_body({"body": body.decode()}) == body)
+    check("...and the encoded form still verifies end to end",
+          interactions.verify(public_key, sig, ts, interactions.raw_body(encoded)))
+
+    # Re-serialising the JSON changes the bytes and breaks the signature. This asserts the
+    # trap is real, so nobody "tidies" raw_body into a parse-and-dump later.
+    reserialised = json.dumps(json.loads(body.decode())).encode()
+    check("re-serialising the JSON would have broken it (hence raw bytes)",
+          reserialised == body or not interactions.verify(public_key, sig, ts, reserialised))
+
+    import handler
+    config._cache.clear()
+    cfg = dict(config.load())
+    cfg["public_key"] = public_key
+    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
+    def event(payload, signer=key, timestamp=ts):
+        raw = json.dumps(payload).encode()
+        return {"headers": {"X-Signature-Ed25519": signer.sign(
+                                timestamp.encode() + raw).signature.hex(),
+                            "X-Signature-Timestamp": timestamp},
+                "body": raw.decode(), "isBase64Encoded": False,
+                "requestContext": {"http": {"method": "POST"}}}
+
+    res = handler.handle_interaction(event({"type": 1}), cfg, pk, now)
+    check("PING is answered with PONG and a 200",
+          res["statusCode"] == 200 and json.loads(res["body"]) == {"type": 1}, res)
+    check("...with a JSON content type",
+          res["headers"]["content-type"] == "application/json")
+
+    bad = event({"type": 1})
+    bad["headers"]["X-Signature-Ed25519"] = "00" * 64
+    res = handler.handle_interaction(bad, cfg, pk, now)
+    check("an INVALID signature gets 401, never 200 — Discord probes for this",
+          res["statusCode"] == 401, res)
+
+    forged = event({"type": 1}, signer=SigningKey.generate())
+    check("a signature from the wrong key gets 401",
+          handler.handle_interaction(forged, cfg, pk, now)["statusCode"] == 401)
+
+    nokey = dict(cfg); nokey["public_key"] = ""
+    check("no configured public key means reject, never wave through",
+          handler.handle_interaction(event({"type": 1}), nokey, pk, now)["statusCode"] == 401)
+
+    # /progress answered from the snapshot the poller leaves behind.
+    FAKE_DDB.items.clear()
+    store.put_snapshot(pk, "the-venomous-abyss", "The Venomous Abyss", 2, 8, 67,
+                       now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    res = handler.handle_interaction(
+        event({"type": 2, "data": {"name": "progress"}, "token": "t",
+               "application_id": "1"}), cfg, pk, now)
+    payload = json.loads(res["body"])
+    check("/progress answers immediately from the snapshot",
+          payload["type"] == interactions.CHANNEL_MESSAGE_WITH_SOURCE, payload)
+    desc = payload["data"]["embeds"][0]["description"]
+    check("...with the line from the spec",
+          "**2** of **8** in Heroic The Venomous Abyss" in desc
+          and "ranked server **#67**" in desc, desc)
+    check("...ephemeral by default", payload["data"]["flags"] == interactions.EPHEMERAL)
+    check("...and mentioning nobody",
+          payload["data"]["allowed_mentions"] == {"parse": []})
+
+    check("an unknown command is answered, not ignored",
+          json.loads(handler.handle_interaction(
+              event({"type": 2, "data": {"name": "nope"}, "token": "t",
+                     "application_id": "1"}), cfg, pk, now)["body"])["type"]
+          == interactions.CHANNEL_MESSAGE_WITH_SOURCE)
+
+    check("the registered command set is exactly /progress",
+          [c["name"] for c in interactions.COMMANDS] == ["progress"])
+    FAKE_DDB.items.clear()
+    config._cache.clear()
+
+
 # ---------------------------------------------------------------- end to end
 
 def test_end_to_end():
@@ -1128,7 +1256,7 @@ def main():
     for fn in (test_config, test_boss_art, test_name_normalisation, test_slug_resolution,
                test_seed_names, test_progress_count, test_dedupe, test_aotc_guard,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
-               test_end_to_end):
+               test_interactions, test_end_to_end):
         fn()
     print()
     if FAILED:

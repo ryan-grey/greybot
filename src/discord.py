@@ -143,3 +143,25 @@ def aotc_payload(guild_name, raid_name, when_text, role_id, iso_ts=None,
         payload["content"] = f"<@&{role_id}>"
         payload["allowed_mentions"]["roles"] = [str(role_id)]
     return payload
+
+
+def progress_embed(guild_name, raid_name, killed, total, realm_rank,
+                   thumbnail_url=None, guild_label=None, guild_url=None, as_of=None):
+    """The /progress card.
+
+    Deliberately the same colour, author block and thumbnail treatment as a kill card, so
+    the two read as one product rather than two tools that happen to share a channel.
+    """
+    line = (f"**{guild_name}** \u2014 **{killed}** of **{total}** "
+            f"in Heroic {raid_name}")
+    if realm_rank:
+        line += f", ranked server **#{realm_rank}**"
+    embed = {"description": line, "color": BRAND_ACCENT,
+             "footer": {"text": f"Heroic {raid_name}"
+                                + (f" \u00b7 as of {as_of}" if as_of else "")}}
+    if thumbnail_url:
+        embed["thumbnail"] = {"url": thumbnail_url}
+    author = _author(guild_label, guild_url)
+    if author:
+        embed["author"] = author
+    return embed

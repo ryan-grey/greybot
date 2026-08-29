@@ -35,9 +35,12 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
+import boto3
+
 import blizzard
 import config
 import discord
+import interactions
 import raiderio
 import store
 import wcl
@@ -48,6 +51,11 @@ ANNOUNCE_TZ = os.environ.get("ANNOUNCE_TZ", "America/New_York")
 # Credited on the AOTC card only. Empty means no credit line at all, which is what should
 # happen until the repository is actually public rather than a link that 404s.
 REPO_URL = os.environ.get("REPO_URL", "")
+# /progress answers from the poller's snapshot when it is fresher than this, and defers to
+# a live fetch when it is not. An hour is generous: the poller refreshes every fifteen
+# minutes, so falling through means something has already gone quiet.
+SNAPSHOT_MAX_AGE = float(os.environ.get("SNAPSHOT_MAX_AGE", "3600"))
+EPHEMERAL_REPLIES = os.environ.get("EPHEMERAL_REPLIES", "1").lower() not in ("0", "false", "no")
 EXPANSION_HINT = int(os.environ.get("EXPANSION_HINT", "11"))
 
 # How far back a routine poll looks. Generous relative to the schedule so a few missed
@@ -111,6 +119,42 @@ def boss_key(name):
     """The dedupe key. A normalised boss name -- the only identifier Warcraft Logs and
     Raider.IO share. See the store module docstring for why not the encounter id."""
     return raiderio.normalize(name)
+
+
+def display_tier(profile, snapshot):
+    """Which tier /progress should describe.
+
+    Note this uses the "one tier is partly cleared" heuristic that resolve_raid refuses.
+    The difference is what a wrong answer costs. Attributing a KILL to the wrong raid
+    corrupts the dedupe state and can manufacture a false AOTC; naming the wrong raid in a
+    read-only progress card is visible, harmless and self-correcting. The snapshot written
+    by the poller -- which derives its tier from an actual kill -- is still preferred, and
+    this only runs when there is none.
+    """
+    progression = profile.get("raid_progression") or {}
+    if snapshot and snapshot.get("slug") in progression:
+        return snapshot["slug"]
+    partial = [slug for slug, v in progression.items()
+               if 0 < int(v.get("heroic_bosses_killed") or 0) < int(v.get("total_bosses") or 0)]
+    if len(partial) == 1:
+        return partial[0]
+    return list(progression)[-1] if progression else None
+
+
+def progress_embed_live(cfg, profile, index, snapshot, as_of=None):
+    slug = display_tier(profile, snapshot)
+    if not slug:
+        return None
+    meta = index.raids.get(slug) if index else None
+    killed, total = raiderio.progress_for(profile, slug)
+    return discord.progress_embed(
+        cfg["guild_name"], (meta or {}).get("name") or slug, killed or 0, total or "?",
+        raiderio.realm_rank(profile, slug, "heroic"),
+        thumbnail_url=raiderio.icon_url(meta),
+        guild_label=raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
+        guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
+                                       cfg["guild_name"]),
+        as_of=as_of)
 
 
 def boss_art(cfg, boss_name, now_iso, fallback=None):
@@ -406,15 +450,153 @@ def preview(spec, cfg, token, gid, profile, index):
     return {"ok": True, "preview": True, "posted": True, **info}
 
 
+def _snapshot_age(snapshot, now):
+    try:
+        stamp = datetime.strptime(snapshot["updatedAt"], "%Y-%m-%dT%H:%M:%SZ")
+        return (now - stamp.replace(tzinfo=timezone.utc)).total_seconds()
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def handle_progress(body, cfg, pk, now):
+    """Answer /progress inside the three-second window if at all possible.
+
+    The snapshot the poller leaves behind makes that a single GetItem. When it is missing
+    or stale the answer needs a live Raider.IO call, which is exactly the kind of thing
+    that turns a cold start into a failed interaction -- so that path defers and hands the
+    work to a second, asynchronous invocation instead.
+    """
+    snapshot = None
+    try:
+        snapshot = store.get_snapshot(pk)
+    except Exception as exc:                                   # noqa: BLE001
+        log("snapshot_read_failed", error=repr(exc))
+
+    age = _snapshot_age(snapshot, now) if snapshot else None
+    if snapshot and age is not None and age <= SNAPSHOT_MAX_AGE:
+        embed = discord.progress_embed(
+            cfg["guild_name"], snapshot["raidName"], snapshot["killed"],
+            snapshot["total"] or "?", snapshot["realmRank"],
+            thumbnail_url=None,
+            guild_label=f"{cfg['guild_name']} \u00b7 {cfg['guild_realm'].title()}",
+            guild_url=raiderio.profile_url({}, cfg["guild_region"], cfg["guild_realm"],
+                                           cfg["guild_name"]),
+            as_of=snapshot["updatedAt"])
+        log("progress_from_snapshot", ageSeconds=int(age), slug=snapshot["slug"])
+        return interactions.message(embed, ephemeral=EPHEMERAL_REPLIES)
+
+    # Slow path. Defer first -- a Lambda cannot answer later without having answered now.
+    spec = {"application_id": body.get("application_id"), "token": body.get("token")}
+    try:
+        boto3.client("lambda", region_name=REGION).invoke(
+            FunctionName=os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "ryangrey-greybot"),
+            InvocationType="Event",
+            Payload=json.dumps({"followup": spec}).encode("utf-8"))
+        log("progress_deferred", snapshotAgeSeconds=age)
+        return interactions.deferred(ephemeral=EPHEMERAL_REPLIES)
+    except Exception as exc:                                   # noqa: BLE001
+        # Could not defer. Say something rather than let the interaction time out with a
+        # red "application did not respond" in the channel.
+        log("progress_defer_failed", error=repr(exc))
+        return interactions.message(
+            {"description": "Progress is briefly unavailable — try again in a minute.",
+             "color": discord.BRAND_ACCENT}, ephemeral=EPHEMERAL_REPLIES)
+
+
+def handle_followup(spec, cfg, pk, now):
+    """The deferred half: fetch live and PATCH the placeholder into the real answer."""
+    profile = raiderio.guild_profile(cfg["guild_region"], cfg["guild_realm"],
+                                     cfg["guild_name"])
+    index, _exp = raiderio.build_index(profile, EXPANSION_HINT)
+    snapshot = None
+    try:
+        snapshot = store.get_snapshot(pk)
+    except Exception:                                          # noqa: BLE001
+        pass
+    embed = progress_embed_live(cfg, profile, index, snapshot)
+    if not embed:
+        embed = {"description": "No raid progress is available yet.",
+                 "color": discord.BRAND_ACCENT}
+    interactions.edit_followup(spec.get("application_id"), spec.get("token"), embed)
+    log("progress_followup_sent", applicationId=spec.get("application_id"))
+    return {"ok": True, "followup": True}
+
+
+def handle_interaction(event, cfg, pk, now):
+    """Verify, then dispatch. Verification is not optional and not conditional."""
+    headers = interactions.lower_headers(event)
+    body_bytes = interactions.raw_body(event)
+    ok = interactions.verify(cfg.get("public_key"),
+                             headers.get("x-signature-ed25519"),
+                             headers.get("x-signature-timestamp"),
+                             body_bytes)
+    if not ok:
+        # Discord probes this endpoint with deliberately invalid signatures. Answering
+        # 200 to one of those costs the interactions URL.
+        log("interaction_rejected", reason="bad_signature",
+            hasKey=bool(cfg.get("public_key")))
+        return interactions.unauthorized()
+
+    try:
+        body = json.loads(body_bytes.decode("utf-8"))
+    except ValueError:
+        return interactions.unauthorized()
+
+    kind = body.get("type")
+    if kind == interactions.PING:
+        log("interaction_ping")
+        return interactions.http(200, {"type": interactions.PONG})
+
+    if kind == interactions.APPLICATION_COMMAND:
+        name = interactions.command_name(body)
+        log("interaction_command", command=name)
+        if name == "progress":
+            return interactions.http(200, handle_progress(body, cfg, pk, now))
+        return interactions.http(200, interactions.message(
+            {"description": f"Unknown command `{name}`.",
+             "color": discord.BRAND_ACCENT}, ephemeral=True))
+
+    log("interaction_ignored", type=kind)
+    return interactions.http(200, {"type": interactions.PONG})
+
+
+def handle_admin(action, cfg):
+    if action != "register_commands":
+        raise RuntimeError(f"unknown admin action: {action}")
+    if not cfg.get("bot_token"):
+        raise RuntimeError("no bot token in SSM — set /greybot/discord/bot_token")
+    if not cfg.get("discord_guild_id"):
+        raise RuntimeError("no guild id in SSM — set /greybot/discord/guild_id")
+    app_id = interactions.application_id(cfg["bot_token"])
+    result = interactions.register_guild_commands(
+        cfg["bot_token"], app_id, cfg["discord_guild_id"], interactions.COMMANDS)
+    names = [c.get("name") for c in (result or [])]
+    log("commands_registered", applicationId=app_id, guildId=cfg["discord_guild_id"],
+        commands=names)
+    return {"ok": True, "applicationId": app_id, "commands": names}
+
+
 def handler(event, context):
     started = time.time()
     cfg = config.load()
     log("config_loaded", **config.redacted(cfg))
 
-    token = wcl.get_token(cfg["wcl_client_id"], cfg["wcl_client_secret"])
     now = datetime.now(timezone.utc)
     now_iso = _iso(now)
     pk = store.guild_pk(cfg["guild_region"], cfg["guild_realm"], cfg["guild_name"])
+
+    # Interactions first, and before any Warcraft Logs work: this path has three seconds
+    # including cold start, and an OAuth round trip it does not need would spend them.
+    if isinstance(event, dict):
+        if event.get("requestContext", {}).get("http") or "x-signature-ed25519" in {
+                str(k).lower() for k in (event.get("headers") or {})}:
+            return handle_interaction(event, cfg, pk, now)
+        if event.get("followup"):
+            return handle_followup(event["followup"], cfg, pk, now)
+        if event.get("admin"):
+            return handle_admin(event["admin"], cfg)
+
+    token = wcl.get_token(cfg["wcl_client_id"], cfg["wcl_client_secret"])
 
     gid, rate = guild_id(token, cfg)
 
@@ -478,6 +660,7 @@ def handler(event, context):
                                   "kills": []})["kills"].append(k)
 
     announced = 0
+    newest_seen = {"ms": -1}
     for slug, bundle in grouped.items():
         # Prefer the Warcraft Logs zone name in the message: it is the name raiders use.
         # Raider.IO's is a data label and reads like one ("MN Tier 1 (VS / DR / MQD)").
@@ -509,9 +692,26 @@ def handler(event, context):
             announce_aotc(cfg, pk, slug, raid_label, state, _at(when_ms))
 
         store.touch(pk, slug, now_iso, raid_name=raid_label)
+        # Leave the display values behind for /progress. Written for the tier of the most
+        # recent kill, so the snapshot's notion of "current" comes from an actual kill
+        # rather than from a heuristic over Raider.IO's progression.
+        newest = max(bundle["kills"], key=lambda k: k["killedAtMs"])["killedAtMs"]
+        if newest >= newest_seen["ms"]:
+            newest_seen.update({"ms": newest, "slug": slug, "raid": raid_label,
+                                "killed": count, "total": total,
+                                "rank": raiderio.realm_rank(profile, slug, "heroic")})
         log("tier_summary", slug=slug, raid=raid_label,
             resolvedBy=bundle["kills"][0].get("_how"), killsSeen=len(bundle["kills"]),
             count=count, total=total, expansions=expansions)
+
+    if newest_seen["ms"] >= 0:
+        try:
+            store.put_snapshot(pk, newest_seen["slug"], newest_seen["raid"],
+                               newest_seen["killed"], newest_seen["total"],
+                               newest_seen["rank"], now_iso)
+        except Exception as exc:                               # noqa: BLE001
+            # A snapshot is a convenience for /progress. Losing it must not fail a poll.
+            log("snapshot_write_failed", error=repr(exc))
 
     log("poll_done", kills=len(kills), announced=announced, tiers=len(grouped),
         points=rate, ms=int((time.time() - started) * 1000))

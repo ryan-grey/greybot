@@ -212,6 +212,37 @@ def touch(pk, slug, now_iso, raid_name=None):
                     ExpressionAttributeValues=vals)
 
 
+def put_snapshot(pk, slug, raid_name, killed, total, realm_rank, now_iso):
+    """What /progress answers from.
+
+    The slash command has a hard three-second budget including cold start, and a
+    Raider.IO round trip inside that is a gamble. The poller already makes that call
+    every fifteen minutes, so it leaves the display values behind and the command reads
+    one item. This is a cache of something already fetched, not a second source of truth --
+    the dedupe state remains the authority on what has been announced.
+    """
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(pk), "sk": _s("PROGRESS"),
+        "slug": _s(slug), "raidName": _s(raid_name or slug),
+        "killed": _n(int(killed or 0)), "total": _n(int(total or 0)),
+        "realmRank": _n(int(realm_rank or 0)), "updatedAt": _s(now_iso)})
+
+
+def get_snapshot(pk):
+    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s("PROGRESS")})
+    item = res.get("Item")
+    if not item:
+        return None
+    def num(field):
+        return int((item.get(field) or {}).get("N") or 0)
+    return {"slug": (item.get("slug") or {}).get("S") or "",
+            "raidName": (item.get("raidName") or {}).get("S") or "",
+            "killed": num("killed"), "total": num("total"),
+            # Raider.IO writes 0 for "not ranked yet"; keep that as None, not zero.
+            "realmRank": num("realmRank") or None,
+            "updatedAt": (item.get("updatedAt") or {}).get("S") or ""}
+
+
 ART_PK = "ART#GLOBAL"
 
 
