@@ -80,21 +80,41 @@ else
   DRIFT=1
 fi
 
+# AccessDenied is not the same answer as "missing", and treating them alike turns a
+# correctly-scoped deploy identity into a failing deploy. ryan-cli deliberately has no
+# ssm:GetParameter and no scheduler read -- it can ship code and nothing else -- so an
+# authorisation failure here means "cannot verify from this identity", which is a note,
+# not drift. Only a resource that genuinely does not exist is drift.
+UNVERIFIED=0
 for P in "${PARAMS[@]}"; do
-  if aws ssm get-parameter --name "$P" --region "$REGION" >/dev/null 2>&1; then
-    echo "    [ok] $P"
-  else
-    echo "    [!!] $P missing or unreadable"
-    DRIFT=1
-  fi
+  ERR="$(aws ssm get-parameter --name "$P" --region "$REGION" 2>&1 >/dev/null)" && {
+    echo "    [ok] $P"; continue; }
+  case "$ERR" in
+    *AccessDenied*|*UnauthorizedOperation*)
+      echo "    [--] $P — no permission to check from this identity (by design)"
+      UNVERIFIED=1 ;;
+    *ParameterNotFound*)
+      echo "    [!!] $P DOES NOT EXIST — the bot cannot start without it"
+      DRIFT=1 ;;
+    *)
+      echo "    [!!] $P — $(printf '%s' "$ERR" | tail -1)"
+      DRIFT=1 ;;
+  esac
 done
 
+SCHED_ERR="$(aws scheduler get-schedule --name "$SCHEDULE" --region "$REGION" \
+  --query 'ScheduleExpression' --output text 2>&1 >/dev/null)" || true
 SCHED="$(aws scheduler get-schedule --name "$SCHEDULE" --region "$REGION" \
   --query 'ScheduleExpression' --output text 2>/dev/null || true)"
 if [ -n "$SCHED" ] && [ "$SCHED" != "None" ]; then
   echo "    [ok] schedule $SCHEDULE — $SCHED"
+elif printf '%s' "$SCHED_ERR" | grep -qiE 'accessdenied|not authorized'; then
+  echo "    [--] schedule $SCHEDULE — no permission to check from this identity (by design)"
+  UNVERIFIED=1
+elif [ "$FIRST_DEPLOY" = "1" ]; then
+  echo "    [--] schedule $SCHEDULE not created yet — expected; it is the LAST step"
 else
-  echo "    [!!] schedule $SCHEDULE missing or unreadable — the bot would never run"
+  echo "    [!!] schedule $SCHEDULE missing — the bot would never run"
   DRIFT=1
 fi
 
@@ -117,4 +137,10 @@ If you see announced_kill or announced_aotc on the first run, stop the schedule.
 NOTE
 fi
 
+if [ "$UNVERIFIED" = "1" ]; then
+  echo
+  echo "Some admin-owned resources could not be checked from this identity. That is the"
+  echo "intended separation, not a problem — verify them from CloudShell if you want to be"
+  echo "sure:  aws ssm get-parameters-by-path --path /greybot --recursive --query 'Parameters[].Name'"
+fi
 [ "$DRIFT" = "0" ] || { echo; echo "Drift detected — fix in CloudShell as admin (infra/iam-setup.sh)."; exit 1; }
