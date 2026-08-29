@@ -600,6 +600,72 @@ def test_wcl_parsing():
           wcl.rate_limit({}) is None)
 
 
+def test_wcl_pagination():
+    """Regression: a single 100-report page was rejected outright by Warcraft Logs at
+    70,705 complexity against a 50,000 ceiling, and the whole first run died with it."""
+    print("\nWarcraft Logs paging")
+    base = 1_756_000_000_000
+    calls = []
+
+    def report(i):
+        return {"code": f"r{i}", "startTime": base + i * 1000,
+                "zone": {"id": 44, "name": "The Venomous Abyss"},
+                "fights": [{"id": 1, "encounterID": 3000 + i, "name": ABYSS[i % 8],
+                            "kill": True, "difficulty": 4, "startTime": 0,
+                            "endTime": 1000}]}
+
+    def paged(pages):
+        def fake(token, doc, variables=None):
+            calls.append(dict(variables or {}))
+            page = (variables or {}).get("page", 1)
+            data = pages[page - 1] if page - 1 < len(pages) else []
+            return {"rateLimitData": {"limitPerHour": 3600, "pointsSpentThisHour": 5.0,
+                                      "pointsResetIn": 60},
+                    "reportData": {"reports": {"data": data}}}
+        return fake
+
+    saved = wcl.query
+    try:
+        check("the query sends a page variable at all",
+              "$page: Int!" in wcl.REPORTS_Q and "page: $page" in wcl.REPORTS_Q)
+
+        # Two full pages then a short one: it should walk all three and stop.
+        calls.clear()
+        wcl.query = paged([[report(i) for i in range(3)],
+                           [report(i) for i in range(3, 6)],
+                           [report(6)]])
+        kills, rate = wcl.heroic_kills_since("t", 1, 0, limit=3, max_pages=6)
+        check("a full page triggers the next one", len(calls) == 3, len(calls))
+        check("pages are requested in order",
+              [c["page"] for c in calls] == [1, 2, 3], [c["page"] for c in calls])
+        check("kills from every page are merged", len(kills) == 7, len(kills))
+        check("and returned oldest-first",
+              [k["killedAtMs"] for k in kills] == sorted(k["killedAtMs"] for k in kills))
+
+        # A short first page is the last page; do not ask for another.
+        calls.clear()
+        wcl.query = paged([[report(0)]])
+        wcl.heroic_kills_since("t", 1, 0, limit=3, max_pages=6)
+        check("a short page stops paging immediately", len(calls) == 1, len(calls))
+
+        # max_pages is a hard cap even when every page comes back full.
+        calls.clear()
+        wcl.query = paged([[report(i) for i in range(3)]] * 10)
+        wcl.heroic_kills_since("t", 1, 0, limit=3, max_pages=2)
+        check("max_pages caps the walk", len(calls) == 2, len(calls))
+
+        calls.clear()
+        wcl.query = paged([[report(i) for i in range(3)]] * 10)
+        wcl.heroic_kills_since("t", 1, 0, limit=3)
+        check("a routine poll defaults to a single page", len(calls) == 1, len(calls))
+
+        check("the seed page size stays well under the complexity ceiling",
+              25 * 707 < 50000, 25 * 707)
+        check("...and the routine poll size too", 12 * 707 < 50000, 12 * 707)
+    finally:
+        wcl.query = saved
+
+
 # ---------------------------------------------------------------- end to end
 
 def test_end_to_end():
@@ -627,7 +693,7 @@ def test_end_to_end():
         return {"encounterID": 3000 + (hash(name) % 900), "name": name, "zoneID": 44,
                 "zoneName": zone, "reportCode": "aBcD", "killedAtMs": ms(days_ago)}
 
-    def fake_kills(token, gid, since_ms, limit=12, difficulty=4):
+    def fake_kills(token, gid, since_ms, limit=12, difficulty=4, max_pages=1):
         deep = since_ms < ms(handler.LOOKBACK_DAYS + 1)
         src = history if deep else window
         return (sorted([k for k in src if k["killedAtMs"] >= since_ms],
@@ -749,7 +815,8 @@ def main():
     print("greyBot self-test")
     for fn in (test_config, test_name_normalisation, test_slug_resolution,
                test_seed_names, test_progress_count, test_dedupe, test_aotc_guard,
-               test_discord_payloads, test_wcl_parsing, test_end_to_end):
+               test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
+               test_end_to_end):
         fn()
     print()
     if FAILED:

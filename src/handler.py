@@ -52,8 +52,15 @@ LOOKBACK_DAYS = float(os.environ.get("LOOKBACK_DAYS", "3"))
 REPORT_LIMIT = int(os.environ.get("REPORT_LIMIT", "12"))
 
 # Seeding reaches back across whole tiers instead, and runs once.
+#
+# The page size is a COMPLEXITY budget, not a preference. Warcraft Logs prices a query
+# from its shape, and asking for fights inside each report costs roughly 707 per report
+# against a 50,000 ceiling -- a single page of 100 was rejected at 70,705 without
+# returning anything. 25 lands near 17,700, leaving room for the weights to change, and
+# the depth comes from walking pages instead.
 SEED_LOOKBACK_DAYS = float(os.environ.get("SEED_LOOKBACK_DAYS", "240"))
-SEED_REPORT_LIMIT = int(os.environ.get("SEED_REPORT_LIMIT", "100"))
+SEED_REPORT_LIMIT = int(os.environ.get("SEED_REPORT_LIMIT", "25"))
+SEED_MAX_PAGES = int(os.environ.get("SEED_MAX_PAGES", "6"))
 
 # Warcraft Logs bills points per hour, not requests. Above this fraction of the hourly
 # allowance the run stops before the expensive reports query. Announcements resume when
@@ -116,10 +123,11 @@ def guild_id(token, cfg):
     return _guild_id["value"], rate
 
 
-def history_by_slug(token, gid, cfg, profile, index, days, limit):
+def history_by_slug(token, gid, cfg, profile, index, days, limit, max_pages=1):
     """Every Heroic kill the log history can still see, grouped by raid slug."""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000
-    kills, rate = wcl.heroic_kills_since(token, gid, since, limit=limit)
+    kills, rate = wcl.heroic_kills_since(token, gid, since, limit=limit,
+                                         max_pages=max_pages)
     grouped = {}
     for k in kills:
         slug, _meta, _how = raiderio.resolve_raid(profile, k["name"], k.get("zoneName"),
@@ -138,7 +146,8 @@ def bootstrap(token, gid, pk, cfg, profile, index, now_iso):
     fall out of the dedupe rules agreeing with each other.
     """
     grouped, rate = history_by_slug(token, gid, cfg, profile, index,
-                                    SEED_LOOKBACK_DAYS, SEED_REPORT_LIMIT)
+                                    SEED_LOOKBACK_DAYS, SEED_REPORT_LIMIT,
+                                    max_pages=SEED_MAX_PAGES)
     progression = profile.get("raid_progression") or {}
     if not progression:
         raise RuntimeError(
@@ -187,7 +196,8 @@ def seed_new_tier(token, gid, pk, cfg, slug, raid_label, profile, index,
     tier's history predates the poll window: a rollover has only fresh kills.
     """
     grouped, rate = history_by_slug(token, gid, cfg, profile, index,
-                                    SEED_LOOKBACK_DAYS, SEED_REPORT_LIMIT)
+                                    SEED_LOOKBACK_DAYS, SEED_REPORT_LIMIT,
+                                    max_pages=SEED_MAX_PAGES)
     mine = grouped.get(slug, [])
     older = [k for k in mine if k["killedAtMs"] < window_start_ms]
     killed, total = raiderio.progress_for(profile, slug)

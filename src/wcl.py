@@ -103,10 +103,10 @@ query($name: String!, $server: String!, $region: String!) {
 """ % RATE
 
 REPORTS_Q = """
-query($guildID: Int!, $start: Float!, $limit: Int!, $difficulty: Int!) {
+query($guildID: Int!, $start: Float!, $limit: Int!, $difficulty: Int!, $page: Int!) {
   %s
   reportData {
-    reports(guildID: $guildID, startTime: $start, limit: $limit) {
+    reports(guildID: $guildID, startTime: $start, limit: $limit, page: $page) {
       data {
         code
         startTime
@@ -151,17 +151,37 @@ def find_guild(token, name, realm_slug, region):
     return guild, rate_limit(data)
 
 
-def heroic_kills_since(token, guild_id, since_ms, limit=12, difficulty=HEROIC):
-    """Every Heroic boss KILL in the guild's reports since `since_ms`, newest report first.
+def heroic_kills_since(token, guild_id, since_ms, limit=12, difficulty=HEROIC,
+                       max_pages=1):
+    """Every Heroic boss KILL in the guild's reports since `since_ms`.
 
     Returns a flat, chronologically ascending list of kills so the caller can announce a
     raid night in the order it actually happened rather than in whatever order the reports
     came back.
+
+    Paged, because the limit is not the only thing this API charges for. Query complexity
+    is computed from the SHAPE of the request, and asking for `fights` inside each report
+    multiplies by the report count: 100 reports priced out at 70,705 against a ceiling of
+    50,000 and was rejected outright, before a single byte came back. Roughly 707 per
+    report, so pages stay small and the deep seed pass walks several of them instead.
+
+    Paging stops on a short page rather than on a `has_more_pages` flag -- a page holding
+    fewer reports than asked for is the last page under any pagination scheme, and that
+    needs no extra field in the query to be true.
     """
-    data = query(token, REPORTS_Q, {"guildID": int(guild_id), "start": float(since_ms),
-                                    "limit": int(limit), "difficulty": int(difficulty)})
-    reports = (((data.get("reportData") or {}).get("reports") or {}).get("data")) or []
-    kills = []
+    kills, rate, page = [], None, 1
+    reports = []
+    while page <= max(1, int(max_pages)):
+        data = query(token, REPORTS_Q, {"guildID": int(guild_id), "start": float(since_ms),
+                                        "limit": int(limit), "difficulty": int(difficulty),
+                                        "page": page})
+        rate = rate_limit(data) or rate
+        batch = (((data.get("reportData") or {}).get("reports") or {}).get("data")) or []
+        reports.extend(batch)
+        if len(batch) < int(limit):
+            break
+        page += 1
+
     for rep in reports:
         base = rep.get("startTime") or 0
         zone = rep.get("zone") or {}
@@ -183,4 +203,4 @@ def heroic_kills_since(token, guild_id, since_ms, limit=12, difficulty=HEROIC):
                 "killedAtMs": int(base + (f.get("endTime") or f.get("startTime") or 0)),
             })
     kills.sort(key=lambda k: k["killedAtMs"])
-    return kills, rate_limit(data)
+    return kills, rate
