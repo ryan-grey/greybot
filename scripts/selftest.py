@@ -298,7 +298,51 @@ INDEX = raiderio.RaidIndex(RAIDS)
 
 # Prime the static-data cache so build_index resolves from the fixture instead of calling
 # Raider.IO. Without this the offline guard fires, which is exactly what it is for.
-raiderio._static_cache.update({10: [], 11: RAIDS, 12: [], 13: []})
+# Expansion 10 is loaded on purpose. Scrambled's logs still hold Heroic Manaforge Omega
+# kills from the previous expansion, and a boss the index has never heard of cannot be
+# recognised as out of scope -- it has to be identifiable in order to be rejected.
+PREV_RAIDS = [
+    {
+        "slug": "manaforge-omega",
+        "name": "Manaforge Omega",
+        "starts": {
+            "us": "2025-08-12T15:00:00Z"
+        },
+        "ends": {
+            "us": "2026-03-02T22:00:00Z"
+        },
+        "encounters": [
+            {
+                "name": "Plexus Sentinel"
+            },
+            {
+                "name": "Loom'ithar"
+            },
+            {
+                "name": "Soulbinder Naazindhri"
+            },
+            {
+                "name": "Forgeweaver Araz"
+            },
+            {
+                "name": "The Soul Hunters"
+            },
+            {
+                "name": "Fractillus"
+            },
+            {
+                "name": "Nexus-King Salhadaar"
+            },
+            {
+                "name": "Dimensius"
+            }
+        ]
+    }
+]
+
+MANAFORGE = [e["name"] for e in PREV_RAIDS[0]["encounters"]]
+
+raiderio._static_cache.update({9: [], 10: PREV_RAIDS, 11: RAIDS, 12: [], 13: []})
 
 
 def dt(s):
@@ -308,7 +352,51 @@ def dt(s):
 
 # Prime the static-data cache so build_index resolves from the fixture instead of calling
 # Raider.IO. Without this the offline guard fires, which is exactly what it is for.
-raiderio._static_cache.update({10: [], 11: RAIDS, 12: [], 13: []})
+# Expansion 10 is loaded on purpose. Scrambled's logs still hold Heroic Manaforge Omega
+# kills from the previous expansion, and a boss the index has never heard of cannot be
+# recognised as out of scope -- it has to be identifiable in order to be rejected.
+PREV_RAIDS = [
+    {
+        "slug": "manaforge-omega",
+        "name": "Manaforge Omega",
+        "starts": {
+            "us": "2025-08-12T15:00:00Z"
+        },
+        "ends": {
+            "us": "2026-03-02T22:00:00Z"
+        },
+        "encounters": [
+            {
+                "name": "Plexus Sentinel"
+            },
+            {
+                "name": "Loom'ithar"
+            },
+            {
+                "name": "Soulbinder Naazindhri"
+            },
+            {
+                "name": "Forgeweaver Araz"
+            },
+            {
+                "name": "The Soul Hunters"
+            },
+            {
+                "name": "Fractillus"
+            },
+            {
+                "name": "Nexus-King Salhadaar"
+            },
+            {
+                "name": "Dimensius"
+            }
+        ]
+    }
+]
+
+MANAFORGE = [e["name"] for e in PREV_RAIDS[0]["encounters"]]
+
+raiderio._static_cache.update({9: [], 10: PREV_RAIDS, 11: RAIDS, 12: [], 13: []})
 INDEX = raiderio.RaidIndex(RAIDS)
 
 
@@ -400,6 +488,32 @@ def test_slug_resolution():
     check("a single live raid resolves by window",
           (slug, how) == ("tier-mn-1", "live-window"), f"got {slug!r}/{how!r}")
 
+    # THE regression. Scrambled farms Manaforge Omega, last expansion's tier. Those bosses
+    # are not in raid_progression, and the version that always returned something dumped
+    # all eight into the-venomous-abyss -- an 8-boss raid -- so the next real kill there
+    # would have read "8 of 8" and fired AOTC with a role ping.
+    full = raiderio.build_index(PROFILE, 11)[0]
+    for boss in MANAFORGE:
+        slug, meta, how = raiderio.resolve_raid(PROFILE, boss, "Manaforge Omega",
+                                                dt("2026-08-27T02:00:00+00:00"), "us", full)
+        if slug is not None:
+            check(f"last expansion's boss {boss!r} must not resolve to a tracked tier",
+                  False, f"resolved to {slug!r} via {how!r}")
+            break
+    else:
+        check("every Manaforge Omega boss is recognised and declined", True)
+    check("...and declined for the RIGHT reason, not merely unrecognised",
+          raiderio.resolve_raid(PROFILE, MANAFORGE[0], "Manaforge Omega",
+                                dt("2026-08-27T02:00:00+00:00"), "us", full)[2]
+          == "known-raid-not-tracked")
+    check("the index spans the previous expansion so those bosses are identifiable",
+          "manaforge-omega" in full.raids)
+
+    slug, meta, how = raiderio.resolve_raid(PROFILE, "Totally Unknown Boss", "Nowhere",
+                                            dt("2026-08-28T02:00:00+00:00"), "us", full)
+    check("an unattributable kill is skipped, never guessed into the newest tier",
+          slug is None and how == "unresolved", f"got {slug!r}/{how!r}")
+
     # The heuristic this design deliberately does NOT use: "the tier that is neither
     # cleared nor untouched". It works today and stops working at the worst moment.
     neither = [k for k, v in PROFILE["raid_progression"].items()
@@ -440,6 +554,15 @@ def test_seed_names():
     names, basis = raiderio.seed_names(None, 2, 8, [ABYSS[0]])
     check("no static data still seeds whatever history saw",
           names == {raiderio.normalize(ABYSS[0])} and basis == "history-only")
+
+    # Belt and braces: even if resolution went wrong again, a tier can only be seeded with
+    # bosses it actually contains. This is the assertion that makes a repeat impossible.
+    names, basis = raiderio.seed_names(abyss, 2, 8, MANAFORGE + [ABYSS[0], ABYSS[1]])
+    check("foreign bosses can never inflate a tier's seed",
+          names == {raiderio.normalize(n) for n in ABYSS[:2]},
+          sorted(names))
+    check("a seed can never exceed the raid's own boss count",
+          len(raiderio.seed_names(abyss, 8, 8, MANAFORGE)[0]) <= 8)
 
 
 def test_progress_count():
@@ -709,7 +832,7 @@ def test_end_to_end():
                           "pointsResetIn": 60}}
     handler.wcl.heroic_kills_since = fake_kills
     handler.raiderio.guild_profile = lambda *a, **kw: profile
-    handler.raiderio.static_raids = lambda exp: RAIDS if exp == 11 else []
+    handler.raiderio.static_raids = lambda exp: {11: RAIDS, 10: PREV_RAIDS}.get(exp, [])
     handler.discord.post = lambda hook, payload, **kw: posts.append(payload) or 204
 
     pk = store.guild_pk("us", "proudmoore", "Scrambled")
@@ -718,7 +841,10 @@ def test_end_to_end():
     # --- tier-mn-1 clear is older than the lookback, exactly as it would be in reality.
     FAKE_DDB.items.clear()
     handler._guild_id["value"] = None
-    history = [kill(ABYSS[0], 6), kill(ABYSS[1], 5)]
+    # History carries last expansion's Manaforge Omega farm alongside the real kills --
+    # the exact shape of the live data that broke the first bootstrap.
+    history = ([kill(ABYSS[0], 6), kill(ABYSS[1], 5)]
+               + [kill(n, 20 + i, zone="Manaforge Omega") for i, n in enumerate(MANAFORGE)])
     window = []
     handler.handler({}, None)
 
@@ -737,6 +863,11 @@ def test_end_to_end():
     check("the current tier seeded its two kills with AOTC unset",
           len(abyss["announced"]) == 2 and abyss["aotcAnnounced"] is False,
           f"{len(abyss['announced'])} / {abyss['aotcAnnounced']}")
+    check("no Manaforge Omega boss leaked into the current tier",
+          not (abyss["announced"] & {raiderio.normalize(n) for n in MANAFORGE}),
+          sorted(abyss["announced"]))
+    check("and its baseline cannot exceed the boss total",
+          abyss["baseline"] <= 8, abyss["baseline"])
 
     # --- run two, unchanged. Must not re-bootstrap and must not announce.
     posts.clear()

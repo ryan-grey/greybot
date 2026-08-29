@@ -128,13 +128,20 @@ def history_by_slug(token, gid, cfg, profile, index, days, limit, max_pages=1):
     since = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000
     kills, rate = wcl.heroic_kills_since(token, gid, since, limit=limit,
                                          max_pages=max_pages)
-    grouped = {}
+    grouped, skipped = {}, {}
     for k in kills:
-        slug, _meta, _how = raiderio.resolve_raid(profile, k["name"], k.get("zoneName"),
-                                                  _at(k["killedAtMs"]), cfg["guild_region"],
-                                                  index)
+        slug, _meta, how = raiderio.resolve_raid(profile, k["name"], k.get("zoneName"),
+                                                 _at(k["killedAtMs"]), cfg["guild_region"],
+                                                 index)
         if slug:
             grouped.setdefault(slug, []).append(k)
+        else:
+            skipped.setdefault(how, set()).add(k["name"])
+    for how, names in skipped.items():
+        # Worth a line rather than a silent drop: "known-raid-not-tracked" is the healthy
+        # case (an old expansion's tier being farmed), "unresolved" means a boss nothing
+        # could identify, which is the one to look at if announcements go missing.
+        log("kills_not_attributed", reason=how, bosses=sorted(names), count=len(names))
     return grouped, rate
 
 
@@ -163,12 +170,15 @@ def bootstrap(token, gid, pk, cfg, profile, index, now_iso):
         names, basis = raiderio.seed_names(meta, killed, total, seen)
         aotc_already = bool(total and killed is not None and killed >= total)
         label = (meta or {}).get("name") or slug
-        created = store.seed_tier(pk, slug, names, killed or 0, label, now_iso,
+        # A baseline above the boss total is arithmetically impossible and is exactly what
+        # manufactures a premature "8 of 8". Clamp it rather than trusting the inputs.
+        baseline = min(killed or 0, total) if total else (killed or 0)
+        created = store.seed_tier(pk, slug, names, baseline, label, now_iso,
                                   aotc_already=aotc_already)
 
         log("seeded_tier", slug=slug, raid=label, created=created, seededBosses=len(names),
             fromLogHistory=len(seen), basis=basis, raiderioKilled=killed, total=total,
-            aotcPreset=aotc_already, announced=0)
+            baseline=baseline, aotcPreset=aotc_already, announced=0)
         if basis == "assumed-kill-order":
             # Recorded rather than silent: the log history could not account for every
             # kill Raider.IO knows about, so the published boss order stood in for it.
@@ -288,7 +298,7 @@ def handler(event, context):
 
     profile = raiderio.guild_profile(cfg["guild_region"], cfg["guild_realm"],
                                      cfg["guild_name"])
-    index, expansion = raiderio.build_index(profile, EXPANSION_HINT)
+    index, expansions = raiderio.build_index(profile, EXPANSION_HINT)
 
     # The first-run branch. Nothing below this line can run until a bootstrap has been
     # recorded, so there is no ordering in which run one announces anything.
@@ -362,7 +372,7 @@ def handler(event, context):
         store.touch(pk, slug, now_iso, raid_name=raid_label)
         log("tier_summary", slug=slug, raid=raid_label,
             resolvedBy=bundle["kills"][0].get("_how"), killsSeen=len(bundle["kills"]),
-            count=count, total=total, expansion=expansion)
+            count=count, total=total, expansions=expansions)
 
     log("poll_done", kills=len(kills), announced=announced, tiers=len(grouped),
         points=rate, ms=int((time.time() - started) * 1000))
