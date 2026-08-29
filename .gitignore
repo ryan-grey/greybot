@@ -1,0 +1,4 @@
+# Real account values live here, never in the repo. See .env.example.
+.env
+__pycache__/
+*.pyc
