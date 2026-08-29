@@ -19,6 +19,7 @@ Fetched once per container and cached. get_parameters takes up to ten names, so 
 arrive in a single call rather than seven.
 """
 
+import json
 import os
 import time
 
@@ -74,11 +75,24 @@ def load(now=None):
     if _cache and (now - _fetched_at["t"]) < TTL_SECONDS:
         return _cache
 
-    res = ssm.get_parameters(Names=NAMES + OPTIONAL_NAMES, WithDecryption=True)
+    res = ssm.get_parameters(Names=NAMES, WithDecryption=True)
     got = {p["Name"]: p["Value"] for p in res.get("Parameters", [])}
     missing = [n for n in NAMES if n not in got or not got[n].strip()]
     if missing:
         raise RuntimeError("missing or empty SSM parameters: " + ", ".join(missing))
+
+    # Optional parameters are fetched SEPARATELY, and failure here is survivable.
+    # GetParameters denies the entire call if the caller lacks permission on any single
+    # name in it, so asking for optional names alongside required ones means one
+    # un-granted parameter takes down the whole bot rather than disabling one feature.
+    # That is exactly what happened when the Discord interaction parameters were added
+    # before the role was widened: the announcer stopped, for want of a slash command.
+    try:
+        opt = ssm.get_parameters(Names=OPTIONAL_NAMES, WithDecryption=True)
+        got.update({p["Name"]: p["Value"] for p in opt.get("Parameters", [])})
+    except Exception as exc:                                   # noqa: BLE001
+        print(json.dumps({"event": "optional_config_unavailable", "error": repr(exc),
+                          "note": "optional features disabled; required config is fine"}))
 
     _cache.clear()
     _fetched_at["t"] = now

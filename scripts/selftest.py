@@ -454,6 +454,28 @@ def test_config():
           == "rotated-value")
     SSM_VALUES["/greybot/wcl/client_secret"] = "not-a-real-secret"
 
+    # An optional parameter the role cannot read must disable one feature, not the bot.
+    # GetParameters denies the whole call on a single un-granted name, so the optional set
+    # is fetched separately and its failure is survivable.
+    config._cache.clear()
+    real = config.ssm.get_parameters
+    def deny_optional(Names=None, WithDecryption=False):
+        if set(Names or []) & set(config.OPTIONAL_NAMES):
+            raise RuntimeError("AccessDeniedException: not authorized")
+        return real(Names=Names, WithDecryption=WithDecryption)
+    config.ssm.get_parameters = deny_optional
+    try:
+        degraded = config.load(now=5000.0)
+        check("an unreadable OPTIONAL parameter does not take the bot down",
+              degraded["guild_name"] == "Scrambled")
+        check("...it just turns that feature off",
+              degraded["public_key"] == "" and degraded["bot_token"] == "")
+    except Exception as exc:                                   # noqa: BLE001
+        check("an unreadable OPTIONAL parameter does not take the bot down", False, repr(exc))
+    finally:
+        config.ssm.get_parameters = real
+        config._cache.clear()
+
     config._cache.clear()
     saved = SSM_VALUES.pop("/greybot/guild/realm")
     try:

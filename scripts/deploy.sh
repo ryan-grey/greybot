@@ -72,22 +72,18 @@ PY
 
 if aws lambda get-function --function-name "$FN" --region "$REGION" >/dev/null 2>&1; then
   echo "[=] Updating $FN"
-  # Architecture first, code second. The currently deployed code is pure Python and runs
-  # on either architecture, so this ordering never leaves arm64 metadata pointing at an
-  # x86_64 binary. Doing it the other way round would.
-  aws lambda update-function-configuration --function-name "$FN" --region "$REGION" \
-    --environment "$ENV" --timeout 60 --memory-size 512 >/dev/null
-  aws lambda wait function-updated --function-name "$FN" --region "$REGION"
+  # Architecture rides on update-function-code, which is the only update call that accepts
+  # it -- update-function-configuration rejects --architectures outright. That is the right
+  # shape anyway: the aarch64 binaries and the arm64 metadata land in the same call, so
+  # there is never a moment where one points at the other.
   CUR_ARCH="$(aws lambda get-function-configuration --function-name "$FN" \
     --region "$REGION" --query 'Architectures[0]' --output text)"
-  if [ "$CUR_ARCH" != "arm64" ]; then
-    echo "    switching architecture $CUR_ARCH -> arm64"
-    aws lambda update-function-configuration --function-name "$FN" --region "$REGION" \
-      --architectures arm64 >/dev/null
-    aws lambda wait function-updated --function-name "$FN" --region "$REGION"
-  fi
+  [ "$CUR_ARCH" = "arm64" ] || echo "    switching architecture $CUR_ARCH -> arm64"
   aws lambda update-function-code --function-name "$FN" --region "$REGION" \
     --zip-file "fileb://$TMP/package.zip" --architectures arm64 >/dev/null
+  aws lambda wait function-updated --function-name "$FN" --region "$REGION"
+  aws lambda update-function-configuration --function-name "$FN" --region "$REGION" \
+    --environment "$ENV" --timeout 60 --memory-size 512 >/dev/null
   aws lambda wait function-updated --function-name "$FN" --region "$REGION"
   FIRST_DEPLOY=0
 else
