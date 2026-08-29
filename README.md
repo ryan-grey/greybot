@@ -389,21 +389,20 @@ aws lambda invoke --function-name ryangrey-greybot --region us-east-1 \
 The application id is read from `/users/@me` rather than configured — for a bot, the user
 id *is* the application id, which removes a fourth parameter to keep in step.
 
-### Active Developer Badge
+### On the Active Developer Badge
 
-Requires an owned app with a registered slash command actually invoked, claimed at
-`discord.com/developers/active-developer`:
+This command was originally built to qualify for Discord's Active Developer Badge.
+**Discord discontinued that badge on 5 December 2025**, removing it from every profile —
+they judged it a support burden that benefited developers little. It cannot be earned, so
+nothing here chases it.
 
-1. Register the command (above)
-2. Run `/progress` in the server
-3. Wait up to 24 hours for Discord to notice the invocation
-4. Claim the badge
+The command stays because the second reason was the real one: the guild wants progress on
+demand, not only at kill time. `/progress` answers in about a tenth of a second from state
+the poller already maintains.
 
-**The badge lapses if no command is invoked for ~30 days**, so it needs an occasional
-`/progress` to stay current.
-
-The verified checkmark is a different thing and needs the bot in 100+ servers. This one is
-single-guild by design and will never qualify; there is deliberately no code chasing it.
+The verified checkmark is a separate thing and needs the bot in 100+ servers. This one is
+single-guild by design and will never qualify; there is deliberately no code chasing that
+either.
 
 ---
 
