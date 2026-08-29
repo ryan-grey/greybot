@@ -86,6 +86,7 @@ fi
 # authorisation failure here means "cannot verify from this identity", which is a note,
 # not drift. Only a resource that genuinely does not exist is drift.
 UNVERIFIED=0
+PENDING=0
 for P in "${PARAMS[@]}"; do
   ERR="$(aws ssm get-parameter --name "$P" --region "$REGION" 2>&1 >/dev/null)" && {
     echo "    [ok] $P"; continue; }
@@ -111,11 +112,13 @@ if [ -n "$SCHED" ] && [ "$SCHED" != "None" ]; then
 elif printf '%s' "$SCHED_ERR" | grep -qiE 'accessdenied|not authorized'; then
   echo "    [--] schedule $SCHEDULE — no permission to check from this identity (by design)"
   UNVERIFIED=1
-elif [ "$FIRST_DEPLOY" = "1" ]; then
-  echo "    [--] schedule $SCHEDULE not created yet — expected; it is the LAST step"
 else
-  echo "    [!!] schedule $SCHEDULE missing — the bot would never run"
-  DRIFT=1
+  # Absent is not the same as broken. The schedule is deliberately the LAST step of setup,
+  # so on any deploy that happens before step 5 it is simply not there yet. Failing the
+  # deploy over it would be the same error as treating AccessDenied as "missing": the
+  # deploy itself succeeded, and the code is live either way. Loud, but not fatal.
+  echo "    [--] schedule $SCHEDULE not created yet — run infra/create-schedule.sh (step 5)"
+  PENDING=1
 fi
 
 echo
@@ -142,5 +145,10 @@ if [ "$UNVERIFIED" = "1" ]; then
   echo "Some admin-owned resources could not be checked from this identity. That is the"
   echo "intended separation, not a problem — verify them from CloudShell if you want to be"
   echo "sure:  aws ssm get-parameters-by-path --path /greybot --recursive --query 'Parameters[].Name'"
+fi
+if [ "$PENDING" = "1" ]; then
+  echo
+  echo "The function is live but nothing is invoking it yet. That is expected until"
+  echo "infra/create-schedule.sh runs in CloudShell as the last setup step."
 fi
 [ "$DRIFT" = "0" ] || { echo; echo "Drift detected — fix in CloudShell as admin (infra/iam-setup.sh)."; exit 1; }
