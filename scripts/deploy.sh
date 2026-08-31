@@ -179,13 +179,23 @@ fi
 
 if [ "$UNVERIFIED" = "1" ]; then
   echo
-  echo "Some admin-owned resources could not be checked from this identity. That is the"
-  echo "intended separation, not a problem — verify them from CloudShell if you want to be"
-  echo "sure:  aws ssm get-parameters-by-path --path /greybot --recursive --query 'Parameters[].Name'"
+  echo "Some resources could not be checked from this identity. That is the intended"
+  echo "separation, not a problem — ryan-cli ships code and nothing else. Verify with the"
+  echo "infra profile if you want to be sure:"
+  echo "  aws --profile infra ssm get-parameters-by-path --path /greybot --recursive \\"
+  echo "    --query 'Parameters[].Name'"
 fi
 if [ "$PENDING" = "1" ]; then
   echo
   echo "The function is live but nothing is invoking it yet. That is expected until"
-  echo "infra/create-schedule.sh runs in CloudShell as the last setup step."
+  echo "infra/create-schedule.sh runs as the last setup step."
 fi
-[ "$DRIFT" = "0" ] || { echo; echo "Drift detected — fix in CloudShell as admin (infra/iam-setup.sh)."; exit 1; }
+# Most drift is now fixable from this machine: ryangrey-infra owns the greybot role, the
+# table, the parameters and the scheduler. Only creating roles at path "/" still needs
+# admin, which is infra/iam-setup.sh and a first-time-setup problem, not a running one.
+[ "$DRIFT" = "0" ] || {
+  echo
+  echo "Drift detected. Most of it is fixable with 'aws --profile infra' from here —"
+  echo "a missing parameter with infra/grant-alerts.sh, a missing schedule with"
+  echo "infra/create-schedule.sh. Only role creation still needs admin (infra/iam-setup.sh)."
+  exit 1; }

@@ -799,6 +799,8 @@ infra/create-recap-schedule.sh    the Wed/Fri morning recap schedule
 infra/create-interactions-api.sh  the HTTPS endpoint Discord posts interactions to
 infra/grant-interactions.sh       widen the role for slash commands
 infra/grant-alerts.sh             health alerts: the parameter + sns:Publish on the role
+infra/reset-state.sh              DESTRUCTIVE: clear one guild's state so the next run reseeds
+docs/wcl-reportdata-blind.md      incident record: Warcraft Logs returned no reports for 18h
 ```
 
 One dependency: **PyNaCl**, for Ed25519 signature verification. Signature checking is not
