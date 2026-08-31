@@ -33,7 +33,8 @@ PARAMS=(/greybot/wcl/client_id /greybot/wcl/client_secret /greybot/discord/webho
         /greybot/discord/public_key /greybot/discord/guild_id
         /greybot/recap/enabled /greybot/recap/show_worst_parse /greybot/recap/schedule
         /greybot/team/roster_min_first_kill_pct /greybot/team/prog_overlap_high
-        /greybot/team/prog_overlap_low /greybot/team/prog_tag)
+        /greybot/team/prog_overlap_low /greybot/team/prog_tag
+        /greybot/alerts/sns_topic_arn)
 
 # The self-test needs PyNaCl to exercise signature verification against real Ed25519
 # rather than a stub, and a stub would happily agree with an implementation that had the

@@ -74,11 +74,18 @@ TEAM_OVERLAP_LOW = f"{PREFIX}/team/prog_overlap_low"
 # into an authoritative answer with no code change.
 TEAM_PROG_TAG = f"{PREFIX}/team/prog_tag"
 
+# Where a health alert is published. Optional, and unset is how the alerts are switched
+# off: the probes still run and still log, they simply have nowhere to mail. That is the
+# right default for a name that has to exist before the role can be granted it -- the
+# parameter can be created in one step and pointed at the topic in another, with no window
+# where a half-wired alert either crashes the poll or sends mail nobody expected.
+ALERT_TOPIC_ARN = f"{PREFIX}/alerts/sns_topic_arn"
+
 OPTIONAL_NAMES = [BLIZZARD_CLIENT_ID, BLIZZARD_CLIENT_SECRET,
                   DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID,
                   RECAP_ENABLED, RECAP_WORST_PARSE, RECAP_SCHEDULE,
                   TEAM_ROSTER_MIN_PCT, TEAM_OVERLAP_HIGH, TEAM_OVERLAP_LOW,
-                  TEAM_PROG_TAG]
+                  TEAM_PROG_TAG, ALERT_TOPIC_ARN]
 
 # Defaults for everything the recap reads. A missing parameter is a configured default,
 # not a failure -- the thresholds especially, because they are tuning knobs that only
@@ -96,6 +103,7 @@ DEFAULTS = {
     TEAM_OVERLAP_HIGH: "70",
     TEAM_OVERLAP_LOW: "35",
     TEAM_PROG_TAG: "",
+    ALERT_TOPIC_ARN: "",
 }
 
 
@@ -185,6 +193,8 @@ def load(now=None):
         "overlap_high": _number(got.get(TEAM_OVERLAP_HIGH), DEFAULTS[TEAM_OVERLAP_HIGH]),
         "overlap_low": _number(got.get(TEAM_OVERLAP_LOW), DEFAULTS[TEAM_OVERLAP_LOW]),
         "prog_tag": got.get(TEAM_PROG_TAG, DEFAULTS[TEAM_PROG_TAG]).strip(),
+        "alert_topic_arn": got.get(ALERT_TOPIC_ARN,
+                                   DEFAULTS[ALERT_TOPIC_ARN]).strip(),
     })
     return _cache
 
@@ -203,4 +213,5 @@ def redacted(cfg):
             "rosterMinPct": cfg.get("roster_min_pct"),
             "overlapHigh": cfg.get("overlap_high"),
             "overlapLow": cfg.get("overlap_low"),
-            "progTag": cfg.get("prog_tag") or None}
+            "progTag": cfg.get("prog_tag") or None,
+            "alertsEnabled": bool(cfg.get("alert_topic_arn"))}

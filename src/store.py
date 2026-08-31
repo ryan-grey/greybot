@@ -460,3 +460,47 @@ def release_recap(pk, night_key):
     ddb.update_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(RECAPS_SK)},
                     UpdateExpression="DELETE posted :b",
                     ExpressionAttributeValues={":b": {"SS": [night_key]}})
+
+
+HEALTH_SK = "HEALTH"
+
+
+def get_health(pk):
+    """The last Discord standing this bot recorded, or None if it has never checked.
+
+    None is not "healthy". It is the first run, and handler.py treats it as a state to
+    record silently rather than a recovery to celebrate -- otherwise every fresh deploy
+    would mail to say nothing is wrong.
+    """
+    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(HEALTH_SK)},
+                       ConsistentRead=True)
+    item = res.get("Item")
+    if not item:
+        return None
+    return {"status": (item.get("status") or {}).get("S") or "",
+            "detail": (item.get("detail") or {}).get("S") or "",
+            "since": (item.get("since") or {}).get("S") or "",
+            "notifiedAt": (item.get("notifiedAt") or {}).get("S") or "",
+            # Three-valued on purpose: True, False, or absent because the probe could not
+            # say. Absent must not read as False, or an unreachable Discord would look
+            # like a bot that just lost its seat.
+            "member": (item.get("member") or {}).get("BOOL")}
+
+
+def put_health(pk, status, detail, since, notified_at="", member=None):
+    """Overwrite the standing wholesale.
+
+    A plain PutItem, deliberately -- unlike everything else in this table there is no
+    claim to win here. Two overlapping polls that both observe the same state write the
+    same item, and the one thing that must not happen (two emails about one kick) is
+    prevented by the transition test in handler.py, not by a conditional write. Making it
+    conditional would only add a way for the second poll to fail.
+    """
+    item = {"pk": _s(pk), "sk": _s(HEALTH_SK),
+            "status": _s(status), "detail": _s(detail or ""),
+            "since": _s(since), "notifiedAt": _s(notified_at or "")}
+    # Written only when the probe actually answered, so "could not tell" stays absent
+    # rather than being recorded as a definite False.
+    if member is not None:
+        item["member"] = {"BOOL": bool(member)}
+    ddb.put_item(TableName=TABLE, Item=item)

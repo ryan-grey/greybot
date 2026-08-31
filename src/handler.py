@@ -46,7 +46,9 @@ import boto3
 import blizzard
 import config
 import discord
+import health
 import interactions
+import notify
 import raiderio
 import recap as recap_mod
 import store
@@ -108,6 +110,12 @@ RECAP_LOOKBACK_HOURS = float(os.environ.get("RECAP_LOOKBACK_HOURS", "18"))
 # fine; a first kill that goes unannounced is not.
 RECAP_POINT_BUDGET = float(os.environ.get("RECAP_POINT_BUDGET", "750"))
 RECAP_MAX_REPORTS = int(os.environ.get("RECAP_MAX_REPORTS", "4"))
+
+# How long a Discord problem may sit before the alert is repeated. One mail per event is
+# the rule -- ninety-six polls a day must not be ninety-six emails -- but a single mail
+# that lands while Ryan is asleep and gets buried is a silent bot nobody knows about, so
+# the state re-announces itself once a day until it clears. Zero disables the repeat.
+HEALTH_REMIND_HOURS = float(os.environ.get("HEALTH_REMIND_HOURS", "24"))
 
 _guild_id = {"value": None}
 
@@ -622,7 +630,110 @@ def handle_interaction(event, cfg, pk, now):
     return interactions.http(200, {"type": interactions.PONG})
 
 
-def handle_admin(action, cfg):
+def _reminder_due(prev, now):
+    """Has a still-broken state gone un-mentioned for long enough to say it again?
+
+    An unparseable or missing notifiedAt reads as due. The stored timestamp is only ever
+    written by this code, so a bad one means something is already wrong, and the failure
+    that costs nothing is one extra email.
+    """
+    if HEALTH_REMIND_HOURS <= 0:
+        return False
+    raw = (prev or {}).get("notifiedAt") or ""
+    if not raw:
+        return True
+    try:
+        last = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return (now - last) >= timedelta(hours=HEALTH_REMIND_HOURS)
+
+
+def run_health_check(cfg, pk, now, now_iso, forced=False):
+    """Probe Discord, and mail on the TRANSITION rather than on the state.
+
+    The whole design lives in one rule: a definite answer that differs from the last
+    definite answer is an event, and nothing else is. Ninety-six polls a day against a
+    bot that was kicked on Tuesday must produce one email on Tuesday, a reminder each day
+    after, and one more when it is fixed.
+
+    An indefinite answer -- a timeout, a 502, a rate limit -- is not written down at all.
+    That is the important half. If Discord being unreachable were recorded as a state, the
+    next successful poll would read as a change and mail an all-clear for an outage that
+    never happened, and worse, an unreachable Discord during a real kick would clear the
+    alert.
+
+    Nothing in here may take the poll down with it, which is why the caller wraps it: an
+    announcement that failed to go out because the health check could not reach SNS would
+    be this feature causing exactly the outage it exists to report.
+    """
+    result = health.check(cfg, now)
+    prev = store.get_health(pk) or {}
+    prev_status = prev.get("status") or ""
+    status = result["status"]
+
+    if not result["definite"]:
+        log("health_unknown", previous=prev_status or None, probes=result["probes"])
+        return result
+
+    # Losing a bot member is a REGRESSION, not a state, and only the stored answer knows
+    # whether there was ever a member to lose. greyBot was authorised with
+    # `applications.commands` and never with `bot`, so it has no member and never has --
+    # reading that absence as a kick is what mailed a false alarm on the first live run.
+    # health.py reports; the comparison lives here because the comparison needs history.
+    member = result.get("member")
+    if prev.get("member") is True and member is False and status == health.OK:
+        status = health.NOT_A_MEMBER
+        result = dict(result, status=status,
+                      cause={"probe": "membership", "verdict": status,
+                             "note": "a bot member existed on the last check"})
+
+    changed = status != prev_status
+    first_run = not prev_status
+    since = now_iso if changed else (prev.get("since") or now_iso)
+
+    kind = None
+    if status != health.OK and (changed or forced):
+        kind = health.ALERT
+    elif status != health.OK and _reminder_due(prev, now):
+        kind = health.REMINDER
+    elif status == health.OK and changed and not first_run:
+        kind = health.RECOVERY
+    elif forced:
+        kind = health.TEST
+
+    sent = False
+    if kind:
+        try:
+            sent = notify.publish(
+                cfg.get("alert_topic_arn"),
+                health.subject(kind, status, cfg.get("guild_name") or ""),
+                health.body(kind, result, cfg, now_iso, since=since))
+        except notify.NotifyError as exc:
+            # Logged and swallowed. The state is still written below, so a topic that comes
+            # back tomorrow sends the reminder rather than pretending the day was fine.
+            log("health_alert_undeliverable", status=status, kind=kind, error=str(exc))
+
+    if changed or sent:
+        store.put_health(pk, status, json.dumps(result["cause"], sort_keys=True)
+                         if result["cause"] else "", since,
+                         now_iso if sent else (prev.get("notifiedAt") or ""),
+                         member=member if member is not None else prev.get("member"))
+
+    log("health_checked", status=status, previous=prev_status or None, changed=changed,
+        since=since, notified=kind if sent else None, botMember=member,
+        alertsConfigured=bool(cfg.get("alert_topic_arn")), probes=result["probes"])
+    return result
+
+
+def handle_admin(event, cfg, pk, now, now_iso):
+    action = event.get("admin")
+    if action == "health":
+        # The manual path, and the only one that mails while everything is fine -- which
+        # is how the SNS grant and the SES forwarder get proved end to end without waiting
+        # for something to actually go wrong.
+        return {"ok": True, "health": run_health_check(cfg, pk, now, now_iso,
+                                                       forced=bool(event.get("notify")))}
     if action != "register_commands":
         raise RuntimeError(f"unknown admin action: {action}")
     if not cfg.get("bot_token"):
@@ -656,7 +767,20 @@ def handler(event, context):
         if event.get("followup"):
             return handle_followup(event["followup"], cfg, pk, now)
         if event.get("admin"):
-            return handle_admin(event["admin"], cfg)
+            return handle_admin(event, cfg, pk, now, now_iso)
+
+    # Standing in the Discord, checked BEFORE any Warcraft Logs work. Every other branch
+    # below this point can return early -- rate-limit backoff, an idle poll, a recap that
+    # yields its budget -- and a check placed after any of them would go dark exactly when
+    # the bot went quiet, which is the moment it is for.
+    #
+    # Wrapped because it is an observer. Nothing it can do, including SNS being unreachable
+    # or Discord returning something this code has never seen, is allowed to stop an
+    # announcement going out.
+    try:
+        run_health_check(cfg, pk, now, now_iso)
+    except Exception as exc:                                       # noqa: BLE001
+        log("health_check_error", error=repr(exc))
 
     token = wcl.get_token(cfg["wcl_client_id"], cfg["wcl_client_secret"])
 

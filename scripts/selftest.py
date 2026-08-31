@@ -149,8 +149,22 @@ def _fake_get_parameters(Names=None, WithDecryption=False):
 
 FAKE_SSM = types.SimpleNamespace(get_parameters=_fake_get_parameters)
 
+# Every SNS publish the code makes, in order. The health alerts are a mail-on-transition
+# rule, so what matters in the tests is not that a message can be built -- it is HOW MANY
+# arrive across a sequence of polls. This list is the assertion.
+SENT = []
+
+
+def _fake_publish(TopicArn=None, Subject=None, Message=None):
+    SENT.append({"topic": TopicArn, "subject": Subject, "body": Message})
+    return {"MessageId": "fake"}
+
+
+FAKE_SNS = types.SimpleNamespace(publish=_fake_publish)
+
 boto3 = types.ModuleType("boto3")
-boto3.client = lambda service, **kw: FAKE_DDB if service == "dynamodb" else FAKE_SSM
+boto3.client = lambda service, **kw: {"dynamodb": FAKE_DDB,
+                                      "sns": FAKE_SNS}.get(service, FAKE_SSM)
 botocore = types.ModuleType("botocore")
 botocore.config = types.ModuleType("botocore.config")
 botocore.config.Config = lambda **kw: None
@@ -165,6 +179,8 @@ import config             # noqa: E402
 import interactions       # noqa: E402
 import discord            # noqa: E402
 import raiderio           # noqa: E402
+import health             # noqa: E402
+import notify             # noqa: E402
 import store              # noqa: E402
 import team               # noqa: E402
 import recap              # noqa: E402
@@ -1482,13 +1498,13 @@ def test_iam_grant_covers_config():
     print("\nThe role policy covers everything config.py reads")
     import re
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-    grant = open(os.path.join(root, "infra", "grant-recap-config.sh"),
+    grant = open(os.path.join(root, "infra", "grant-alerts.sh"),
                  encoding="utf-8").read()
     src = open(os.path.join(root, "src", "config.py"), encoding="utf-8").read()
 
     wanted = set(re.findall(r'f"\{PREFIX\}(/[a-z_/]+)"', src))
     granted = set(re.findall(r'\$P(/[a-z_/]+)"', grant))
-    check("config.py asks for a plausible number of parameters", len(wanted) >= 18,
+    check("config.py asks for a plausible number of parameters", len(wanted) >= 19,
           len(wanted))
     check("the role grants every one of them", wanted <= granted,
           f"NOT granted: {sorted(wanted - granted)}")
@@ -1501,6 +1517,248 @@ def test_iam_grant_covers_config():
     optional = [n.strip() for n in names.replace("\n", " ").split(",") if n.strip()]
     check("the optional list still spans more than one GetParameters call",
           len(optional) > 10, len(optional))
+
+
+# ------------------------------------------------- discord standing / alerts
+
+def test_health():
+    """The probes, and the rule that turns ninety-six polls a day into one email.
+
+    Two failure modes are being defended against here, and they pull in opposite
+    directions. One is a bot that gets kicked on a Tuesday and nobody finds out until the
+    guild asks why the last three kills went unannounced. The other is a bot that mails
+    every fifteen minutes because Discord had a bad afternoon. The transition rule is what
+    satisfies both, and it only works if an indefinite answer is treated as no answer at
+    all -- which is the assertion that matters most in this block.
+    """
+    print("\nDiscord standing: probes, and one email per event")
+    from datetime import datetime, timedelta, timezone
+
+    import handler
+
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    WEBHOOK = "https://discord.com/api/webhooks/1/tok"
+    GID = "999"
+    cfg = {"webhook": WEBHOOK, "bot_token": "t", "discord_guild_id": GID,
+           "guild_name": "Scrambled",
+           "alert_topic_arn": "arn:aws:sns:us-east-1:0:ryangrey-dev-alerts"}
+
+    real_get = health._get
+
+    def responder(**scripted):
+        """Each probe's URL mapped to a scripted (status, body). Everything unmentioned
+        answers healthily, so each case states only the thing it is testing."""
+        def _get(url, token=None, timeout=10):
+            if url.startswith(WEBHOOK):
+                return scripted.get("webhook", (200, {"channel_id": "5"}))
+            if "/users/@me/guilds" in url:
+                return scripted.get("guilds", (200, [{"id": GID}]))
+            if url.endswith("/users/@me"):
+                return scripted.get("identity", (200, {"id": "42"}))
+            if url.endswith("/commands"):
+                return scripted.get("installation", (200, [{"name": "progress"}]))
+            if "/members/" in url:
+                return scripted.get("member", (200, {}))
+            raise AssertionError("unexpected probe URL " + url)
+        return _get
+
+    def run(**scripted):
+        health._get = responder(**scripted)
+        return health.check(cfg, now)
+
+    res = run()
+    check("everything healthy reads ok", res["status"] == health.OK, res)
+    check("...definitely, having asked all five questions",
+          res["definite"] and [p["probe"] for p in res["probes"]] ==
+          ["webhook", "identity", "installation", "membership", "member"], res["probes"])
+
+    # THE FALSE ALARM THIS BLOCK EXISTS FOR. greyBot is authorised with
+    # `applications.commands` and not `bot`, so it has no member and never has. The first
+    # live run read that as a kick and mailed about a bot that was working perfectly.
+    res = run(guilds=(200, []))
+    check("no bot member is NOT a fault — greyBot has never had one",
+          res["status"] == health.OK and res["definite"], res)
+    check("...and the answer is carried for handler.py to compare against history",
+          res["member"] is False, res)
+
+    res = run(guilds=(200, [{"id": GID}]))
+    check("a bot member that IS there is reported as present", res["member"] is True, res)
+
+    # Losing the app's authorisation is the real "thrown out" signal for this bot.
+    res = run(installation=(403, {"code": 50001}))
+    check("the app being removed from the server is an alert",
+          res["status"] == health.NOT_INSTALLED and res["definite"], res)
+    check("...and says so without claiming to know kick from ban",
+          "banned" in health.ADVICE[health.NOT_INSTALLED], "")
+
+    # Removing an app deletes the webhooks that app created. The mail leads with the
+    # cause, not with whichever symptom was probed first.
+    res = run(installation=(403, {"code": 50001}), webhook=(404, {"code": 10015}))
+    check("a removal that also killed the webhook still reports the removal",
+          res["status"] == health.NOT_INSTALLED, res)
+
+    res = run(webhook=(404, {"code": 10015}))
+    check("a deleted webhook on its own is its own alert",
+          res["status"] == health.WEBHOOK_GONE, res)
+
+    res = run(member=(200, {"communication_disabled_until": "2026-09-01T18:00:00+00:00"}))
+    check("a timeout still running is a timeout", res["status"] == health.TIMED_OUT, res)
+
+    # communication_disabled_until is left behind after it expires. Reading it as a flag
+    # would keep mailing about a punishment that ended.
+    res = run(member=(200, {"communication_disabled_until": "2026-08-30T18:00:00+00:00"}))
+    check("an EXPIRED timeout is not a timeout", res["status"] == health.OK, res)
+
+    res = run(member=(200, {"mute": True}))
+    check("a server mute is reported", res["status"] == health.SERVER_MUTED, res)
+
+    res = run(identity=(401, {"code": 0}))
+    check("a rejected token is its own state", res["status"] == health.BAD_TOKEN, res)
+    check("...and stops the probes that would need it",
+          [p["probe"] for p in res["probes"]] == ["webhook", "identity"], res["probes"])
+
+    # Asking about a timeout on an app with no member returns 404 and would read as a
+    # second, invented failure.
+    res = run(guilds=(200, []))
+    check("with no member, the moderation probe is not even asked",
+          "member" not in [p["probe"] for p in res["probes"]], res["probes"])
+
+    # --- the indefinite answers. None of these may ever reach an inbox.
+    res = run(webhook=(500, {}))
+    check("a 500 is not evidence of anything",
+          res["status"] == health.UNKNOWN and not res["definite"], res)
+
+    res = run(guilds=(429, {"retry_after": 1}))
+    check("neither is a rate limit", not res["definite"], res)
+
+    res = run(identity=(None, {"error": "timeout"}))
+    check("neither is a request that never arrived", not res["definite"], res)
+
+    # 200 is this endpoint's maximum page size, so a full page cannot prove absence.
+    res = run(guilds=(200, [{"id": str(i)} for i in range(200)]))
+    check("a full page of guilds without ours is unknown, not kicked",
+          res["status"] == health.UNKNOWN, res)
+
+    res = run(webhook=(500, {}), installation=(403, {"code": 50001}))
+    check("but one unknown probe never masks a definite failure",
+          res["status"] == health.NOT_INSTALLED and res["definite"], res)
+
+    # ---------------------------------------------------------------- the mail
+    body = health.body(health.ALERT, run(installation=(403, {"code": 50001})), cfg,
+                       "2026-09-01T12:00:00Z", since="2026-09-01T12:00:00Z")
+    check("the alert names the server", "Scrambled" in body)
+    check("...admits a kick and a ban are indistinguishable from in here",
+          "banned" in body and "Re-authorise" in body)
+    check("...and shows every probe's raw answer",
+          "installation" in body and "webhook" in body)
+
+    check("SNS subjects are capped", len(notify.clean_subject("x" * 300)) <= 100)
+    check("...and stripped to ASCII, which SNS is fussy about",
+          notify.clean_subject("greyBot \u2014 kicked").isascii())
+
+    # ------------------------------------------------- one email per event
+    FAKE_DDB.items.clear()
+    SENT.clear()
+    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    _iso = handler._iso
+    real_check = health.check
+
+    def canned(status, definite=True, member=None):
+        cause = None if status == health.OK else {"probe": "membership", "verdict": status}
+        return lambda c, n=None: {"status": status, "definite": definite, "cause": cause,
+                                  "member": member,
+                                  "probes": [{"probe": "membership", "verdict": status}]}
+
+    health.check = canned(health.OK)
+    handler.run_health_check(cfg, pk, now, _iso(now))
+    check("a healthy first run mails nobody", SENT == [], SENT)
+    check("...but records the state, so the next change is a change",
+          (store.get_health(pk) or {}).get("status") == health.OK)
+
+    health.check = canned(health.NOT_A_MEMBER)
+    handler.run_health_check(cfg, pk, now, _iso(now))
+    check("being thrown out sends exactly one email", len(SENT) == 1, SENT)
+
+    t = now + timedelta(minutes=15)
+    handler.run_health_check(cfg, pk, t, _iso(t))
+    check("the next poll, still kicked, sends nothing", len(SENT) == 1, SENT)
+
+    t = now + timedelta(hours=25)
+    handler.run_health_check(cfg, pk, t, _iso(t))
+    check("a day later it says so once more", len(SENT) == 2, SENT)
+    check("...marked a reminder rather than a new event",
+          SENT[1]["subject"].startswith("Still:"), SENT[1]["subject"])
+
+    # The one that would be worst to get wrong: Discord going unreachable during a real
+    # kick must not read as recovery.
+    health.check = canned(health.UNKNOWN, definite=False)
+    t = now + timedelta(hours=26)
+    handler.run_health_check(cfg, pk, t, _iso(t))
+    check("an unreachable Discord mails nothing", len(SENT) == 2, SENT)
+    check("...and does not clear a live alert",
+          store.get_health(pk)["status"] == health.NOT_A_MEMBER)
+
+    health.check = canned(health.OK)
+    t = now + timedelta(hours=27)
+    handler.run_health_check(cfg, pk, t, _iso(t))
+    check("coming back sends one all-clear", len(SENT) == 3, SENT)
+    check("...that reads as a recovery", "back to normal" in SENT[2]["subject"],
+          SENT[2]["subject"])
+    t = now + timedelta(hours=28)
+    handler.run_health_check(cfg, pk, t, _iso(t))
+    check("and then it goes quiet again", len(SENT) == 3, SENT)
+
+    # ------------------------------------------------- the regression rule
+    #
+    # Absence is only an incident when presence was recorded before. A bot that never had
+    # a member stays quiet forever; one that HAD a member and lost it gets mailed once.
+    FAKE_DDB.items.clear()
+    SENT.clear()
+    health.check = canned(health.OK, member=False)
+    handler.run_health_check(cfg, pk, now, _iso(now))
+    t = now + timedelta(minutes=15)
+    handler.run_health_check(cfg, pk, t, _iso(t))
+    check("a bot that never had a member is never mailed about one", SENT == [], SENT)
+
+    FAKE_DDB.items.clear()
+    SENT.clear()
+    health.check = canned(health.OK, member=True)
+    handler.run_health_check(cfg, pk, now, _iso(now))
+    check("a healthy run with a member mails nobody", SENT == [], SENT)
+    health.check = canned(health.OK, member=False)
+    t = now + timedelta(minutes=15)
+    handler.run_health_check(cfg, pk, t, _iso(t))
+    check("but LOSING a member that was there is one alert", len(SENT) == 1, SENT)
+    check("...reported as not_a_member",
+          store.get_health(pk)["status"] == health.NOT_A_MEMBER, store.get_health(pk))
+
+    # ------------------------------------------------- degrading, not failing
+    FAKE_DDB.items.clear()
+    SENT.clear()
+    quiet = dict(cfg, alert_topic_arn="")
+    health.check = canned(health.NOT_A_MEMBER)
+    handler.run_health_check(quiet, pk, now, _iso(now))
+    check("with no topic configured nothing is mailed", SENT == [], SENT)
+    check("...though the state is still recorded",
+          store.get_health(pk)["status"] == health.NOT_A_MEMBER)
+    t = now + timedelta(minutes=15)
+    handler.run_health_check(cfg, pk, t, _iso(t))
+    check("...so wiring the topic up later still gets the alert out", len(SENT) == 1, SENT)
+
+    # A publish that fails must not take the poll down with it, and must not leave the
+    # state claiming the mail went.
+    FAKE_DDB.items.clear()
+    SENT.clear()
+    boom = lambda **kw: (_ for _ in ()).throw(RuntimeError("topic gone"))
+    notify.sns.publish, health.check = boom, canned(health.OK)
+    handler.run_health_check(cfg, pk, now, _iso(now))
+    health.check = canned(health.TIMED_OUT)
+    handler.run_health_check(cfg, pk, now, _iso(now))
+    check("a broken SNS does not raise out of the health check", True)
+    check("...and leaves nothing claiming to have been sent",
+          store.get_health(pk)["notifiedAt"] == "", store.get_health(pk))
+    notify.sns.publish = _fake_publish
+    health.check, health._get = real_check, real_get
 
 
 def _src(report="R1", actors=None, elig=None, fids=None,
@@ -1860,7 +2118,7 @@ def main():
                test_seed_names, test_progress_count, test_dedupe, test_aotc_guard,
                test_roster_derivation, test_team_resolution, test_roster_state,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
-               test_interactions, test_iam_grant_covers_config,
+               test_interactions, test_health, test_iam_grant_covers_config,
                test_recap_parsers, test_end_to_end,
                test_recap_end_to_end):
         fn()

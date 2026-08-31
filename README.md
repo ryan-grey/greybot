@@ -117,7 +117,8 @@ EventBridge Scheduler ──rate(15 min)──▶ Lambda ──▶ Discord webho
                                           ├─▶ SSM Parameter Store  who and what secrets
                                           ├─▶ Warcraft Logs v2     what died, and when
                                           ├─▶ Raider.IO            how many, what rank
-                                          └─▶ DynamoDB             already announced?
+                                          ├─▶ DynamoDB             already announced?
+                                          └─▶ SNS ─▶ SES ─▶ email  still allowed to post?
 ```
 
 ### Configuration
@@ -135,7 +136,7 @@ Seven parameters under `/greybot`, read at runtime, cached per container, fetche
 | `/greybot/guild/realm` | String | realm **slug**, lowercase-hyphenated |
 | `/greybot/guild/region` | String | `us` |
 
-Seven more are **optional**, and default to something safe when missing. They are fetched
+Eight more are **optional**, and default to something safe when missing. They are fetched
 in a separate call, chunked in tens, because `GetParameters` denies the whole request if
 the caller lacks permission on any single name in it — asking for optional names alongside
 required ones means one un-granted parameter takes the announcer down. That is not
@@ -151,6 +152,7 @@ before the role was widened.
 | `/greybot/team/prog_overlap_high` | 70 | roster overlap at or above this is the prog team |
 | `/greybot/team/prog_overlap_low` | 35 | roster overlap at or below this is the other team |
 | `/greybot/team/prog_tag` | — | Warcraft Logs report tag, if the guild ever starts tagging |
+| `/greybot/alerts/sns_topic_arn` | — | where health alerts are mailed; unset means no alerts |
 
 `recap/enabled` defaulting to false is the important one: deploying this code changes
 nothing until somebody decides otherwise. The recap posts a card naming individual raiders
@@ -267,6 +269,7 @@ stays inside that grant.
 | first-kill roster | `GUILD#<region>#<realm>#<name>` | `KILL#<raid-slug>#<boss-key>` |
 | derived roster | `GUILD#<region>#<realm>#<name>` | `ROSTER#<raid-slug>` |
 | recap claims | `GUILD#<region>#<realm>#<name>` | `RECAPS` |
+| Discord standing | `GUILD#<region>#<realm>#<name>` | `HEALTH` |
 
 Held per tier: the set of announced bosses, the seed size, the count baseline, and the
 AOTC flag. **Tier rollover needs no migration and no detection** — a new raid slug is a new
@@ -649,6 +652,110 @@ either.
 
 ---
 
+## Knowing when it has been thrown out
+
+Nothing else in this bot would notice being kicked. The announcer posts through a
+**webhook, and a webhook is not a member** — so a kick, a ban or a timeout leaves every
+poll looking exactly like a quiet week. The first sign of trouble would be somebody in the
+guild asking why the last three kills went unannounced.
+
+So each poll asks Discord four questions before it does anything else, and mails
+`rgrey.web@gmail.com` when the answer changes:
+
+| probe | endpoint | catches |
+|---|---|---|
+| identity | `GET /users/@me` | a regenerated or revoked bot token |
+| installation | `GET /applications/{a}/guilds/{g}/commands` | **removed from the server** |
+| membership | `GET /users/@me/guilds` | whether a bot member exists at all |
+| member | `GET /guilds/{g}/members/{u}` | timed out, server-muted, deafened |
+| webhook | `GET {webhook_url}` | the thing announcements actually go through, deleted |
+
+The webhook probe is not a formality — it is the one that catches announcements stopping
+while every other probe still reads healthy. Removing an app from a server deletes the
+webhooks that app created, and a channel can be deleted out from under a webhook that was
+made by hand.
+
+### Installation, not membership, is the authority
+
+**This cost a false alarm on the first live run, and the mistake is worth recording.**
+greyBot was authorised to Scrambled with the `applications.commands` scope and never with
+`bot`. It therefore has no member in the guild and never has: `/users/@me/guilds` returns
+`[]` and `/guilds/{id}` answers `404 Unknown Guild`. Nothing is wrong with that —
+announcements go through a webhook a person created, slash commands arrive at the
+interactions endpoint, and neither needs a member. The first version read that absence as
+a kick and mailed *"greyBot is no longer in the Scrambled Discord"* about a bot that was
+working perfectly.
+
+So the question "have we been thrown out" is asked of the **guild commands** instead.
+Those are stored against the app's authorisation in that guild, so the endpoint answers
+200 exactly while the app is installed and `403 Missing Access` once it is not — whether
+it was kicked, banned, or removed from the server's Integrations page. That holds for an
+app with no bot member, which is what this one is. It is deliberately a `GET`:
+registration uses `PUT` against the same path, and a health check must never be able to
+change the command set it is checking.
+
+Membership is now **reported, not judged**. It becomes an alert only as a regression — a
+member that existed on the last check and does not now — and that comparison lives in
+`handler.py`, because only the stored state knows what was true before. `health.py` cannot
+see history, so it must not be the thing deciding.
+
+**A kick and a ban look identical from in here**, and that gap is not worth closing:
+reading the ban list requires being in the guild, which is exactly the thing that just
+stopped being true. The email names the probe rather than guessing between the two.
+
+Membership is asked of the guild *list*, not of the guild, since `GET /guilds/{id}`
+answers a non-member with 403 or 404 depending on the reason and 404 also covers "that id
+was never a server". The one hedge is page size — 200 is that endpoint's maximum, so a
+full page means absence proves nothing and the verdict is *unknown*.
+
+### One email per event
+
+The rule is that a **definite** answer differing from the last definite answer is an event,
+and nothing else is. Ninety-six polls a day against a bot kicked on Tuesday produce one
+email on Tuesday, one reminder every 24 hours after that, and one more when it is fixed.
+
+`definite` is the load-bearing word. A 429, a 502 or a dropped connection is a bad minute
+at Discord, and it is **not written down at all** — because if an unreachable Discord were
+recorded as a state, the next successful poll would read as a change and mail an all-clear
+for an outage that never happened. Worse, an unreachable Discord *during a real kick* would
+clear the alert. Only answers that can mean exactly one thing are allowed to send mail.
+
+`communication_disabled_until` gets the same treatment from the other direction: it is a
+timestamp Discord leaves behind after it expires, so a past date means the timeout **ended**.
+Read as a boolean it would keep mailing about a punishment that was already over.
+
+The check runs *before* any Warcraft Logs work. Every other branch below it can return
+early — rate-limit backoff, an idle poll, a recap yielding its budget — and a check placed
+after any of them would go dark exactly when the bot went quiet, which is the moment it
+exists for. It is also wrapped: it is an observer, and nothing it can do, including SNS
+being unreachable, may stop an announcement going out.
+
+### Why SNS and not SES
+
+greyBot does not talk to SES. It publishes to `ryangrey-dev-alerts`, the topic that already
+fans out to `ryangrey-alert-forwarder`, which sends from `alerts@ryangrey.dev` over a
+DKIM-signed domain identity. That pipeline exists because **SNS's own email sender never
+delivered to the target Gmail address** — four subscription attempts, zero arrivals — while
+mail from an authenticated domain gets through. The forwarder already falls through to a
+plain message body for anything that is not a CloudWatch alarm, so greyBot publishing a
+subject and a block of text needed no change on that side. A second SES sender here would
+mean a second reputation, a second set of DNS records, and a second thing to debug the next
+time mail goes missing.
+
+An unset `/greybot/alerts/sns_topic_arn` is how the alerts are turned off: the probes still
+run and still log, they simply have nowhere to mail. The state is recorded either way, so
+wiring the topic up later still gets the outstanding alert out.
+
+Proving the whole path without waiting for something to break:
+
+```sh
+aws lambda invoke --function-name ryangrey-greybot --region us-east-1 \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"admin":"health","notify":true}' /dev/stdout
+```
+
+---
+
 ## Cost
 
 | | basis | $/mo |
@@ -658,6 +765,7 @@ either.
 | DynamoDB on-demand | a few thousand tiny reads/writes | ~0.01 |
 | SSM Parameter Store | 3 standard parameters | 0.00 |
 | CloudWatch Logs | structured JSON, one line per poll | ~0.01 |
+| SNS + SES | one email per event, not per poll | ~0.00 |
 | | | **≈ $0.02** |
 
 Warcraft Logs and Raider.IO are free. Nothing is provisioned; no NAT, no VPC.
@@ -675,6 +783,8 @@ src/store.py         DynamoDB: the announce-once claim, the prog roster
 src/team.py          which of the guild's two raid teams filed a report
 src/recap.py         reading the untyped table/rankings blobs
 src/discord.py       webhook payloads and retries
+src/health.py        can the bot still speak in the server — kick, ban, timeout, webhook
+src/notify.py        publish one alert to the ryangrey-dev-alerts topic
 src/interactions.py  slash commands: Ed25519 verification, PING/PONG, /progress
 assets/              greyBot-avatar.png — the canonical icon, 1024x1024
 scripts/selftest.py  the gate; no AWS, no boto3, no network
@@ -688,6 +798,7 @@ infra/grant-recap-config.sh       widen the role for the recap, create its param
 infra/create-recap-schedule.sh    the Wed/Fri morning recap schedule
 infra/create-interactions-api.sh  the HTTPS endpoint Discord posts interactions to
 infra/grant-interactions.sh       widen the role for slash commands
+infra/grant-alerts.sh             health alerts: the parameter + sns:Publish on the role
 ```
 
 One dependency: **PyNaCl**, for Ed25519 signature verification. Signature checking is not
