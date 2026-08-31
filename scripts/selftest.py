@@ -1772,6 +1772,60 @@ def test_health():
     health.check, health._get = real_check, real_get
 
 
+def test_progress_slow_path():
+    """/progress when the snapshot is stale, which is the path that was broken in prod.
+
+    Someone ran /progress and got "Progress is briefly unavailable". The deferral raised
+    NameError -- handler.py referenced a REGION it never defined -- so the slow path had
+    never once worked. It went unnoticed for as long as it did because the FAST path
+    covered for it, and the fast path stopped covering only when the snapshot went stale.
+
+    Which it did constantly: put_snapshot was written on the kills path alone, so a guild
+    that had killed nothing in the last hour -- most hours -- left an hour-old snapshot and
+    every /progress fell through to the broken deferral. Two bugs that each hid the other.
+    """
+    print("\n/progress when the snapshot is stale")
+    from datetime import datetime, timedelta, timezone
+
+    import handler
+
+    check("handler defines the region it invokes itself in",
+          getattr(handler, "REGION", None), getattr(handler, "REGION", None))
+
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    FAKE_DDB.items.clear()
+    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    cfg = {"guild_name": "Scrambled", "guild_realm": "proudmoore", "guild_region": "us"}
+
+    # A snapshot older than the max age must defer, not apologise.
+    stale = handler._iso(now - timedelta(seconds=handler.SNAPSHOT_MAX_AGE + 60))
+    store.put_snapshot(pk, "the-venomous-abyss", "The Venomous Abyss", 2, 8, 12, stale)
+    invoked = []
+
+    class FakeLambda:
+        def invoke(self, **kw):
+            invoked.append(kw)
+            return {"StatusCode": 202}
+
+    real_client = handler.boto3.client
+    handler.boto3.client = lambda svc, **kw: FakeLambda() if svc == "lambda" else real_client(svc, **kw)
+    res = handler.handle_progress({"application_id": "1", "token": "t"}, cfg, pk, now)
+    handler.boto3.client = real_client
+    check("a stale snapshot defers rather than failing",
+          res["type"] == interactions.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, res)
+    check("...by asynchronously invoking itself once",
+          len(invoked) == 1 and invoked[0]["InvocationType"] == "Event", invoked)
+
+    # And the reason it goes stale in the first place is now fixed: an idle poll refreshes.
+    FAKE_DDB.items.clear()
+    handler.refresh_snapshot(pk, cfg, PROFILE, INDEX, "2026-09-01T12:00:00Z")
+    snap = store.get_snapshot(pk)
+    check("an idle poll leaves a fresh snapshot behind",
+          snap and snap["updatedAt"] == "2026-09-01T12:00:00Z", snap)
+    check("...naming a real tier, not a slug",
+          snap and snap["raidName"] and snap["raidName"] != snap["slug"], snap)
+
+
 def test_subtitle_aliases():
     """Raider.IO says "Dimensius"; the logs say "Dimensius, the All-Devouring".
 
@@ -2255,7 +2309,8 @@ def main():
                test_seed_names, test_progress_count, test_dedupe, test_aotc_guard,
                test_roster_derivation, test_team_resolution, test_roster_state,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
-               test_interactions, test_subtitle_aliases, test_health,
+               test_interactions, test_progress_slow_path,
+               test_subtitle_aliases, test_health,
                test_source_blind,
                test_iam_grant_covers_config,
                test_recap_parsers, test_end_to_end,

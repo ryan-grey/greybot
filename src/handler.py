@@ -123,6 +123,12 @@ HEALTH_REMIND_HOURS = float(os.environ.get("HEALTH_REMIND_HOURS", "24"))
 # rather than something found eighteen hours later by asking.
 SOURCE_BLIND_POLLS = int(os.environ.get("SOURCE_BLIND_POLLS", "4"))
 
+# Where this function invokes ITSELF to finish a slow /progress. Every other module reads
+# AWS_REGION for its own client; this one referenced a REGION that was never defined here,
+# so the deferral raised NameError and the command answered "briefly unavailable" instead.
+# It went unnoticed because the fast path covered it whenever the snapshot was fresh.
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+
 _guild_id = {"value": None}
 
 
@@ -671,6 +677,30 @@ def _reminder_due(prev, now):
     return (now - last) >= timedelta(hours=HEALTH_REMIND_HOURS)
 
 
+def refresh_snapshot(pk, cfg, profile, index, now_iso):
+    """Write the /progress snapshot from the Raider.IO profile this poll already holds.
+
+    Deliberately weaker than the snapshot the announcer writes, and it never overwrites a
+    better answer with a worse one in the way that matters: the announcer derives its tier
+    from a kill it actually saw, this derives it from display_tier's heuristic. Both write
+    the same counts, because both read them from the same profile.
+
+    Best effort in the strongest sense -- a snapshot is a convenience for a slash command
+    and losing it must never fail a poll.
+    """
+    slug = display_tier(profile, None)
+    if not slug:
+        return
+    killed, total = raiderio.progress_for(profile, slug)
+    meta = index.raids.get(slug) if index else None
+    try:
+        store.put_snapshot(pk, slug, (meta or {}).get("name") or slug,
+                           killed or 0, total or 0,
+                           raiderio.realm_rank(profile, slug, "heroic"), now_iso)
+    except Exception as exc:                                   # noqa: BLE001
+        log("snapshot_write_failed", error=repr(exc), where="idle")
+
+
 def _alert_kind(prev, status, now, forced=False):
     """Which email a transition warrants, if any. Pure, and shared.
 
@@ -957,6 +987,15 @@ def handler(event, context):
 
         run_source_check(cfg, pk, now, now_iso, blind,
                          detail={"heroicKills": heroic, "reportsVisible": len(seen)})
+
+        # Refresh the /progress snapshot even though nothing was announced. It used to be
+        # written only on the kills path, so a guild that had not killed anything in an
+        # hour -- which is most hours -- left a stale snapshot, and /progress fell through
+        # to the deferred live fetch every time. That is a three-second budget spent on a
+        # cold start and a Raider.IO round trip for an answer already sitting in the
+        # profile this poll ALREADY fetched. Free here, and it keeps the slow path genuinely
+        # exceptional rather than routine.
+        refresh_snapshot(pk, cfg, profile, index, now_iso)
         log("poll_idle", lookbackDays=LOOKBACK_DAYS, points=rate, reportsVisible=len(seen),
             ms=int((time.time() - started) * 1000))
         return {"ok": True, "kills": 0}
