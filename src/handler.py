@@ -714,7 +714,15 @@ def run_health_check(cfg, pk, now, now_iso, forced=False):
             # back tomorrow sends the reminder rather than pretending the day was fine.
             log("health_alert_undeliverable", status=status, kind=kind, error=str(exc))
 
-    if changed or sent:
+    # The member flag has to be able to move the write on its own. Gaining or losing a seat
+    # while the status stays "ok" is not an event and mails nothing -- but it IS the fact
+    # the regression rule reads next time, so skipping the write leaves that rule comparing
+    # against a stale answer. That is not hypothetical: greyBot was authorised with the bot
+    # scope, the next check saw member=true, status stayed ok, nothing was written, and the
+    # stored flag sat at false. A kick of the member would then have compared false against
+    # false and said nothing.
+    seat_moved = member is not None and member != prev.get("member")
+    if changed or sent or seat_moved:
         store.put_health(pk, status, json.dumps(result["cause"], sort_keys=True)
                          if result["cause"] else "", since,
                          now_iso if sent else (prev.get("notifiedAt") or ""),

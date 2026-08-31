@@ -1720,6 +1720,17 @@ def test_health():
     handler.run_health_check(cfg, pk, t, _iso(t))
     check("a bot that never had a member is never mailed about one", SENT == [], SENT)
 
+    # Gaining a seat is not an event and mails nothing -- but it must still be WRITTEN, or
+    # the regression rule compares against a stale answer forever. This is the bug that
+    # actually shipped: after the bot scope was added the status stayed ok, nothing was
+    # written, and the stored flag sat at false while the live one was true.
+    health.check = canned(health.OK, member=True)
+    t = now + timedelta(minutes=30)
+    handler.run_health_check(cfg, pk, t, _iso(t))
+    check("gaining a seat mails nobody", SENT == [], SENT)
+    check("...but IS persisted, or the regression rule goes blind",
+          store.get_health(pk)["member"] is True, store.get_health(pk))
+
     FAKE_DDB.items.clear()
     SENT.clear()
     health.check = canned(health.OK, member=True)
