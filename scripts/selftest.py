@@ -1772,6 +1772,57 @@ def test_health():
     health.check, health._get = real_check, real_get
 
 
+def test_subtitle_aliases():
+    """Raider.IO says "Dimensius"; the logs say "Dimensius, the All-Devouring".
+
+    This is the one long-standing known bug in the seeding path, and it bites in exactly
+    the situation seeding exists for: a tier seeded from Raider.IO's encounter list because
+    the log history was unavailable. The seed records one key, the next kill arrives under
+    the other, the dedupe sees a boss it has never heard of, and the bot announces a first
+    kill for a boss it was explicitly told was already dead -- with a role ping, if it is
+    the last one.
+    """
+    print("\nBoss names the two APIs print differently")
+    n = raiderio.normalize
+
+    known = {n("Dimensius"), n("Sszorak"), n("The Coiled Altar")}
+    check("a subtitle in the logs matches a bare seed from Raider.IO",
+          raiderio.alias_match(known, n("Dimensius, the All-Devouring")) == "dimensius")
+    check("...and the bare form matches a seed that carried the subtitle",
+          raiderio.alias_match({n("Dimensius, the All-Devouring")}, n("Dimensius"))
+          == "dimensius the all devouring")
+    check("an exact name still matches itself",
+          raiderio.alias_match(known, n("Sszorak")) == "sszorak")
+    check("a boss genuinely not in the set does not match",
+          raiderio.alias_match(known, n("Ula'tek")) is None)
+
+    # The failure that would matter more than the one being fixed: two different bosses
+    # folded into one would SILENCE a real first kill forever.
+    check("a shared first word is not a match",
+          raiderio.alias_match({n("Dimensius")}, n("Dimensia")) is None)
+    check("...nor is a prefix that stops mid-word",
+          raiderio.alias_match({n("Sszorak")}, n("Sszorakar")) is None)
+    check("an empty key matches nothing", raiderio.alias_match(known, "") is None)
+
+    # And end to end: seed the tier the way Raider.IO would, then kill it the way the logs
+    # would name it, and confirm nothing is posted.
+    import handler
+    FAKE_DDB.items.clear()
+    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    store.seed_tier(pk, "t", {n("Dimensius")}, 1, "T", "now")
+    state = store.load_tier(pk, "t")
+    posts = []
+    handler.discord.post = lambda *a, **kw: posts.append(a)
+    posted = handler.announce_kill(
+        {"guild_name": "Scrambled", "webhook": "w", "role_id": "", "guild_realm": "p",
+         "guild_region": "us"},
+        pk, "t", "T", {"name": "Dimensius, the All-Devouring", "killedAtMs": 0,
+                       "encounterID": 1, "reportCode": "R"},
+        state, PROFILE)
+    check("a seeded boss killed under its long name announces NOTHING",
+          posted is False and posts == [], posts)
+
+
 def test_source_blind():
     """The other axis: the bot is fine and the source has stopped answering.
 
@@ -2204,7 +2255,8 @@ def main():
                test_seed_names, test_progress_count, test_dedupe, test_aotc_guard,
                test_roster_derivation, test_team_resolution, test_roster_state,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
-               test_interactions, test_health, test_source_blind,
+               test_interactions, test_subtitle_aliases, test_health,
+               test_source_blind,
                test_iam_grant_covers_config,
                test_recap_parsers, test_end_to_end,
                test_recap_end_to_end):

@@ -394,6 +394,22 @@ def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None,
                   now_iso=None, token=None):
     """Claim, then post. In that order -- see store.claim_boss."""
     key = boss_key(kill["name"])
+
+    # The subtitle guard, checked BEFORE the claim. Raider.IO's encounter list says
+    # "Dimensius" where the logs say "Dimensius, the All-Devouring", so a tier seeded from
+    # Raider.IO -- which is what happens when the log history is unavailable, the case
+    # seeding exists for -- records a key the next kill will not match. Without this the
+    # bot announces a first kill for a boss it was explicitly told was already dead.
+    #
+    # It only ever suppresses. The claim below stays an exact conditional write, so this
+    # cannot authorise an announcement, only decline one, and a decline recovers on the
+    # next poll while a duplicate never does.
+    prior = raiderio.alias_match(state.get("announced") or (), key)
+    if prior and prior != key:
+        log("skip_rekill_alias", slug=slug, boss=kill["name"], key=key, matchedSeed=prior,
+            note="already recorded under a shorter or longer form of the same name")
+        return False
+
     if not store.claim_boss(pk, slug, key):
         log("skip_rekill", slug=slug, boss=kill["name"], key=key)
         return False

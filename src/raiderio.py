@@ -323,3 +323,37 @@ def guild_display(profile, name, realm_slug):
     """'Scrambled · Proudmoore' -- the realm as Raider.IO spells it, not the slug."""
     realm = (profile or {}).get("realm") or realm_slug.replace("-", " ").title()
     return f"{name} \u00b7 {realm}"
+
+
+def alias_match(known, key):
+    """Does `key` name a boss already in `known`, allowing for the subtitle problem?
+
+    Warcraft Logs and Raider.IO agree on punctuation once normalize() has had its way with
+    them, but they do not always agree on how much of a boss's name to print. Raider.IO's
+    encounter list says "Dimensius"; the logs say "Dimensius, the All-Devouring". Those
+    normalise to different keys, and the split matters in exactly one place -- a tier seeded
+    from Raider.IO's list because the log history was unavailable, which is the case seeding
+    exists for. The seed records "dimensius", the next kill arrives as
+    "dimensius the all devouring", the dedupe sees a boss it has never heard of, and the bot
+    announces a first kill for a boss it was explicitly told was already dead.
+
+    Matched on a WORD-BOUNDARY prefix in either direction, so "dimensius" matches
+    "dimensius the all devouring" while "dimensius" and "dimensia" stay separate. Two
+    distinct bosses in one tier where one name is a whole-word prefix of the other would
+    collide, which does not happen in practice and would be visible in the seed log if it
+    ever did.
+
+    Deliberately used as a GUARD and not as the claim itself. The claim stays an exact
+    conditional write in DynamoDB, because a ConditionExpression cannot express this and
+    because the safe direction is asymmetric: this check can only ever suppress an
+    announcement, never authorise a second one. A missed announcement recovers on the next
+    poll once the names agree; a duplicate never recovers.
+    """
+    if not key:
+        return None
+    for k in known or ():
+        if k == key:
+            return k
+        if key.startswith(k + " ") or k.startswith(key + " "):
+            return k
+    return None
