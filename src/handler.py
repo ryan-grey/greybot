@@ -117,6 +117,12 @@ RECAP_MAX_REPORTS = int(os.environ.get("RECAP_MAX_REPORTS", "4"))
 # the state re-announces itself once a day until it clears. Zero disables the repeat.
 HEALTH_REMIND_HOURS = float(os.environ.get("HEALTH_REMIND_HOURS", "24"))
 
+# Consecutive polls with the log source visibly empty before that counts as an outage.
+# Four is an hour at the fifteen-minute cadence -- long enough that a bad minute at
+# Warcraft Logs passes unremarked, short enough that a real outage is a morning's problem
+# rather than something found eighteen hours later by asking.
+SOURCE_BLIND_POLLS = int(os.environ.get("SOURCE_BLIND_POLLS", "4"))
+
 _guild_id = {"value": None}
 
 
@@ -649,6 +655,84 @@ def _reminder_due(prev, now):
     return (now - last) >= timedelta(hours=HEALTH_REMIND_HOURS)
 
 
+def _alert_kind(prev, status, now, forced=False):
+    """Which email a transition warrants, if any. Pure, and shared.
+
+    Two independent signals use this rule -- Discord standing and whether the log source
+    can be read -- and they must not drift apart. A fix to the reminder cadence or to the
+    first-run guard has to land in one place, not in two functions that were the same
+    shape on the day they were written.
+
+    The first-run guard is the subtle one: a brand new state with nothing recorded before
+    is not a recovery, so a fresh deploy does not mail to say nothing is wrong. A first run
+    that finds a REAL problem still alerts, because that is a fact worth having on the day
+    it is true rather than the day after.
+    """
+    prev_status = (prev or {}).get("status") or ""
+    changed = status != prev_status
+    first_run = not prev_status
+    if status != health.OK and (changed or forced):
+        return health.ALERT
+    if status != health.OK and _reminder_due(prev, now):
+        return health.REMINDER
+    if status == health.OK and changed and not first_run:
+        return health.RECOVERY
+    if forced:
+        return health.TEST
+    return None
+
+
+def run_source_check(cfg, pk, now, now_iso, blind, detail=None):
+    """Can greyBot still SEE the raid logs it exists to read?
+
+    A different axis from health.py entirely, and the one that was missing. On 2026-08-31
+    Warcraft Logs began answering every report query with an empty list -- for every guild,
+    not just this one -- and greyBot went eighteen hours unable to detect a kill while every
+    Discord probe reported ok, because Discord was fine. The bot was perfectly healthy and
+    completely blind, and the only reason anybody found out was that Ryan asked.
+
+    BLINDNESS IS NOT QUIETNESS, and telling them apart is the whole difficulty. A guild that
+    has not raided in three days legitimately has no kills in the window. The distinction is
+    made on REPORTS, not kills: reports visible and no new kills is a quiet week; zero
+    reports visible while Raider.IO still shows Heroic progress is a source that has stopped
+    answering.
+
+    Consecutive polls, not one. A single empty answer is a bad minute at Warcraft Logs, and
+    the same rule holds here as for Discord -- only a state that persists is an event.
+    """
+    prev = store.get_source(pk) or {}
+    streak = int(prev.get("blindPolls") or 0)
+    streak = streak + 1 if blind else 0
+
+    # Below the threshold the state is recorded and nothing is said. That is what makes the
+    # streak survive a cold start: the count lives in DynamoDB, not in this container.
+    status = health.SOURCE_BLIND if streak >= SOURCE_BLIND_POLLS else health.OK
+    prev_status = prev.get("status") or ""
+    changed = status != prev_status
+    since = now_iso if changed else (prev.get("since") or now_iso)
+    kind = _alert_kind(prev, status, now)
+
+    sent = False
+    if kind:
+        result = health.source_result(status, streak, SOURCE_BLIND_POLLS, detail or {})
+        try:
+            sent = notify.publish(
+                cfg.get("alert_topic_arn"),
+                health.subject(kind, status, cfg.get("guild_name") or ""),
+                health.body(kind, result, cfg, now_iso, since=since))
+        except notify.NotifyError as exc:
+            log("source_alert_undeliverable", status=status, kind=kind, error=str(exc))
+
+    if changed or sent or streak != int(prev.get("blindPolls") or 0):
+        store.put_source(pk, status, streak, since,
+                         now_iso if sent else (prev.get("notifiedAt") or ""))
+
+    log("source_checked", status=status, blind=blind, blindPolls=streak,
+        threshold=SOURCE_BLIND_POLLS, previous=prev_status or None,
+        notified=kind if sent else None, **(detail or {}))
+    return status
+
+
 def run_health_check(cfg, pk, now, now_iso, forced=False):
     """Probe Discord, and mail on the TRANSITION rather than on the state.
 
@@ -689,18 +773,8 @@ def run_health_check(cfg, pk, now, now_iso, forced=False):
                              "note": "a bot member existed on the last check"})
 
     changed = status != prev_status
-    first_run = not prev_status
     since = now_iso if changed else (prev.get("since") or now_iso)
-
-    kind = None
-    if status != health.OK and (changed or forced):
-        kind = health.ALERT
-    elif status != health.OK and _reminder_due(prev, now):
-        kind = health.REMINDER
-    elif status == health.OK and changed and not first_run:
-        kind = health.RECOVERY
-    elif forced:
-        kind = health.TEST
+    kind = _alert_kind(prev, status, now, forced=forced)
 
     sent = False
     if kind:
@@ -836,18 +910,43 @@ def handler(event, context):
     kills, rate = wcl.heroic_kills_since(token, gid, window_start_ms, limit=REPORT_LIMIT)
 
     if not kills:
+        # No kills is two completely different situations wearing the same face, and the
+        # bot spent eighteen hours unable to tell them apart. A guild that has not raided
+        # in three days has no kills in the window and is perfectly fine. A source that has
+        # stopped answering has no kills either, and is an outage.
+        #
+        # REPORTS are what separates them, so ask -- but only here, in the ambiguous case.
+        # reports_in_window carries no fights subquery, so it costs a fraction of the paged
+        # announcer query, and a normal poll that found kills never pays for it at all.
         progression = profile.get("raid_progression") or {}
-        # A public guild with progress but zero visible reports is the private-logs case:
-        # a client-credentials token can only read public reports, so the event source is
-        # blind and no amount of retrying will fix it. Say so plainly in the logs.
-        if progression and any((v or {}).get("heroic_bosses_killed")
-                               for v in progression.values()):
+        heroic = sum(int((v or {}).get("heroic_bosses_killed") or 0)
+                     for v in progression.values())
+        seen, seen_rate = wcl.reports_in_window(
+            token, gid, window_start_ms, int(now.timestamp() * 1000), limit=5)
+        rate = seen_rate or rate
+        blind = heroic > 0 and not seen
+
+        if blind:
+            # Deliberately NOT "the guild's logs are private any more". That hint was a
+            # guess baked into a log line, and on 2026-08-31 it sent the whole
+            # investigation the wrong way for an hour -- the real cause was Warcraft Logs
+            # returning empty for every guild in the game, not this one's settings. State
+            # the observation; leave the diagnosis to whoever reads it.
             log("no_reports_visible", guild=cfg["guild_name"], realm=cfg["guild_realm"],
-                hint="Raider.IO shows Heroic kills but Warcraft Logs returned no reports — "
-                     "the guild's logs are probably private to this OAuth client.")
-        log("poll_idle", lookbackDays=LOOKBACK_DAYS, points=rate,
+                heroicKillsPerRaiderIO=heroic, reportsVisible=0,
+                hint="Warcraft Logs returned no reports while Raider.IO still shows Heroic "
+                     "progress. Could be private logs, could be the API — check whether "
+                     "ANOTHER guild returns reports before concluding. "
+                     "See docs/wcl-reportdata-blind.md.")
+
+        run_source_check(cfg, pk, now, now_iso, blind,
+                         detail={"heroicKills": heroic, "reportsVisible": len(seen)})
+        log("poll_idle", lookbackDays=LOOKBACK_DAYS, points=rate, reportsVisible=len(seen),
             ms=int((time.time() - started) * 1000))
         return {"ok": True, "kills": 0}
+
+    # Kills came back, so the source is answering. Nothing to ask and nothing to pay for.
+    run_source_check(cfg, pk, now, now_iso, False)
 
     # Resolve every kill to a raid from the boss that died, rather than deciding on one
     # "current tier" up front. A raid night that clears the new tier and then farms an old

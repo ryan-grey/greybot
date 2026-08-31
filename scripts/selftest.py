@@ -1772,6 +1772,81 @@ def test_health():
     health.check, health._get = real_check, real_get
 
 
+def test_source_blind():
+    """The other axis: the bot is fine and the source has stopped answering.
+
+    This exists because it actually happened. On 2026-08-31 Warcraft Logs began returning
+    an empty report list for every guild, greyBot went eighteen hours unable to detect a
+    kill, and every Discord probe said ok the whole time -- because Discord WAS ok. The
+    monitor watched the wrong axis.
+
+    The hard part is not detecting emptiness, it is not crying wolf about a guild that
+    simply has not raided. That distinction is on REPORTS, not kills, and it is the first
+    thing asserted here.
+    """
+    print("\nThe log source, and telling a quiet week from an outage")
+    from datetime import datetime, timedelta, timezone
+
+    import handler
+
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    _iso = handler._iso
+    cfg = {"guild_name": "Scrambled",
+           "alert_topic_arn": "arn:aws:sns:us-east-1:0:ryangrey-dev-alerts"}
+    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    FAKE_DDB.items.clear()
+    SENT.clear()
+
+    # Four consecutive blind polls before a word is said. A single empty answer is a bad
+    # minute at Warcraft Logs, not an outage.
+    for i in range(handler.SOURCE_BLIND_POLLS - 1):
+        t = now + timedelta(minutes=15 * i)
+        handler.run_source_check(cfg, pk, t, _iso(t), True, {"heroicKills": 8})
+    check(f"{handler.SOURCE_BLIND_POLLS - 1} blind polls stay quiet", SENT == [], SENT)
+    check("...but the streak is persisted, not held in the container",
+          store.get_source(pk)["blindPolls"] == handler.SOURCE_BLIND_POLLS - 1,
+          store.get_source(pk))
+
+    t = now + timedelta(minutes=15 * (handler.SOURCE_BLIND_POLLS - 1))
+    handler.run_source_check(cfg, pk, t, _iso(t), True, {"heroicKills": 8})
+    check("crossing the threshold sends exactly one email", len(SENT) == 1, SENT)
+    check("...that says Discord is fine and the source is not",
+          "Warcraft Logs" in SENT[0]["subject"], SENT[0]["subject"])
+    check("...and points at the handoff rather than guessing the cause",
+          "wcl-reportdata-blind" in SENT[0]["body"])
+
+    t = now + timedelta(hours=1)
+    handler.run_source_check(cfg, pk, t, _iso(t), True, {"heroicKills": 8})
+    check("still blind an hour later sends nothing more", len(SENT) == 1, SENT)
+
+    t = now + timedelta(hours=25)
+    handler.run_source_check(cfg, pk, t, _iso(t), True, {"heroicKills": 8})
+    check("a day later it reminds, once", len(SENT) == 2, SENT)
+    check("...marked a reminder", SENT[1]["subject"].startswith("Still:"), SENT[1]["subject"])
+
+    t = now + timedelta(hours=26)
+    handler.run_source_check(cfg, pk, t, _iso(t), False)
+    check("reports coming back sends one all-clear", len(SENT) == 3, SENT)
+    check("...and resets the streak", store.get_source(pk)["blindPolls"] == 0,
+          store.get_source(pk))
+
+    # A quiet week must never reach the threshold at all, no matter how long it lasts.
+    FAKE_DDB.items.clear()
+    SENT.clear()
+    for i in range(12):                      # three hours of polls with nothing to find
+        t = now + timedelta(minutes=15 * i)
+        handler.run_source_check(cfg, pk, t, _iso(t), False)
+    check("a guild that simply has not raided is never called an outage", SENT == [], SENT)
+    check("...and never accumulates a streak", store.get_source(pk)["blindPolls"] == 0)
+
+    # The two signals share one rule, so a fix to the cadence lands in one place.
+    check("the transition rule is shared with the Discord check",
+          handler._alert_kind({}, health.OK, now) is None
+          and handler._alert_kind({}, health.SOURCE_BLIND, now) == health.ALERT
+          and handler._alert_kind({"status": health.SOURCE_BLIND}, health.OK, now)
+              == health.RECOVERY)
+
+
 def _src(report="R1", actors=None, elig=None, fids=None,
          damage=None, deaths=(), rankings=None):
     """One report's worth of blobs, in the shape recap.py aggregates over."""
@@ -2129,7 +2204,8 @@ def main():
                test_seed_names, test_progress_count, test_dedupe, test_aotc_guard,
                test_roster_derivation, test_team_resolution, test_roster_state,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
-               test_interactions, test_health, test_iam_grant_covers_config,
+               test_interactions, test_health, test_source_blind,
+               test_iam_grant_covers_config,
                test_recap_parsers, test_end_to_end,
                test_recap_end_to_end):
         fn()

@@ -60,6 +60,9 @@ NOT_A_MEMBER = "not_a_member"
 TIMED_OUT = "timed_out"
 SERVER_MUTED = "server_muted"
 WEBHOOK_GONE = "webhook_gone"
+# Not a Discord state at all. The log source has stopped answering, which silences the bot
+# just as completely as being kicked and is invisible to every probe above.
+SOURCE_BLIND = "source_blind"
 
 # Worst first. Several of these go wrong at the same instant -- removing the app fails the
 # commands fetch AND deletes any webhook the app created -- so the mail has to lead with
@@ -73,6 +76,7 @@ HEADLINE = {
     TIMED_OUT: "greyBot has been timed out in the {guild} Discord",
     SERVER_MUTED: "greyBot has been server-muted in the {guild} Discord",
     WEBHOOK_GONE: "greyBot's announcement webhook no longer exists",
+    SOURCE_BLIND: "greyBot cannot see any Warcraft Logs reports",
 }
 
 # What Ryan should actually do about it, which is the entire reason the mail is worth
@@ -101,7 +105,31 @@ ADVICE = {
     WEBHOOK_GONE: ("This is the one that stops announcements. Create a new webhook on the "
                    "announce channel and put its URL in /greybot/discord/webhook_url; "
                    "nothing needs redeploying, config.py re-reads it within five minutes."),
+    SOURCE_BLIND: ("Discord is fine -- the log source is not. Warcraft Logs is returning "
+                   "no reports at all for this guild while Raider.IO still shows Heroic "
+                   "progress, so greyBot cannot detect a kill and will announce nothing "
+                   "until it clears. Nothing is lost: the dedupe state is intact and "
+                   "announcements resume by themselves. Check whether the guild's logs "
+                   "went private, and check whether OTHER guilds return reports too -- if "
+                   "they do not, it is Warcraft Logs and not you. See "
+                   "docs/wcl-reportdata-blind.md."),
 }
+
+
+def source_result(status, blind_polls, threshold, detail):
+    """A check() result describing the log source rather than Discord.
+
+    Shaped exactly like a real one so body() can render it without a second code path --
+    one email format, one notify call, whichever axis went wrong.
+    """
+    verdict = "no_reports" if status != OK else OK
+    probes = [{"probe": "warcraftlogs", "verdict": verdict,
+               "consecutivePolls": blind_polls, "threshold": threshold}]
+    if detail.get("heroicKills") is not None:
+        probes.append({"probe": "raiderio", "verdict": OK,
+                       "heroicKills": detail["heroicKills"]})
+    return {"status": status, "definite": True, "probes": probes,
+            "cause": probes[0] if status != OK else None, "member": None}
 
 
 def _get(url, token=None, timeout=10):

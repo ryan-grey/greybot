@@ -504,3 +504,34 @@ def put_health(pk, status, detail, since, notified_at="", member=None):
     if member is not None:
         item["member"] = {"BOOL": bool(member)}
     ddb.put_item(TableName=TABLE, Item=item)
+
+
+SOURCE_SK = "SOURCE"
+
+
+def get_source(pk):
+    """Whether the log source was answering last time, and for how many polls it has not.
+
+    The streak lives here rather than in the Lambda because a Lambda container is not a
+    place to keep a count -- it is recycled on a whim, and a counter that resets whenever
+    AWS feels like it can never reach a threshold of four.
+    """
+    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(SOURCE_SK)},
+                       ConsistentRead=True)
+    item = res.get("Item")
+    if not item:
+        return None
+    return {"status": (item.get("status") or {}).get("S") or "",
+            "blindPolls": int((item.get("blindPolls") or {}).get("N") or 0),
+            "since": (item.get("since") or {}).get("S") or "",
+            "notifiedAt": (item.get("notifiedAt") or {}).get("S") or ""}
+
+
+def put_source(pk, status, blind_polls, since, notified_at=""):
+    """Overwrite wholesale, for the same reason put_health does: there is no claim to win
+    here, and the one-email-per-event rule is enforced by the transition test rather than
+    by a conditional write."""
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(pk), "sk": _s(SOURCE_SK),
+        "status": _s(status), "blindPolls": _n(int(blind_polls or 0)),
+        "since": _s(since), "notifiedAt": _s(notified_at or "")})
