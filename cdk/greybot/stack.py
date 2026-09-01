@@ -197,6 +197,13 @@ class GreybotStack(Stack):
             name=cfg.api_name,
             protocol_type="HTTP",
         )
+        # RETAIN, because this API's id is baked into a URL registered by hand in
+        # the Discord developer portal. Deleting the stack would mint a new id on
+        # the next deploy, and the interactions endpoint would go dead until
+        # someone remembered to paste the new URL into Discord — a failure with no
+        # error message anywhere in AWS. The table is retained for its data; this
+        # is retained for its name.
+        api.apply_removal_policy(RemovalPolicy.RETAIN)
 
         integration = apigw.CfnIntegration(
             self, "InteractionsIntegration",
