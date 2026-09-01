@@ -1,0 +1,12 @@
+{
+  "StateTable9728C7E5": { "TableName": "ryangrey-greybot" },
+  "Function76856677": { "FunctionName": "ryangrey-greybot" },
+  "RuntimeRoleFD8790A4": { "RoleName": "ryangrey-greybot-role" },
+  "SchedulerRole59E73443": { "RoleName": "ryangrey-greybot-scheduler-role" },
+  "PollSchedule": { "Name": "ryangrey-greybot-poll" },
+  "LogGroupF5B46931": { "LogGroupName": "/aws/lambda/ryangrey-greybot" },
+  "InteractionsApi": { "ApiId": "9g60dy6j95" },
+  "InteractionsIntegration": { "ApiId": "9g60dy6j95", "IntegrationId": "wg2h5j1" },
+  "InteractionsRoute": { "ApiId": "9g60dy6j95", "RouteId": "fh0rjdj" },
+  "DefaultStage": { "ApiId": "9g60dy6j95", "StageName": "$default" }
+}
