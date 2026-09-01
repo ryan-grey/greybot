@@ -5,3 +5,8 @@ __pycache__/
 
 # Test dependency (PyNaCl for signature tests). Created by scripts/deploy.sh.
 .venv/
+
+# Local reference: Discord identifiers for the dev stage.
+# Public IDs only today, but this is the file a token would end up pasted into
+# on a tired evening. Ignored so that cannot become a commit.
+docs/dev-discord-ids.md
