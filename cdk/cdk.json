@@ -1,0 +1,10 @@
+{
+  "app": ".venv/bin/python app.py",
+  "watch": { "include": ["**"], "exclude": ["README.md", ".venv/**", "cdk.out/**"] },
+  "context": {
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/aws-iam:minimizePolicies": false,
+    "@aws-cdk/core:validateSnapshotRemovalPolicy": true
+  }
+}

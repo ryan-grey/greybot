@@ -1,0 +1,18 @@
+{
+  "_README": [
+    "Differences Phase 1 makes on purpose, between docs/parity-baseline/ (the live",
+    "hand-rolled stack) and cdk synth. Checked by scripts/check-parity.py.",
+    "",
+    "Keep this SHORT. Every entry is something the CDK stack does differently from",
+    "what is running today, and each one should be defensible out loud. An entry",
+    "added to make the check go green is the failure this gate exists to prevent.",
+    "",
+    "Not listed here, because they are not differences: resource names in the dev",
+    "stage (different by design) and CloudFormation logical IDs (an artefact of",
+    "CDK, not of the deployed resource)."
+  ],
+  "logs.RetentionInDays": {
+    "reason": "The live log group never expires; CDK sets 1 month. The one deliberate difference in Phase 1. A poller logging every 15 minutes with no retention grows forever and bills forever, and nothing reads a greyBot log older than a few days. RETAIN on the group itself, so the port cannot delete existing logs.",
+    "decided": "2026-09-01"
+  }
+}
