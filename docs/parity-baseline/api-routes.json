@@ -1,0 +1,11 @@
+{
+    "Items": [
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "NONE",
+            "RouteId": "fh0rjdj",
+            "RouteKey": "POST /interactions",
+            "Target": "integrations/wg2h5j1"
+        }
+    ]
+}

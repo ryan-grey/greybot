@@ -1,0 +1,12 @@
+{
+    "ApiEndpoint": "https://9g60dy6j95.execute-api.us-east-1.amazonaws.com",
+    "ApiId": "9g60dy6j95",
+    "ApiKeySelectionExpression": "$request.header.x-api-key",
+    "CreatedDate": "2026-08-29T03:52:43+00:00",
+    "DisableExecuteApiEndpoint": false,
+    "IpAddressType": "ipv4",
+    "Name": "greybot-interactions",
+    "ProtocolType": "HTTP",
+    "RouteSelectionExpression": "$request.method $request.path",
+    "Tags": {}
+}

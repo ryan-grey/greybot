@@ -1,0 +1,18 @@
+{
+    "Items": [
+        {
+            "AutoDeploy": true,
+            "CreatedDate": "2026-08-29T03:52:48+00:00",
+            "DefaultRouteSettings": {
+                "DetailedMetricsEnabled": false
+            },
+            "DeploymentId": "vaqkge",
+            "LastDeploymentStatusMessage": "Successfully deployed stage with deployment ID 'vaqkge'",
+            "LastUpdatedDate": "2026-08-29T03:52:50+00:00",
+            "RouteSettings": {},
+            "StageName": "$default",
+            "StageVariables": {},
+            "Tags": {}
+        }
+    ]
+}
