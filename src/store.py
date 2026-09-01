@@ -368,9 +368,13 @@ def progress_count(state, raider_killed, total):
 # which is the same reason the announced set holds boss names rather than encounter ids.
 #
 #   item              pk                             sk
-#   first-kill roster GUILD#<region>#<realm>#<name>  KILL#<slug>#<boss-key>
-#   derived roster    GUILD#<region>#<realm>#<name>  ROSTER#<slug>
-#   recap claims      GUILD#<region>#<realm>#<name>  RECAPS
+#   first-kill roster WOW#<region>#<realm>#<name>    KILL#<slug>#<boss-key>
+#   derived roster    WOW#<region>#<realm>#<name>    ROSTER#<slug>
+#   recap claims      TENANT#<discord_guild_id>      RECAPS
+#
+# Kills and rosters are shared: who killed a boss first is a fact about the guild,
+# identical for every install watching it. Recap claims are not -- two installs
+# post two recaps to two channels, and each has to claim its own night.
 #
 # A boss in `announced` with no KILL# item is a boss that was SEEDED -- killed before the
 # bot was watching, or absorbed by a rollover seed. Those have no participants to record
