@@ -144,3 +144,20 @@ class Scope:
     # sharing it. Cheaper to keep them hashable now than to debug it later.
     def __hash__(self):
         return hash((self.wow, self.tenant))
+
+
+# The registry. One row listing every configured install, so the poller can find
+# them with a GetItem on a known pk.
+#
+# Not a Scan and not a GSI, deliberately. The execution role grants GetItem,
+# PutItem, UpdateItem and Query and nothing else -- no Scan, no BatchGetItem --
+# and that absence is a security property this project has already paid for
+# once. A registry row keeps enumeration inside the existing grant.
+#
+# The ceiling this implies is worth stating: a DynamoDB item caps at 400 KB, so a
+# string set of snowflakes tops out somewhere in the low tens of thousands of
+# tenants. The WCL points budget caps installs far below that, so the registry is
+# not the binding constraint -- but if it ever becomes one, the answer is a
+# sharded registry (REGISTRY#0..N), not a Scan.
+REGISTRY_PK = "REGISTRY"
+TENANTS_SK = "TENANTS"
