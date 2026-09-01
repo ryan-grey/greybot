@@ -115,11 +115,15 @@ class FakeDynamo:
             item = dict(Key)
             self.items[k] = item
 
-        setop = re.match(r"(ADD|DELETE) (\w+) :b$", UpdateExpression.strip())
+        # Any placeholder name, not just :b. Real DynamoDB does not care what the
+        # value is called, and hardcoding one here made the fake quietly ignore
+        # the tenant registry's `ADD tenants :t` -- an update that silently does
+        # nothing is the worst possible fake behaviour.
+        setop = re.match(r"(ADD|DELETE) (\w+) (:\w+)$", UpdateExpression.strip())
         if setop:
-            verb, attr = setop.group(1), setop.group(2)
+            verb, attr, ph = setop.group(1), setop.group(2), setop.group(3)
             have = set((item.get(attr) or {}).get("SS") or [])
-            have = have | set(vals[":b"]["SS"]) if verb == "ADD" else have - set(vals[":b"]["SS"])
+            have = have | set(vals[ph]["SS"]) if verb == "ADD" else have - set(vals[ph]["SS"])
             if have:
                 item[attr] = {"SS": sorted(have)}
             else:
@@ -892,6 +896,74 @@ def test_setup_command():
           store.get_config("TENANT#900000000000000009") is None)
 
     raiderio.guild_profile = real_profile
+    FAKE_DDB.items.clear()
+
+
+def test_tenant_fanout():
+    print("\nTenant registry and poll fan-out")
+    import handler
+    FAKE_DDB.items.clear()
+
+    SSM_CFG = {"guild_region": "us", "guild_realm": "proudmoore",
+               "guild_name": "Scrambled", "discord_guild_id": TEST_TENANT,
+               "webhook": "https://discord.com/api/webhooks/1/legacy",
+               "bot_token": "bot-tok", "wcl_client_id": "id"}
+
+    # --- the migration bridge --------------------------------------------
+    # Prod runs from SSM today. An empty registry MUST keep it polling, or
+    # migrating would mean an outage.
+    check("an empty registry lists no tenants", store.list_tenants() == [])
+    pairs = handler.tenant_configs(SSM_CFG)
+    check("...so the poll falls back to the SSM config", len(pairs) == 1)
+    check("...with the legacy scope", pairs[0][0].tenant == f"TENANT#{TEST_TENANT}")
+    check("...and the legacy webhook destination",
+          handler.destination(pairs[0][1]) == {"webhook": SSM_CFG["webhook"]})
+
+    # --- registration -----------------------------------------------------
+    A, B = f"TENANT#{TEST_TENANT}", "TENANT#900000000000000002"
+    store.put_config(A, "us", "Proudmoore", "Scrambled", "555000000000000001", "now")
+    store.register_tenant(A)
+    check("a registered tenant appears", store.list_tenants() == [A])
+    store.register_tenant(A)
+    check("...registering twice does not duplicate", store.list_tenants() == [A])
+
+    store.put_config(B, "eu", "Draenor", "Elsewhere", "555000000000000002", "now")
+    store.register_tenant(B)
+    check("a second tenant appears", store.list_tenants() == sorted([A, B]))
+
+    # --- fan-out ----------------------------------------------------------
+    pairs = handler.tenant_configs(SSM_CFG)
+    check("the poll now runs for both tenants", len(pairs) == 2)
+    by_tenant = {s.tenant: c for s, c in pairs}
+    check("...each on its own WoW partition",
+          {s.wow for s, _ in pairs} ==
+          {"WOW#us#proudmoore#scrambled", "WOW#eu#draenor#elsewhere"})
+    check("...keeping the operator's shared secrets",
+          all(c["wcl_client_id"] == "id" for c in by_tenant.values()))
+    check("...but each install's own guild",
+          by_tenant[B]["guild_name"] == "Elsewhere")
+
+    # A configured tenant posts to its channel with the bot token, NOT through
+    # the operator's webhook -- otherwise every tenant's kills land in one server.
+    dest = handler.destination(by_tenant[B])
+    check("a configured tenant posts to its own channel",
+          dest == {"bot_token": "bot-tok", "channel": "555000000000000002"}, dest)
+    check("...and never through the shared webhook", "webhook" not in dest)
+
+    # --- one broken install must not stop the others ----------------------
+    store.register_tenant("TENANT#900000000000000003")   # registered, never configured
+    pairs = handler.tenant_configs(SSM_CFG)
+    check("a tenant with no config is skipped, not fatal", len(pairs) == 2)
+    check("...and the healthy ones still poll",
+          {s.tenant for s, _ in pairs} == {A, B})
+
+    # --- eject ------------------------------------------------------------
+    store.unregister_tenant(B)
+    check("an ejected tenant stops being polled",
+          [s.tenant for s, _ in handler.tenant_configs(SSM_CFG)] == [A])
+    check("...but its config row survives for a re-install",
+          store.get_config(B) is not None)
+
     FAKE_DDB.items.clear()
 
 
@@ -2489,7 +2561,8 @@ def main():
     print("greyBot self-test")
     for fn in (test_config, test_boss_art, test_name_normalisation, test_slug_resolution,
                test_seed_names, test_progress_count,
-               test_tenant_keys, test_setup_command, test_dedupe, test_aotc_guard,
+               test_tenant_keys, test_setup_command, test_tenant_fanout,
+               test_dedupe, test_aotc_guard,
                test_roster_derivation, test_team_resolution, test_roster_state,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
                test_interactions, test_progress_slow_path,

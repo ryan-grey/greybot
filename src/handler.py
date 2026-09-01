@@ -437,7 +437,7 @@ def announce_kill(cfg, scope, slug, raid_label, kill, state, profile, thumb=None
         guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
                                        cfg["guild_name"]))
     try:
-        discord.post(cfg["webhook"], payload)
+        discord.post_to(destination(cfg), payload)
     except discord.DiscordError as exc:
         # Hand the boss back so the next poll retries it. A missed announcement recovers
         # in fifteen minutes; a duplicate one never recovers at all.
@@ -467,7 +467,7 @@ def announce_aotc(cfg, scope, slug, raid_label, state, when, thumb=None, profile
         guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
                                        cfg["guild_name"]))
     try:
-        discord.post(cfg["webhook"], payload)
+        discord.post_to(destination(cfg), payload)
     except discord.DiscordError as exc:
         store.release_aotc(scope, slug)
         log("aotc_failed", slug=slug, error=str(exc))
@@ -543,7 +543,7 @@ def preview(spec, cfg, token, gid, profile, index):
         log("preview_dry_run", **info, stateWritten=False)
         return {"ok": True, "preview": True, "posted": False, "payload": payload, **info}
 
-    discord.post(cfg["webhook"], payload)
+    discord.post_to(destination(cfg), payload)
     log("preview_posted", **info, stateWritten=False,
         note="PREVIEW — posted to Discord, no dedupe state was written")
     return {"ok": True, "preview": True, "posted": True, **info}
@@ -664,6 +664,10 @@ def handle_setup(body, now_iso):
 
     store.put_config(tenant, region, realm, guild, channel, now_iso,
                      prog_role_id=role, configured_by=who)
+    # Registry AFTER the config, deliberately. The poller reads the registry and
+    # then each config; a tenant listed before its config exists is one the very
+    # next poll would pick up and find nothing for.
+    store.register_tenant(tenant)
     log("setup_saved", tenant=tenant, region=region, realm=realm,
         guild=guild, channel=channel, hasRole=bool(role))
 
@@ -963,6 +967,57 @@ def handle_admin(event, cfg, scope, now, now_iso):
     log("commands_registered", applicationId=app_id, guildId=cfg["discord_guild_id"],
         commands=names)
     return {"ok": True, "applicationId": app_id, "commands": names}
+
+
+def destination(cfg):
+    """Where this install posts.
+
+    A configured tenant posts to its channel with the bot token; the legacy
+    single-tenant install posts through the webhook it has always used. Resolved
+    in one place so no announce path has to know which kind of install it is
+    serving.
+    """
+    if cfg.get("channel_id") and cfg.get("bot_token"):
+        return {"bot_token": cfg["bot_token"], "channel": cfg["channel_id"]}
+    return {"webhook": cfg.get("webhook")}
+
+
+def tenant_configs(cfg):
+    """Every install this poll should run for, as (scope, merged cfg) pairs.
+
+    Secrets stay central and per-install settings come from the CONFIG row: WCL
+    and Blizzard credentials, the bot token and the alert topic are the operator's
+    and identical for everyone, while the guild and channel belong to the tenant.
+
+    An EMPTY REGISTRY FALLS BACK TO THE SSM CONFIG, and that is the migration
+    bridge rather than an oversight. Prod is running from SSM right now; this has
+    to keep it running until its rows are migrated and it is registered as tenant
+    #1. Once the registry has entries the fallback never fires again.
+
+    A registered tenant with no CONFIG row is skipped and logged rather than
+    raising. One broken install must not stop the others polling -- that is the
+    per-tenant isolation the brief asks for, and the cheapest place to honour it
+    is here.
+    """
+    pairs, missing = [], []
+    for tenant in store.list_tenants():
+        row = store.get_config(tenant)
+        if not row:
+            missing.append(tenant)
+            continue
+        merged = dict(cfg)
+        merged.update({k: v for k, v in row.items() if v})
+        pairs.append((store.scope_for(tenant, row), merged))
+    if missing:
+        log("tenants_missing_config", tenants=missing,
+            note="registered but never configured — skipped, not fatal")
+    if pairs:
+        return pairs
+
+    log("no_registered_tenants", note="falling back to the SSM single-tenant config")
+    legacy = keys.Scope.build(cfg["guild_region"], cfg["guild_realm"],
+                              cfg["guild_name"], cfg["discord_guild_id"])
+    return [(legacy, cfg)]
 
 
 def handler(event, context):
@@ -1524,7 +1579,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
                 "payload": payload, "summary": summary}
 
     try:
-        discord.post(cfg["webhook"], payload)
+        discord.post_to(destination(cfg), payload)
     except discord.DiscordError as exc:
         # Hand the night back so the next run retries it, exactly as a failed kill
         # announcement hands the boss back.

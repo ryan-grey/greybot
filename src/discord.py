@@ -30,19 +30,30 @@ class DiscordError(RuntimeError):
 
 
 def post(webhook_url, payload, timeout=10, sleep=time.sleep):
+    """POST one message to a webhook, retrying 429 and 5xx."""
+    return _post_json(webhook_url, payload, timeout=timeout, sleep=sleep)
+
+
+def _post_json(url, payload, headers=None, timeout=10, sleep=time.sleep):
     """POST one message, retrying 429 and 5xx.
 
     Discord answers a rate limit with retry_after in the body, so the wait is read rather
     than guessed. 4xx other than 429 is a permanent failure -- a bad webhook URL will not
     fix itself, and retrying it just delays the log line that says so.
+
+    Shared by the webhook and bot-token paths so that the retry behaviour cannot
+    drift between them. A rate limit answered correctly on one destination and
+    guessed at on the other is the kind of difference that only shows up under
+    load, which is exactly when it matters.
     """
     body = json.dumps(payload).encode("utf-8")
     last = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         req = urllib.request.Request(
-            webhook_url, data=body, method="POST",
+            url, data=body, method="POST",
             headers={"Content-Type": "application/json",
-                     "User-Agent": "scrambled-raid-bot/1.0"})
+                     "User-Agent": "scrambled-raid-bot/1.0",
+                     **(headers or {})})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as res:
                 return res.status
@@ -273,3 +284,33 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
     # No content, no roles in allowed_mentions. The recap is informational -- the AOTC card
     # remains the only thing in this bot that pings anybody.
     return {"embeds": [embed], "allowed_mentions": {"parse": []}}
+
+CHANNEL_API = "https://discord.com/api/v10/channels"
+
+
+def post_to(destination, payload, timeout=10, sleep=time.sleep):
+    """POST one announcement to wherever this install posts.
+
+    Two destinations, one call site. A single-tenant install posts through the
+    webhook URL it has always used; a configured tenant posts to its channel with
+    the bot token.
+
+    Channel posting rather than a webhook per tenant, deliberately. Creating a
+    webhook per install would mean MANAGE_WEBHOOKS on every server and a secret
+    URL stored per tenant -- a second credential to hold, rotate and leak. The bot
+    token is already held once, centrally, and `Send Messages` in the chosen
+    channel is the smallest permission that does the job.
+
+    `destination` is either {"webhook": url} or {"bot_token": t, "channel": id}.
+    """
+    if destination.get("webhook"):
+        return post(destination["webhook"], payload, timeout=timeout, sleep=sleep)
+
+    token = destination.get("bot_token")
+    channel = destination.get("channel")
+    if not token or not channel:
+        raise DiscordError("no destination configured: need a webhook, "
+                           "or a bot token and channel id")
+    return _post_json(f"{CHANNEL_API}/{channel}/messages", payload,
+                      headers={"Authorization": f"Bot {token}"},
+                      timeout=timeout, sleep=sleep)

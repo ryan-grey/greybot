@@ -79,7 +79,7 @@ def _n(v):
 # one install did. Ask `scope.wow` or `scope.tenant` here, once, against the table
 # in `docs/multi-tenant-keys.md`.
 from keys import (Scope, wow_pk, tenant_pk, tier_sk, announced_sk,  # noqa: F401
-                  ART_PK, CONFIG_SK)
+                  ART_PK, CONFIG_SK, REGISTRY_PK, TENANTS_SK)
 
 
 def _tier_key(scope, slug):
@@ -658,3 +658,41 @@ def scope_for(tenant, cfg):
     """Build the Scope for an install from its CONFIG row."""
     return Scope(wow_pk(cfg["guild_region"], cfg["guild_realm"], cfg["guild_name"]),
                  tenant)
+
+
+# --- the tenant registry --------------------------------------------------
+
+def register_tenant(tenant):
+    """Add an install to the registry. Idempotent -- ADD on a set, so re-running
+    /setup does not duplicate anything and does not need a read first."""
+    ddb.update_item(
+        TableName=TABLE,
+        Key={"pk": _s(REGISTRY_PK), "sk": _s(TENANTS_SK)},
+        UpdateExpression="ADD tenants :t",
+        ExpressionAttributeValues={":t": {"SS": [tenant]}})
+
+
+def unregister_tenant(tenant):
+    """Remove an install, for eject. DELETE on a set is an UpdateItem, so this
+    stays inside a grant that deliberately has no DeleteItem."""
+    ddb.update_item(
+        TableName=TABLE,
+        Key={"pk": _s(REGISTRY_PK), "sk": _s(TENANTS_SK)},
+        UpdateExpression="DELETE tenants :t",
+        ExpressionAttributeValues={":t": {"SS": [tenant]}})
+
+
+def list_tenants():
+    """Every configured install, oldest-order-agnostic.
+
+    A GetItem on a known key, not a Scan. Returns [] when nothing has been set
+    up, which the poller treats as 'fall back to the single-tenant path' during
+    the migration rather than as 'there is no work'.
+    """
+    res = ddb.get_item(TableName=TABLE,
+                       Key={"pk": _s(REGISTRY_PK), "sk": _s(TENANTS_SK)},
+                       ConsistentRead=True)
+    item = res.get("Item")
+    if not item:
+        return []
+    return sorted((item.get("tenants") or {}).get("SS") or [])
