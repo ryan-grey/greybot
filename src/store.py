@@ -23,8 +23,20 @@ execution role again grants no Scan and no DeleteItem. Removing a set member is 
 UpdateItem with DELETE, so the rollback path stays inside that grant.
 
     item              pk                             sk
-    bootstrap marker  GUILD#<region>#<realm>#<name>  BOOTSTRAP
-    tier state        GUILD#<region>#<realm>#<name>  TIER#<raid-slug>
+    tier baseline     WOW#<region>#<realm>#<name>    TIER#<raid-slug>
+    bootstrap marker  TENANT#<discord_guild_id>      BOOTSTRAP
+    ANNOUNCED SET     TENANT#<discord_guild_id>      ANNOUNCED#<raid-slug>
+
+The announced set is under TENANT#, not WOW#, and that placement is the dedupe
+guarantee rather than a filing decision. Two Discord servers can track the same WoW
+guild -- a raid guild's main server and its social server -- and they post to two
+different channels. Sharing one announced set between them would mean whichever polled
+second found every boss already claimed and posted nothing: no error, no log line, a bot
+that looks healthy and never speaks. Facts about the guild are shared because they are
+the same facts; records of what was posted are not, because they are not.
+
+Every function here takes a `Scope` rather than a pk, so no call site has to remember
+which partition a row lives in. See `docs/multi-tenant-keys.md`.
 
 One item per tier is also what makes tier rollover free: a new slug is a new sk, so the
 announced set starts empty on its own and nothing has to detect the rollover or clean up.
@@ -61,36 +73,53 @@ def _n(v):
     return {"N": str(v)}
 
 
-def guild_pk(region, realm, name):
-    return f"GUILD#{region.lower()}#{realm.lower()}#{name.lower()}"
+# Key construction lives in keys.py, and every function below takes a `Scope`
+# rather than a bare pk. That is deliberate: no call site should have to remember
+# whether a given row is a shared fact about the WoW guild or a record of what
+# one install did. Ask `scope.wow` or `scope.tenant` here, once, against the table
+# in `docs/multi-tenant-keys.md`.
+from keys import Scope, wow_pk, tenant_pk, tier_sk, announced_sk, ART_PK  # noqa: F401
 
 
-def tier_sk(slug):
-    return f"TIER#{slug}"
+def _tier_key(scope, slug):
+    """SHARED. Tier baseline, raid name, kill counts — facts about the guild."""
+    return {"pk": _s(scope.wow), "sk": _s(tier_sk(slug))}
 
 
-def _key(pk, slug):
-    return {"pk": _s(pk), "sk": _s(tier_sk(slug))}
+def _ann_key(scope, slug):
+    """PER-TENANT. The announced set and the AOTC flag — what THIS install posted.
+
+    Every claim and release below points here rather than at the tier row. That
+    is the correctness half of Phase 2: two Discord servers tracking one WoW
+    guild post to two channels, so they must not share a dedupe set.
+    """
+    return {"pk": _s(scope.tenant), "sk": _s(announced_sk(slug))}
 
 
-def _bootstrap_key(pk):
-    return {"pk": _s(pk), "sk": _s("BOOTSTRAP")}
+def _bootstrap_key(scope):
+    return {"pk": _s(scope.tenant), "sk": _s("BOOTSTRAP")}
 
 
-def is_bootstrapped(pk):
-    """Has this guild ever been seeded? One marker item, checked before anything can be
+def is_bootstrapped(scope):
+    """Has THIS INSTALL ever been seeded? One marker item, checked before anything can be
     announced, so 'first run announces nothing' is a branch rather than an emergent
-    property of several other rules agreeing with each other."""
-    res = ddb.get_item(TableName=TABLE, Key=_bootstrap_key(pk), ConsistentRead=True)
+    property of several other rules agreeing with each other.
+
+    Per-tenant, not per-guild, and the distinction matters the moment a second
+    Discord server tracks an already-tracked guild: that install has itself never
+    announced anything, so it must seed independently or its first poll replays
+    the whole tier into a brand-new channel.
+    """
+    res = ddb.get_item(TableName=TABLE, Key=_bootstrap_key(scope), ConsistentRead=True)
     return bool(res.get("Item"))
 
 
-def mark_bootstrapped(pk, now_iso, tiers, note=""):
+def mark_bootstrapped(scope, now_iso, tiers, note=""):
     """Record that seeding happened. Conditional, so two invocations racing the first run
     cannot both seed."""
     try:
         ddb.put_item(TableName=TABLE,
-                     Item={**_bootstrap_key(pk), "bootstrappedAt": _s(now_iso),
+                     Item={**_bootstrap_key(scope), "bootstrappedAt": _s(now_iso),
                            "tiers": _n(tiers), "note": _s(note or "")},
                      ConditionExpression="attribute_not_exists(pk)")
         return True
@@ -100,24 +129,37 @@ def mark_bootstrapped(pk, now_iso, tiers, note=""):
         raise
 
 
-def load_tier(pk, slug):
-    """Current state for one tier. A missing item means this tier has never been seen,
-    which is the signal to seed rather than to announce."""
-    res = ddb.get_item(TableName=TABLE, Key=_key(pk, slug), ConsistentRead=True)
-    item = res.get("Item")
-    if not item:
+def load_tier(scope, slug):
+    """Current state for one tier, assembled from both partitions.
+
+    Two reads, because the row was split: the shared tier row carries the
+    baseline and raid name, and this install's announced row carries what IT has
+    posted. The merged dict keeps the shape callers already expect.
+
+    A missing ANNOUNCED row is the signal to seed, not a missing TIER row. The
+    tier row may well exist already because another tenant tracks the same guild,
+    and treating that as 'already seeded' would silently skip seeding for this
+    install and let its first poll announce a tier's worth of old kills.
+    """
+    ann = ddb.get_item(TableName=TABLE, Key=_ann_key(scope, slug),
+                       ConsistentRead=True).get("Item")
+    if not ann:
         return None
+    tier = ddb.get_item(TableName=TABLE, Key=_tier_key(scope, slug),
+                        ConsistentRead=True).get("Item") or {}
     return {
-        "announced": set((item.get("announced") or {}).get("SS") or []),
-        "seedSize": int((item.get("seedSize") or {}).get("N") or 0),
-        "baseline": int((item.get("baseline") or {}).get("N") or 0),
-        "aotcAnnounced": bool((item.get("aotcAnnounced") or {}).get("BOOL") or False),
-        "raidName": (item.get("raidName") or {}).get("S") or "",
-        "seededAt": (item.get("seededAt") or {}).get("S") or "",
+        # per-tenant
+        "announced": set((ann.get("announced") or {}).get("SS") or []),
+        "aotcAnnounced": bool((ann.get("aotcAnnounced") or {}).get("BOOL") or False),
+        "seededAt": (ann.get("seededAt") or {}).get("S") or "",
+        "seedSize": int((ann.get("seedSize") or {}).get("N") or 0),
+        # shared
+        "baseline": int((tier.get("baseline") or {}).get("N") or 0),
+        "raidName": (tier.get("raidName") or {}).get("S") or "",
     }
 
 
-def seed_tier(pk, slug, already_killed, baseline, raid_name, now_iso, aotc_already=False):
+def seed_tier(scope, slug, already_killed, baseline, raid_name, now_iso, aotc_already=False):
     """Record what was ALREADY dead the first time this tier is seen, announcing nothing.
 
     Without this, the first run after a mid-tier deploy posts a kill announcement for
@@ -134,11 +176,31 @@ def seed_tier(pk, slug, already_killed, baseline, raid_name, now_iso, aotc_alrea
     an achievement the guild earned before it was watching.
     """
     names = sorted({str(x) for x in already_killed if str(x)})
-    item = {**_key(pk, slug),
+
+    # The shared tier row. Another tenant tracking this guild may have written it
+    # already, and that is fine -- these are the same facts either way. Written
+    # first and unconditionally-tolerant, so the tenant row below is the only
+    # thing that decides whether THIS install seeds.
+    try:
+        ddb.put_item(TableName=TABLE,
+                     Item={**_tier_key(scope, slug),
+                           "baseline": _n(max(int(baseline or 0), len(names))),
+                           "raidName": _s(raid_name or slug),
+                           "seededAt": _s(now_iso)},
+                     ConditionExpression="attribute_not_exists(pk)")
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            raise
+        # Already seeded by another install. Keep the existing row: its baseline
+        # came from the same upstream and rewriting it would only risk moving a
+        # count backwards.
+
+    # This install's announced row. THIS is the seed guard -- conditional, so two
+    # invocations racing the first run cannot both seed, and a second tenant on an
+    # already-tracked guild still seeds for itself.
+    item = {**_ann_key(scope, slug),
             "seedSize": _n(len(names)),
-            "baseline": _n(max(int(baseline or 0), len(names))),
             "aotcAnnounced": {"BOOL": bool(aotc_already)},
-            "raidName": _s(raid_name or slug),
             "seededAt": _s(now_iso)}
     if names:                      # DynamoDB has no empty string set
         item["announced"] = {"SS": names}
@@ -152,12 +214,12 @@ def seed_tier(pk, slug, already_killed, baseline, raid_name, now_iso, aotc_alrea
         raise
 
 
-def claim_boss(pk, slug, boss_key):
+def claim_boss(scope, slug, boss_key):
     """Atomically claim the right to announce one boss. True means announce; False means
     someone already did."""
     try:
         ddb.update_item(
-            TableName=TABLE, Key=_key(pk, slug),
+            TableName=TABLE, Key=_ann_key(scope, slug),
             UpdateExpression="ADD announced :b",
             ConditionExpression=("attribute_exists(pk) AND "
                                  "(attribute_not_exists(announced) OR NOT contains(announced, :k))"),
@@ -169,22 +231,22 @@ def claim_boss(pk, slug, boss_key):
         raise
 
 
-def release_boss(pk, slug, boss_key):
+def release_boss(scope, slug, boss_key):
     """Undo a claim whose announcement never made it to Discord, so the next poll retries.
     DELETE on a set, which is UpdateItem -- the role has no DeleteItem and does not need
     one."""
-    ddb.update_item(TableName=TABLE, Key=_key(pk, slug),
+    ddb.update_item(TableName=TABLE, Key=_ann_key(scope, slug),
                     UpdateExpression="DELETE announced :b",
                     ExpressionAttributeValues={":b": {"SS": [boss_key]}})
 
 
-def claim_aotc(pk, slug):
+def claim_aotc(scope, slug):
     """Claim the one-and-only AOTC announcement for this tier. The guard is the whole
     point: the final boss gets re-killed every week for the rest of the tier, and every
     one of those re-kills satisfies 'heroic kills == total bosses'."""
     try:
         ddb.update_item(
-            TableName=TABLE, Key=_key(pk, slug),
+            TableName=TABLE, Key=_ann_key(scope, slug),
             UpdateExpression="SET aotcAnnounced = :t",
             ConditionExpression=("attribute_exists(pk) AND "
                                  "(attribute_not_exists(aotcAnnounced) OR aotcAnnounced = :f)"),
@@ -196,23 +258,23 @@ def claim_aotc(pk, slug):
         raise
 
 
-def release_aotc(pk, slug):
-    ddb.update_item(TableName=TABLE, Key=_key(pk, slug),
+def release_aotc(scope, slug):
+    ddb.update_item(TableName=TABLE, Key=_ann_key(scope, slug),
                     UpdateExpression="SET aotcAnnounced = :f",
                     ExpressionAttributeValues={":f": {"BOOL": False}})
 
 
-def touch(pk, slug, now_iso, raid_name=None):
+def touch(scope, slug, now_iso, raid_name=None):
     expr, vals = ["updatedAt = :u"], {":u": _s(now_iso)}
     if raid_name:
         expr.append("raidName = :r")
         vals[":r"] = _s(raid_name)
-    ddb.update_item(TableName=TABLE, Key=_key(pk, slug),
+    ddb.update_item(TableName=TABLE, Key=_tier_key(scope, slug),
                     UpdateExpression="SET " + ", ".join(expr),
                     ExpressionAttributeValues=vals)
 
 
-def put_snapshot(pk, slug, raid_name, killed, total, realm_rank, now_iso):
+def put_snapshot(scope, slug, raid_name, killed, total, realm_rank, now_iso):
     """What /progress answers from.
 
     The slash command has a hard three-second budget including cold start, and a
@@ -222,14 +284,14 @@ def put_snapshot(pk, slug, raid_name, killed, total, realm_rank, now_iso):
     the dedupe state remains the authority on what has been announced.
     """
     ddb.put_item(TableName=TABLE, Item={
-        "pk": _s(pk), "sk": _s("PROGRESS"),
+        "pk": _s(scope.wow), "sk": _s("PROGRESS"),
         "slug": _s(slug), "raidName": _s(raid_name or slug),
         "killed": _n(int(killed or 0)), "total": _n(int(total or 0)),
         "realmRank": _n(int(realm_rank or 0)), "updatedAt": _s(now_iso)})
 
 
-def get_snapshot(pk):
-    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s("PROGRESS")})
+def get_snapshot(scope):
+    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(scope.wow), "sk": _s("PROGRESS")})
     item = res.get("Item")
     if not item:
         return None
@@ -322,7 +384,7 @@ def roster_sk(slug):
     return f"ROSTER#{slug}"
 
 
-def record_first_kill(pk, slug, boss_key, players, killed_at_ms, report_code, now_iso):
+def record_first_kill(scope, slug, boss_key, players, killed_at_ms, report_code, now_iso):
     """Who was standing there for one first Heroic kill.
 
     Written after the claim succeeds, so it records kills that were actually announced
@@ -338,14 +400,14 @@ def record_first_kill(pk, slug, boss_key, players, killed_at_ms, report_code, no
     if not names:
         return False
     ddb.put_item(TableName=TABLE, Item={
-        "pk": _s(pk), "sk": _s(kill_sk(slug, boss_key)),
+        "pk": _s(scope.wow), "sk": _s(kill_sk(slug, boss_key)),
         "players": {"SS": names}, "killedAtMs": _n(int(killed_at_ms or 0)),
         "reportCode": _s(report_code or ""), "recordedAt": _s(now_iso)})
     return True
 
 
-def get_first_kill(pk, slug, boss_key):
-    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(kill_sk(slug, boss_key))})
+def get_first_kill(scope, slug, boss_key):
+    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(scope.wow), "sk": _s(kill_sk(slug, boss_key))})
     item = res.get("Item")
     if not item:
         return None
@@ -354,7 +416,7 @@ def get_first_kill(pk, slug, boss_key):
             "reportCode": (item.get("reportCode") or {}).get("S") or ""}
 
 
-def first_kills(pk, slug, boss_keys):
+def first_kills(scope, slug, boss_keys):
     """Every recorded first kill for this tier, keyed by boss.
 
     `boss_keys` comes from the tier's announced set. Bosses with no record are simply
@@ -363,15 +425,15 @@ def first_kills(pk, slug, boss_keys):
     """
     out = {}
     for key in sorted(boss_keys or ()):
-        rec = get_first_kill(pk, slug, key)
+        rec = get_first_kill(scope, slug, key)
         if rec and rec["players"]:
             out[key] = rec
     return out
 
 
-def load_roster(pk, slug):
+def load_roster(scope, slug):
     """The persisted roster for one tier: what was derived, and what it was seeded from."""
-    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(roster_sk(slug))},
+    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(scope.wow), "sk": _s(roster_sk(slug))},
                        ConsistentRead=True)
     item = res.get("Item")
     if not item:
@@ -384,7 +446,7 @@ def load_roster(pk, slug):
             "derivedAt": (item.get("derivedAt") or {}).get("S") or ""}
 
 
-def seed_roster(pk, slug, players, from_slug, now_iso):
+def seed_roster(scope, slug, players, from_slug, now_iso):
     """Carry the previous tier's roster into a new one, once.
 
     An UpdateItem guarded on `seed` rather than a conditional PutItem, because the tier's
@@ -399,7 +461,7 @@ def seed_roster(pk, slug, players, from_slug, now_iso):
         return False
     try:
         ddb.update_item(
-            TableName=TABLE, Key={"pk": _s(pk), "sk": _s(roster_sk(slug))},
+            TableName=TABLE, Key={"pk": _s(scope.wow), "sk": _s(roster_sk(slug))},
             UpdateExpression="SET seed = :p, seedFrom = :f, seededAt = :t",
             ConditionExpression="attribute_not_exists(seed)",
             ExpressionAttributeValues={":p": {"SS": names}, ":f": _s(from_slug or ""),
@@ -411,7 +473,7 @@ def seed_roster(pk, slug, players, from_slug, now_iso):
         raise
 
 
-def save_derived_roster(pk, slug, players, sample, provisional, now_iso):
+def save_derived_roster(scope, slug, players, sample, provisional, now_iso):
     """Persist the roster the bot actually used.
 
     It is recomputed from the first-kill records on every recap, so this copy is not the
@@ -426,7 +488,7 @@ def save_derived_roster(pk, slug, players, sample, provisional, now_iso):
     if names:
         expr.append("derived = :d")
         vals[":d"] = {"SS": names}
-    ddb.update_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(roster_sk(slug))},
+    ddb.update_item(TableName=TABLE, Key={"pk": _s(scope.wow), "sk": _s(roster_sk(slug))},
                     UpdateExpression="SET " + ", ".join(expr),
                     ExpressionAttributeValues=vals)
 
@@ -434,7 +496,7 @@ def save_derived_roster(pk, slug, players, sample, provisional, now_iso):
 RECAPS_SK = "RECAPS"
 
 
-def claim_recap(pk, night_key):
+def claim_recap(scope, night_key):
     """Atomically claim the right to post one night's recap. Same discipline as
     claim_boss, and for the same reason -- Discord has no undo.
 
@@ -444,7 +506,7 @@ def claim_recap(pk, night_key):
     """
     try:
         ddb.update_item(
-            TableName=TABLE, Key={"pk": _s(pk), "sk": _s(RECAPS_SK)},
+            TableName=TABLE, Key={"pk": _s(scope.tenant), "sk": _s(RECAPS_SK)},
             UpdateExpression="ADD posted :b",
             ConditionExpression="attribute_not_exists(posted) OR NOT contains(posted, :k)",
             ExpressionAttributeValues={":b": {"SS": [night_key]}, ":k": _s(night_key)})
@@ -455,9 +517,9 @@ def claim_recap(pk, night_key):
         raise
 
 
-def release_recap(pk, night_key):
+def release_recap(scope, night_key):
     """Hand the night back after a permanent failure, so the next run retries it."""
-    ddb.update_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(RECAPS_SK)},
+    ddb.update_item(TableName=TABLE, Key={"pk": _s(scope.tenant), "sk": _s(RECAPS_SK)},
                     UpdateExpression="DELETE posted :b",
                     ExpressionAttributeValues={":b": {"SS": [night_key]}})
 
@@ -465,14 +527,14 @@ def release_recap(pk, night_key):
 HEALTH_SK = "HEALTH"
 
 
-def get_health(pk):
+def get_health(scope):
     """The last Discord standing this bot recorded, or None if it has never checked.
 
     None is not "healthy". It is the first run, and handler.py treats it as a state to
     record silently rather than a recovery to celebrate -- otherwise every fresh deploy
     would mail to say nothing is wrong.
     """
-    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(HEALTH_SK)},
+    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(scope.tenant), "sk": _s(HEALTH_SK)},
                        ConsistentRead=True)
     item = res.get("Item")
     if not item:
@@ -487,7 +549,7 @@ def get_health(pk):
             "member": (item.get("member") or {}).get("BOOL")}
 
 
-def put_health(pk, status, detail, since, notified_at="", member=None):
+def put_health(scope, status, detail, since, notified_at="", member=None):
     """Overwrite the standing wholesale.
 
     A plain PutItem, deliberately -- unlike everything else in this table there is no
@@ -496,7 +558,7 @@ def put_health(pk, status, detail, since, notified_at="", member=None):
     prevented by the transition test in handler.py, not by a conditional write. Making it
     conditional would only add a way for the second poll to fail.
     """
-    item = {"pk": _s(pk), "sk": _s(HEALTH_SK),
+    item = {"pk": _s(scope.tenant), "sk": _s(HEALTH_SK),
             "status": _s(status), "detail": _s(detail or ""),
             "since": _s(since), "notifiedAt": _s(notified_at or "")}
     # Written only when the probe actually answered, so "could not tell" stays absent
@@ -509,14 +571,14 @@ def put_health(pk, status, detail, since, notified_at="", member=None):
 SOURCE_SK = "SOURCE"
 
 
-def get_source(pk):
+def get_source(scope):
     """Whether the log source was answering last time, and for how many polls it has not.
 
     The streak lives here rather than in the Lambda because a Lambda container is not a
     place to keep a count -- it is recycled on a whim, and a counter that resets whenever
     AWS feels like it can never reach a threshold of four.
     """
-    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(pk), "sk": _s(SOURCE_SK)},
+    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(scope.wow), "sk": _s(SOURCE_SK)},
                        ConsistentRead=True)
     item = res.get("Item")
     if not item:
@@ -527,11 +589,11 @@ def get_source(pk):
             "notifiedAt": (item.get("notifiedAt") or {}).get("S") or ""}
 
 
-def put_source(pk, status, blind_polls, since, notified_at=""):
+def put_source(scope, status, blind_polls, since, notified_at=""):
     """Overwrite wholesale, for the same reason put_health does: there is no claim to win
     here, and the one-email-per-event rule is enforced by the transition test rather than
     by a conditional write."""
     ddb.put_item(TableName=TABLE, Item={
-        "pk": _s(pk), "sk": _s(SOURCE_SK),
+        "pk": _s(scope.wow), "sk": _s(SOURCE_SK),
         "status": _s(status), "blindPolls": _n(int(blind_polls or 0)),
         "since": _s(since), "notifiedAt": _s(notified_at or "")})

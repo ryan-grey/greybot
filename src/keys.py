@@ -115,3 +115,10 @@ class Scope:
     def __eq__(self, other):
         return (isinstance(other, Scope)
                 and self.wow == other.wow and self.tenant == other.tenant)
+
+    # Defining __eq__ removes the inherited __hash__, which would make a Scope
+    # unusable as a dict key or set member — and Phase 3's caching layer will
+    # want exactly that, to fan one upstream fetch out across the tenants
+    # sharing it. Cheaper to keep them hashable now than to debug it later.
+    def __hash__(self):
+        return hash((self.wow, self.tenant))

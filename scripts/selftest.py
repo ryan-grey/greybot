@@ -35,6 +35,12 @@ def _no_network(*a, **kw):
 urllib.request.urlopen = _no_network
 
 
+# A fixed Discord snowflake for the tests. Any valid one will do; what
+# matters is that it is the SAME one throughout, so dedupe rows written by
+# one test are found by the next.
+TEST_TENANT = "900000000000000001"
+
+
 def check(name, cond, detail=""):
     if cond:
         print(f"  [ok] {name}")
@@ -138,6 +144,10 @@ SSM_VALUES = {
     "/greybot/guild/name": "Scrambled",
     "/greybot/guild/realm": "proudmoore",
     "/greybot/guild/region": "us",
+    # The tenant. Required since Phase 2: it is the partition every announcement
+    # record is written under, so a poll cannot proceed without knowing which
+    # install it is acting as.
+    "/greybot/discord/guild_id": TEST_TENANT,
 }
 
 
@@ -181,6 +191,7 @@ import discord            # noqa: E402
 import raiderio           # noqa: E402
 import health             # noqa: E402
 import notify             # noqa: E402
+import keys
 import store              # noqa: E402
 import team               # noqa: E402
 import recap              # noqa: E402
@@ -740,7 +751,6 @@ def test_progress_count():
 
 def test_tenant_keys():
     print("\nMulti-tenant key layout")
-    import keys
 
     # --- namespaces are distinct and derived, not passed in ---------------
     wow = keys.wow_pk("US", "Proudmoore", "Scrambled")
@@ -789,11 +799,18 @@ def test_tenant_keys():
     check("different guild, same install SPLITS upstream", a.wow != c.wow)
     check("different guild, same install SHARES tenant", a.tenant == c.tenant)
 
+    # Phase 3 fans one upstream fetch out across the tenants sharing it, which
+    # means Scopes end up as dict keys. Defining __eq__ drops the inherited
+    # __hash__, so this would fail silently until that phase.
+    a2 = keys.Scope.build("us", "proudmoore", "Scrambled", "111111111111111111")
+    check("equal scopes compare equal", a == a2)
+    check("scopes are hashable and dedupe by value", len({a, a2, b}) == 2)
+
 
 def test_dedupe():
     print("\nDedupe and the announce-once claim")
     FAKE_DDB.items.clear()
-    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
     slug = "the-venomous-abyss"
 
     check("seeding creates the tier",
@@ -823,7 +840,7 @@ def test_dedupe():
 def test_aotc_guard():
     print("\nAOTC fires once")
     FAKE_DDB.items.clear()
-    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
     slug = "the-venomous-abyss"
     store.seed_tier(pk, slug, {"a"}, 1, "The Venomous Abyss", "now")
 
@@ -1112,7 +1129,7 @@ def test_interactions():
     config._cache.clear()
     cfg = dict(config.load())
     cfg["public_key"] = public_key
-    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
 
@@ -1220,7 +1237,7 @@ def test_end_to_end():
     handler.raiderio.static_raids = lambda exp: {11: RAIDS, 10: PREV_RAIDS}.get(exp, [])
     handler.discord.post = lambda hook, payload, **kw: posts.append(payload) or 204
 
-    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
 
     # --- run one. Warcraft Logs can only still see the two current-tier kills; the
     # --- tier-mn-1 clear is older than the lookback, exactly as it would be in reality.
@@ -1483,15 +1500,15 @@ def test_team_resolution():
 def test_roster_state():
     print("\nRoster state, seeding and the recap claim")
     FAKE_DDB.items.clear()
-    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
     slug = "the-venomous-abyss"
 
     for i, name in enumerate(ABYSS[:4]):
         store.record_first_kill(pk, slug, raiderio.normalize(name),
                                 {team.player_key(p) for p in FIRST_KILLS[i]},
                                 1_700_000_000_000 + i, f"REPORT{i}", "now")
-    keys = {raiderio.normalize(n) for n in ABYSS[:5]}     # the 5th was seeded, not killed
-    recorded = store.first_kills(pk, slug, keys)
+    boss_keys = {raiderio.normalize(n) for n in ABYSS[:5]}  # the 5th was seeded, not killed
+    recorded = store.first_kills(pk, slug, boss_keys)
     check("four first kills read back", len(recorded) == 4, sorted(recorded))
     check("a seeded boss with no participants is simply absent",
           raiderio.normalize(ABYSS[4]) not in recorded)
@@ -1711,7 +1728,7 @@ def test_health():
     # ------------------------------------------------- one email per event
     FAKE_DDB.items.clear()
     SENT.clear()
-    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
     _iso = handler._iso
     real_check = health.check
 
@@ -1846,7 +1863,7 @@ def test_progress_slow_path():
 
     now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
     FAKE_DDB.items.clear()
-    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
     cfg = {"guild_name": "Scrambled", "guild_realm": "proudmoore", "guild_region": "us"}
 
     # A snapshot older than the max age must defer, not apologise.
@@ -1914,7 +1931,7 @@ def test_subtitle_aliases():
     # would name it, and confirm nothing is posted.
     import handler
     FAKE_DDB.items.clear()
-    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
     store.seed_tier(pk, "t", {n("Dimensius")}, 1, "T", "now")
     state = store.load_tier(pk, "t")
     posts = []
@@ -1950,7 +1967,7 @@ def test_source_blind():
     _iso = handler._iso
     cfg = {"guild_name": "Scrambled",
            "alert_topic_arn": "arn:aws:sns:us-east-1:0:ryangrey-dev-alerts"}
-    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
     FAKE_DDB.items.clear()
     SENT.clear()
 
@@ -2224,7 +2241,7 @@ def test_recap_end_to_end():
     handler.raiderio.static_raids = lambda exp: {11: RAIDS, 10: PREV_RAIDS}.get(exp, [])
     handler.discord.post = lambda hook, payload, **kw: posts.append(payload) or 204
 
-    pk = store.guild_pk("us", "proudmoore", "Scrambled")
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
     store.mark_bootstrapped(pk, "now", 4)
     store.seed_tier(pk, "the-venomous-abyss", set(), 0, "The Venomous Abyss", "now")
     store.seed_tier(pk, "the-tidebound-grotto", set(), 0, "The Tidebound Grotto", "now")
@@ -2268,7 +2285,8 @@ def test_recap_end_to_end():
     posts.clear()
     # The window test above did a real post, which claimed this night. Release it, or the
     # manual case would be testing the duplicate guard rather than the manual path.
-    FAKE_DDB.items.pop((pk, store.RECAPS_SK), None)
+    # Recap claims are per-tenant, so the fake table is keyed by that partition.
+    FAKE_DDB.items.pop((pk.tenant, store.RECAPS_SK), None)
     before_manual = dict(FAKE_DDB.items)
     res = handler.handler({"mode": "recap", "manual": True, "hours": 48}, None)
     check("a manual post works while the schedule is still disabled",
