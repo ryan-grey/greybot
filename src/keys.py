@@ -52,6 +52,28 @@ def tenant_pk(discord_guild_id):
     return f"TENANT#{raw}"
 
 
+def tenant_from_interaction(body):
+    """The tenant an interaction came from, taken off the VERIFIED payload.
+
+    This is the only way a request-driven code path may learn which tenant it is
+    acting as. `body` must be the JSON of an interaction whose Ed25519 signature
+    has already been checked — Discord populates `guild_id` itself, so a caller
+    cannot claim to be a server they are not in.
+
+    Nothing reads a guild id from a command option or a request field. That is
+    GreyScale's "no endpoint accepts a member id" rule: if no caller can name a
+    tenant, no caller can reach another tenant's rows.
+
+    Raises for a DM (no `guild_id`), which is correct — every one of this bot's
+    commands is about a server's configuration, and there is no sensible tenant
+    to answer as outside one.
+    """
+    gid = (body or {}).get("guild_id")
+    if not gid:
+        raise ValueError("interaction has no guild_id — commands only work in a server")
+    return tenant_pk(gid)
+
+
 ART_PK = "ART#GLOBAL"
 
 

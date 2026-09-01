@@ -604,6 +604,13 @@ def handle_progress(body, cfg, scope, now):
 
 def handle_followup(spec, cfg, scope, now):
     """The deferred half: fetch live and PATCH the placeholder into the real answer."""
+    if (spec or {}).get("kind") == "setup":
+        result = handle_setup(spec.get("body") or {}, _iso(now))
+        interactions.edit_followup(spec.get("application_id"), spec.get("token"),
+                                   result["embed"])
+        log("setup_followup_sent", ok=result["ok"])
+        return {"ok": result["ok"], "followup": True, "setup": True}
+
     profile = raiderio.guild_profile(cfg["guild_region"], cfg["guild_realm"],
                                      cfg["guild_name"])
     index, _exp = raiderio.build_index(profile, EXPANSION_HINT)
@@ -619,6 +626,56 @@ def handle_followup(spec, cfg, scope, now):
     interactions.edit_followup(spec.get("application_id"), spec.get("token"), embed)
     log("progress_followup_sent", applicationId=spec.get("application_id"))
     return {"ok": True, "followup": True}
+
+
+def handle_setup(body, now_iso):
+    """`/setup` — point this server at a WoW guild and a channel.
+
+    Defers first. Validating the guild means a Raider.IO round trip, and spending
+    a three-second budget on somebody else's API is how an interaction visibly
+    fails in the channel. Type 5 now, the real answer via follow-up.
+
+    NOTHING IS SAVED UNTIL THE GUILD RESOLVES. A typo'd realm that wrote a config
+    row would leave the server subscribed to a guild that does not exist, and the
+    only symptom would be a bot that never posts -- indistinguishable from a quiet
+    week. Failing here, loudly, is the whole reason validation is in this path.
+    """
+    tenant = keys.tenant_from_interaction(body)
+    opts = interactions.command_options(body)
+    region = str(opts.get("region") or "").strip().lower()
+    realm = str(opts.get("realm") or "").strip()
+    guild = str(opts.get("guild") or "").strip()
+    channel = str(opts.get("channel") or "").strip()
+    role = str(opts.get("role") or "").strip()
+    who = ((body.get("member") or {}).get("user") or {}).get("id") or ""
+
+    try:
+        profile = raiderio.guild_profile(region, realm, guild)
+    except Exception as exc:                                   # noqa: BLE001
+        log("setup_guild_lookup_failed", tenant=tenant, region=region,
+            realm=realm, guild=guild, error=repr(exc))
+        return {"ok": False, "embed": {
+            "title": "Could not find that guild",
+            "description": (f"Raider.IO has no **{guild}** on **{realm}** ({region.upper()}).\n\n"
+                            "Check the spelling of the realm and guild, and note that "
+                            "the guild needs at least one logged Heroic kill before "
+                            "Raider.IO knows about it."),
+            "color": discord.BRAND_ACCENT}}
+
+    store.put_config(tenant, region, realm, guild, channel, now_iso,
+                     prog_role_id=role, configured_by=who)
+    log("setup_saved", tenant=tenant, region=region, realm=realm,
+        guild=guild, channel=channel, hasRole=bool(role))
+
+    return {"ok": True, "embed": {
+        "title": "greyBot is set up",
+        "description": (f"Tracking **{profile.get('name') or guild}** on "
+                        f"**{profile.get('realm') or realm}** ({region.upper()}).\n"
+                        f"Announcements go to <#{channel}>."
+                        + (f"\nMentioning <@&{role}> on a first kill." if role else "")
+                        + "\n\nThe next poll seeds what is already dead and announces "
+                          "nothing. Kills after that get posted."),
+        "color": discord.BRAND_ACCENT}}
 
 
 def handle_interaction(event, cfg, scope, now):
@@ -651,6 +708,36 @@ def handle_interaction(event, cfg, scope, now):
         log("interaction_command", command=name)
         if name == "progress":
             return interactions.http(200, handle_progress(body, cfg, scope, now))
+        if name == "setup":
+            # Belt and braces on top of default_member_permissions. That field is
+            # a default a server admin can override in Discord's UI, so it is not
+            # by itself an authorisation check. 0x20 is MANAGE_GUILD.
+            perms = int(str(body.get("member", {}).get("permissions") or "0") or 0)
+            if not perms & 0x20:
+                log("setup_denied", reason="missing_manage_guild")
+                return interactions.http(200, interactions.message(
+                    {"description": "You need **Manage Server** to run `/setup`.",
+                     "color": discord.BRAND_ACCENT}, ephemeral=True))
+            # Defer and hand the Raider.IO lookup to a second invocation, the
+            # same shape /progress uses for its cold path. Validating inside the
+            # three-second window would gamble the interaction on someone else's
+            # API being quick.
+            spec = {"kind": "setup", "body": body,
+                    "application_id": body.get("application_id"),
+                    "token": body.get("token")}
+            try:
+                boto3.client("lambda", region_name=REGION).invoke(
+                    FunctionName=os.environ.get("AWS_LAMBDA_FUNCTION_NAME",
+                                                "ryangrey-greybot"),
+                    InvocationType="Event",
+                    Payload=json.dumps({"followup": spec}).encode("utf-8"))
+                log("setup_deferred")
+                return interactions.http(200, interactions.deferred(ephemeral=True))
+            except Exception as exc:                           # noqa: BLE001
+                log("setup_defer_failed", error=repr(exc))
+                return interactions.http(200, interactions.message(
+                    {"description": "Setup is briefly unavailable — try again in a minute.",
+                     "color": discord.BRAND_ACCENT}, ephemeral=True))
         return interactions.http(200, interactions.message(
             {"description": f"Unknown command `{name}`.",
              "color": discord.BRAND_ACCENT}, ephemeral=True))

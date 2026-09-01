@@ -807,6 +807,94 @@ def test_tenant_keys():
     check("scopes are hashable and dedupe by value", len({a, a2, b}) == 2)
 
 
+def test_setup_command():
+    print("\n/setup: tenant config")
+    import handler
+    FAKE_DDB.items.clear()
+
+    OTHER = "900000000000000002"
+
+    def body(gid=TEST_TENANT, perms="32", **opts):
+        base = {"region": "us", "realm": "Proudmoore", "guild": "Scrambled",
+                "channel": "555000000000000001"}
+        base.update(opts)
+        return {"guild_id": gid,
+                "member": {"permissions": perms, "user": {"id": "777"}},
+                "application_id": "1", "token": "tok",
+                "data": {"name": "setup",
+                         "options": [{"name": k, "value": v}
+                                     for k, v in base.items() if v is not None]}}
+
+    # --- the tenant comes from the payload, never from an option -----------
+    check("tenant is derived from the verified guild_id",
+          keys.tenant_from_interaction(body()) == f"TENANT#{TEST_TENANT}")
+    try:
+        keys.tenant_from_interaction({"data": {}})
+        check("a DM has no tenant to act as", False, "accepted a DM")
+    except ValueError:
+        check("a DM has no tenant to act as", True)
+    # An option called guild_id must be ignored entirely: this is the whole
+    # no-endpoint-accepts-a-member-id rule, and it is worth an explicit test.
+    forged = body()
+    forged["data"]["options"].append({"name": "guild_id", "value": OTHER})
+    check("an option cannot forge the tenant",
+          keys.tenant_from_interaction(forged) == f"TENANT#{TEST_TENANT}")
+
+    # --- a guild that does not resolve saves NOTHING -----------------------
+    def boom(*a, **kw):
+        raise RuntimeError("404 not found")
+    real_profile, raiderio.guild_profile = raiderio.guild_profile, boom
+    try:
+        res = handler.handle_setup(body(realm="Nosuchrealm"), "2026-09-01T00:00:00Z")
+    finally:
+        raiderio.guild_profile = real_profile
+    check("an unresolvable guild reports failure", res["ok"] is False)
+    check("...and says which realm and guild it tried",
+          "Nosuchrealm" in res["embed"]["description"])
+    check("...and writes NO config row",
+          store.get_config(f"TENANT#{TEST_TENANT}") is None,
+          "a typo'd realm would leave a server silently subscribed to nothing")
+
+    # --- the happy path ---------------------------------------------------
+    # The suite is fully offline, so the lookup is stubbed. It echoes back the
+    # realm Raider.IO would return, which is how the success embed can differ
+    # from what was typed.
+    def resolved(region, realm, name):
+        return {"name": name, "realm": realm.title(), "region": region}
+    raiderio.guild_profile = resolved
+
+    res = handler.handle_setup(body(), "2026-09-01T00:00:00Z")
+    check("a resolvable guild succeeds", res["ok"] is True)
+    cfg = store.get_config(f"TENANT#{TEST_TENANT}")
+    check("...writes the config row", cfg is not None)
+    check("...case-folds region and realm",
+          (cfg["guild_region"], cfg["guild_realm"]) == ("us", "proudmoore"), cfg)
+    check("...keeps the guild name as typed", cfg["guild_name"] == "Scrambled")
+    check("...records the channel", cfg["channel_id"] == "555000000000000001")
+    check("...records who ran it", cfg["configuredBy"] == "777")
+    check("...leaves the mention role empty when not given", cfg["prog_role_id"] == "")
+
+    # --- re-running corrects a mistake ------------------------------------
+    handler.handle_setup(body(realm="Tichondrius", role="888"),
+                         "2026-09-02T00:00:00Z")
+    cfg = store.get_config(f"TENANT#{TEST_TENANT}")
+    check("re-running /setup replaces the config", cfg["guild_realm"] == "tichondrius")
+    check("...and can add a mention role", cfg["prog_role_id"] == "888")
+
+    # --- two servers do not see each other's config -----------------------
+    handler.handle_setup(body(gid=OTHER, guild="Elsewhere"),
+                         "2026-09-01T00:00:00Z")
+    a = store.get_config(f"TENANT#{TEST_TENANT}")
+    b = store.get_config(f"TENANT#{OTHER}")
+    check("a second server gets its own config", b["guild_name"] == "Elsewhere")
+    check("...and does not disturb the first", a["guild_name"] == "Scrambled")
+    check("an unconfigured server reads as None",
+          store.get_config("TENANT#900000000000000009") is None)
+
+    raiderio.guild_profile = real_profile
+    FAKE_DDB.items.clear()
+
+
 def test_dedupe():
     print("\nDedupe and the announce-once claim")
     FAKE_DDB.items.clear()
@@ -1185,8 +1273,32 @@ def test_interactions():
                      "application_id": "1"}), cfg, pk, now)["body"])["type"]
           == interactions.CHANNEL_MESSAGE_WITH_SOURCE)
 
-    check("the registered command set is exactly /progress",
-          [c["name"] for c in interactions.COMMANDS] == ["progress"])
+    check("the registered command set is /progress and /setup",
+          [c["name"] for c in interactions.COMMANDS] == ["progress", "setup"])
+
+    setup = interactions.SETUP_COMMAND
+    # 0x20 is MANAGE_GUILD. Discord takes this as a STRING bitfield; an int here
+    # is silently rejected and the command ends up available to everyone.
+    check("/setup is gated on Manage Server",
+          setup["default_member_permissions"] == "32")
+    check("...as a string, which is what Discord accepts",
+          isinstance(setup["default_member_permissions"], str))
+    check("/setup refuses DMs", setup["dm_permission"] is False)
+    opts = {o["name"]: o for o in setup["options"]}
+    check("...asks for region, realm, guild and channel",
+          all(k in opts for k in ("region", "realm", "guild", "channel")))
+    check("...takes the channel as a real channel picker, not a typed id",
+          opts["channel"]["type"] == 7)
+    check("...restricts it to channels a webhook can post in",
+          opts["channel"]["channel_types"] == [0, 5])
+    check("...makes the mention role optional", opts["role"]["required"] is False)
+
+    flat = interactions.command_options(
+        {"data": {"options": [{"name": "region", "value": "us"},
+                              {"name": "realm", "value": "Proudmoore"}]}})
+    check("options flatten to a dict", flat == {"region": "us", "realm": "Proudmoore"})
+    check("...and missing options are simply absent",
+          interactions.command_options({"data": {}}) == {})
     FAKE_DDB.items.clear()
     config._cache.clear()
 
@@ -2377,7 +2489,7 @@ def main():
     print("greyBot self-test")
     for fn in (test_config, test_boss_art, test_name_normalisation, test_slug_resolution,
                test_seed_names, test_progress_count,
-               test_tenant_keys, test_dedupe, test_aotc_guard,
+               test_tenant_keys, test_setup_command, test_dedupe, test_aotc_guard,
                test_roster_derivation, test_team_resolution, test_roster_state,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
                test_interactions, test_progress_slow_path,

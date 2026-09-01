@@ -78,7 +78,8 @@ def _n(v):
 # whether a given row is a shared fact about the WoW guild or a record of what
 # one install did. Ask `scope.wow` or `scope.tenant` here, once, against the table
 # in `docs/multi-tenant-keys.md`.
-from keys import Scope, wow_pk, tenant_pk, tier_sk, announced_sk, ART_PK  # noqa: F401
+from keys import (Scope, wow_pk, tenant_pk, tier_sk, announced_sk,  # noqa: F401
+                  ART_PK, CONFIG_SK)
 
 
 def _tier_key(scope, slug):
@@ -597,3 +598,63 @@ def put_source(scope, status, blind_polls, since, notified_at=""):
         "pk": _s(scope.wow), "sk": _s(SOURCE_SK),
         "status": _s(status), "blindPolls": _n(int(blind_polls or 0)),
         "since": _s(since), "notifiedAt": _s(notified_at or "")})
+
+
+# --- tenant configuration -------------------------------------------------
+#
+# The CONFIG row is the install itself: which WoW guild this server tracks, and
+# where to post. Written by /setup, read at the top of every poll.
+#
+# These two take a TENANT PARTITION STRING rather than a Scope, and that is the
+# one deliberate exception to the rule above. A Scope needs the WoW guild, and
+# the whole point of reading this row is to find out what the WoW guild is --
+# there is nothing to build a Scope from until after it returns.
+
+def get_config(tenant):
+    """This install's configuration, or None if /setup has never run here.
+
+    None is a real answer, not an error. A server that has added the bot but not
+    configured it should be told to run /setup, not shown a stack trace.
+    """
+    res = ddb.get_item(TableName=TABLE,
+                       Key={"pk": _s(tenant), "sk": _s(CONFIG_SK)},
+                       ConsistentRead=True)
+    item = res.get("Item")
+    if not item:
+        return None
+    return {
+        "guild_region": (item.get("guildRegion") or {}).get("S") or "",
+        "guild_realm": (item.get("guildRealm") or {}).get("S") or "",
+        "guild_name": (item.get("guildName") or {}).get("S") or "",
+        "channel_id": (item.get("channelId") or {}).get("S") or "",
+        "prog_role_id": (item.get("progRoleId") or {}).get("S") or "",
+        "configuredAt": (item.get("configuredAt") or {}).get("S") or "",
+        "configuredBy": (item.get("configuredBy") or {}).get("S") or "",
+    }
+
+
+def put_config(tenant, region, realm, name, channel_id, now_iso,
+               prog_role_id="", configured_by=""):
+    """Write or replace this install's configuration.
+
+    Overwrite rather than conditional-create: re-running /setup to correct a
+    typo'd realm has to work, and there is no claim to win here the way there is
+    with an announcement.
+
+    Re-pointing a server at a DIFFERENT WoW guild deliberately leaves the old
+    ANNOUNCED# rows in place. They are keyed by tier slug, not by guild, so the
+    new guild's tiers get their own rows and seed normally; deleting the old ones
+    would only risk re-announcing kills if the server ever pointed back.
+    """
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(tenant), "sk": _s(CONFIG_SK),
+        "guildRegion": _s(region.lower()), "guildRealm": _s(realm.lower()),
+        "guildName": _s(name), "channelId": _s(channel_id),
+        "progRoleId": _s(prog_role_id or ""),
+        "configuredAt": _s(now_iso), "configuredBy": _s(configured_by or "")})
+
+
+def scope_for(tenant, cfg):
+    """Build the Scope for an install from its CONFIG row."""
+    return Scope(wow_pk(cfg["guild_region"], cfg["guild_realm"], cfg["guild_name"]),
+                 tenant)
