@@ -895,6 +895,33 @@ def test_setup_command():
     check("an unconfigured server reads as None",
           store.get_config("TENANT#900000000000000009") is None)
 
+    # --- THE CROSS-TENANT BOUNDARY ----------------------------------------
+    #
+    # An interaction must be answered as the server that sent it, never as
+    # whichever install the poller's config happens to name. This is the one
+    # code path that takes input from strangers, so it is where the key layout's
+    # isolation is either real or decorative.
+    A_scope, A_cfg = handler.interaction_scope({"guild_id": TEST_TENANT}, {})
+    B_scope, B_cfg = handler.interaction_scope({"guild_id": OTHER}, {})
+    check("server A resolves to its own tenant", A_scope.tenant == f"TENANT#{TEST_TENANT}")
+    check("server B resolves to its own tenant", B_scope.tenant == f"TENANT#{OTHER}")
+    check("...and to its own WoW guild, not A's",
+          B_scope.wow != A_scope.wow, f"{B_scope.wow} vs {A_scope.wow}")
+    check("...with its own guild name in the config",
+          B_cfg["guild_name"] == "Elsewhere")
+
+    # A server that has never run /setup gets told so, rather than being handed
+    # somebody else's data.
+    s, why = handler.interaction_scope({"guild_id": "900000000000000009"}, {})
+    check("an unconfigured server gets no scope", s is None)
+    check("...and is told to run /setup", why == "unconfigured", why)
+
+    # A DM has no server to answer as. This must not raise: an unhandled
+    # exception here is a 500 to Discord, which reads as a broken bot.
+    s, why = handler.interaction_scope({}, {})
+    check("a DM gets no scope and does not raise", s is None)
+    check("...and is told commands need a server", why == "dm", why)
+
     raiderio.guild_profile = real_profile
     FAKE_DDB.items.clear()
 
@@ -956,6 +983,39 @@ def test_tenant_fanout():
     check("a tenant with no config is skipped, not fatal", len(pairs) == 2)
     check("...and the healthy ones still poll",
           {s.tenant for s, _ in pairs} == {A, B})
+
+    # --- the fan-out is actually WIRED IN, not just defined ---------------
+    #
+    # This was a real gap: tenant_configs() existed and was tested while
+    # handler() still polled one SSM-derived scope, so a second tenant would have
+    # been registered, configured, and never polled.
+    polled = []
+    real_poll = handler.poll_one
+    handler.poll_one = lambda ev, c, s, n, ni, st: (polled.append(s.tenant)
+                                                    or {"ok": True, "tenant": s.tenant})
+    try:
+        out = handler.handler({"source": "aws.scheduler"}, None)
+    finally:
+        handler.poll_one = real_poll
+    check("handler polls every registered tenant", sorted(polled) == sorted([A, B]),
+          polled)
+    check("...and reports both", out.get("tenants") == 2, out)
+
+    # One tenant failing must not stop the others: the poller is one Lambda for
+    # every install, so an escaping exception would silence everybody.
+    polled.clear()
+    def one_explodes(ev, c, s, n, ni, st):
+        polled.append(s.tenant)
+        if s.tenant == A:
+            raise RuntimeError("this tenant's channel was revoked")
+        return {"ok": True}
+    handler.poll_one = one_explodes
+    try:
+        out = handler.handler({"source": "aws.scheduler"}, None)
+    finally:
+        handler.poll_one = real_poll
+    check("a failing tenant does not stop the others", sorted(polled) == sorted([A, B]))
+    check("...and the failure is reported, not swallowed", out.get("failed") == [A], out)
 
     # --- eject ------------------------------------------------------------
     store.unregister_tenant(B)
@@ -1326,8 +1386,11 @@ def test_interactions():
     store.put_snapshot(pk, "the-venomous-abyss", "The Venomous Abyss", 2, 8, 67,
                        now.strftime("%Y-%m-%dT%H:%M:%SZ"))
     res = handler.handle_interaction(
+        # guild_id, as Discord always sends for a guild command. Since Phase 2
+        # this is what decides WHICH install the answer is about, so an
+        # interaction without one is a DM rather than a command in a server.
         event({"type": 2, "data": {"name": "progress"}, "token": "t",
-               "application_id": "1"}), cfg, pk, now)
+               "guild_id": TEST_TENANT, "application_id": "1"}), cfg, pk, now)
     payload = json.loads(res["body"])
     check("/progress answers immediately from the snapshot",
           payload["type"] == interactions.CHANNEL_MESSAGE_WITH_SOURCE, payload)

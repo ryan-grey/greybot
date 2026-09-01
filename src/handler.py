@@ -585,7 +585,11 @@ def handle_progress(body, cfg, scope, now):
         return interactions.message(embed, ephemeral=EPHEMERAL_REPLIES)
 
     # Slow path. Defer first -- a Lambda cannot answer later without having answered now.
-    spec = {"application_id": body.get("application_id"), "token": body.get("token")}
+    # guild_id travels with the spec so the deferred half can answer as the server
+    # that asked. Without it the follow-up would resolve its scope from the
+    # poller's SSM config and reply to server B with server A's progress.
+    spec = {"application_id": body.get("application_id"), "token": body.get("token"),
+            "guild_id": body.get("guild_id")}
     try:
         boto3.client("lambda", region_name=REGION).invoke(
             FunctionName=os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "ryangrey-greybot"),
@@ -610,6 +614,14 @@ def handle_followup(spec, cfg, scope, now):
                                    result["embed"])
         log("setup_followup_sent", ok=result["ok"])
         return {"ok": result["ok"], "followup": True, "setup": True}
+
+    # Resolve the asking server again here rather than trusting the scope this
+    # invocation was constructed with — the follow-up runs as a fresh Lambda
+    # invocation, so its `scope` is the poller's, not the caller's.
+    if (spec or {}).get("guild_id"):
+        caller_scope, caller_cfg = interaction_scope(spec, cfg)
+        if caller_scope is not None:
+            scope, cfg = caller_scope, caller_cfg
 
     profile = raiderio.guild_profile(cfg["guild_region"], cfg["guild_realm"],
                                      cfg["guild_name"])
@@ -682,6 +694,41 @@ def handle_setup(body, now_iso):
         "color": discord.BRAND_ACCENT}}
 
 
+def interaction_scope(body, cfg):
+    """The Scope and config for the server an interaction came from.
+
+    THIS IS THE CROSS-TENANT BOUNDARY. Answering an interaction from the scope
+    the poller happens to hold would mean a command run in server B replying with
+    server A's data — the exact leak the key layout exists to prevent, arriving
+    through the one code path that takes input from strangers.
+
+    The tenant comes off the verified payload; the guild it maps to comes from
+    that tenant's own CONFIG row. Neither is taken from the request.
+
+    Returns (scope, merged cfg). On failure returns (None, reason) where reason
+    is "dm" or "unconfigured" — both are real answers to give a user, and neither
+    should reach the caller as an exception. An unhandled raise here would return
+    a 500 to Discord, which looks to the person who typed the command like the
+    bot is broken rather than like they need to do something.
+    """
+    try:
+        tenant = keys.tenant_from_interaction(body)
+    except ValueError:
+        return None, "dm"
+    row = store.get_config(tenant)
+    if not row:
+        # Fall back to the SSM install ONLY when it is literally this server, so
+        # the original single-tenant deployment keeps answering /progress before
+        # its CONFIG row exists. Any other server gets told to run /setup.
+        if cfg.get("discord_guild_id") and tenant == keys.tenant_pk(cfg["discord_guild_id"]):
+            return keys.Scope.build(cfg["guild_region"], cfg["guild_realm"],
+                                    cfg["guild_name"], cfg["discord_guild_id"]), cfg
+        return None, "unconfigured"
+    merged = dict(cfg)
+    merged.update({k: v for k, v in row.items() if v})
+    return store.scope_for(tenant, row), merged
+
+
 def handle_interaction(event, cfg, scope, now):
     """Verify, then dispatch. Verification is not optional and not conditional."""
     headers = interactions.lower_headers(event)
@@ -711,7 +758,17 @@ def handle_interaction(event, cfg, scope, now):
         name = interactions.command_name(body)
         log("interaction_command", command=name)
         if name == "progress":
-            return interactions.http(200, handle_progress(body, cfg, scope, now))
+            # Answer as the server that asked, not as whichever install the
+            # poller's config happens to name.
+            caller_scope, caller_cfg = interaction_scope(body, cfg)
+            if caller_scope is None:
+                why = ("`/progress` only works inside a server."
+                       if caller_cfg == "dm" else
+                       "This server has not been set up yet — run `/setup` first.")
+                return interactions.http(200, interactions.message(
+                    {"description": why, "color": discord.BRAND_ACCENT}, ephemeral=True))
+            return interactions.http(200,
+                                     handle_progress(body, caller_cfg, caller_scope, now))
         if name == "setup":
             # Belt and braces on top of default_member_permissions. That field is
             # a default a server admin can override in Discord's UI, so it is not
@@ -1045,6 +1102,35 @@ def handler(event, context):
         if event.get("admin"):
             return handle_admin(event, cfg, scope, now, now_iso)
 
+    # Fan out. One poll per registered install, each on its own Scope and its own
+    # merged config. A failure in one tenant is caught and logged rather than
+    # raised: the poller is a single Lambda serving every install, so an
+    # exception escaping here would stop every OTHER tenant being polled too --
+    # one server's revoked channel must not silence the rest.
+    results, failed = [], []
+    for tenant_scope, tenant_cfg in tenant_configs(cfg):
+        try:
+            results.append(poll_one(event, tenant_cfg, tenant_scope, now, now_iso, started))
+        except Exception as exc:                                   # noqa: BLE001
+            log("tenant_poll_failed", tenant=tenant_scope.tenant, error=repr(exc))
+            failed.append(tenant_scope.tenant)
+
+    # One tenant keeps the old single-install response shape, so nothing that
+    # reads this return value -- the tests, a manual invoke -- had to change.
+    if len(results) == 1 and not failed:
+        return results[0]
+    return {"ok": not failed, "tenants": len(results) + len(failed),
+            "failed": failed, "results": results}
+
+
+def poll_one(event, cfg, scope, now, now_iso, started):
+    """One install's poll. Everything below here is per-tenant.
+
+    Extracted from handler() so the poll can run once per registered install.
+    It was already written against a single `cfg` and `scope`; the fan-out is a
+    loop around it rather than a rewrite of it, which is why the announce, seed
+    and claim logic is untouched.
+    """
     # Standing in the Discord, checked BEFORE any Warcraft Logs work. Every other branch
     # below this point can return early -- rate-limit backoff, an idle poll, a recap that
     # yields its budget -- and a check placed after any of them would go dark exactly when
