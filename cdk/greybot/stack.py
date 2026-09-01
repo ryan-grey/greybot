@@ -32,6 +32,17 @@ class GreybotStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
         self.cfg = cfg
 
+        # Prod retains its stateful resources; dev destroys them.
+        #
+        # RETAIN is what protects the prod dedupe rows and the prod API id. On dev
+        # it is actively harmful: a rolled-back deploy leaves the table and log
+        # group behind, and the NEXT deploy then fails with "already exists" — so
+        # one failure makes the stage permanently undeployable until somebody
+        # deletes the orphans by hand. Hit exactly that twice while bringing dev
+        # up. Dev holds nothing worth keeping, so it should clean up after itself.
+        self.removal = (RemovalPolicy.RETAIN if cfg.is_prod
+                        else RemovalPolicy.DESTROY)
+
         self.table = self._table()
         self.role = self._role()
         self.function = self._function()
@@ -71,7 +82,7 @@ class GreybotStack(Stack):
             # TTL is DISABLED in the baseline. Do not enable it here to be tidy:
             # a TTL on this table would silently delete dedupe rows, and an
             # expired dedupe row is a re-announced kill.
-            removal_policy=RemovalPolicy.RETAIN,
+            removal_policy=self.removal,
             # Off in the baseline. Worth revisiting once the table is
             # multi-tenant and holds other people's config, but turning it on
             # here would be a change, and this phase changes nothing.
@@ -159,7 +170,7 @@ class GreybotStack(Stack):
             self, "LogGroup",
             log_group_name=f"/aws/lambda/{cfg.function_name}",
             retention=logs.RetentionDays.ONE_MONTH,
-            removal_policy=RemovalPolicy.RETAIN,
+            removal_policy=self.removal,
         )
 
         return lambda_.Function(
@@ -178,6 +189,17 @@ class GreybotStack(Stack):
                 "STATE_TABLE": cfg.table_name,
                 "ANNOUNCE_TZ": cfg.announce_tz,
                 "REPO_URL": cfg.repo_url,
+                # SSM_PREFIX is set on DEV ONLY, and its absence on prod is the
+                # point. `src/config.py` already defaults to "/greybot", so prod
+                # reads the same paths it always has and its env var KEYS stay
+                # byte-identical to the parity baseline — adding a fourth key
+                # there would fail the parity check for no behavioural gain.
+                #
+                # Dev needs it: without it the dev function reads prod's
+                # parameter paths. Its dev-scoped role denies that, which is the
+                # isolation working, but the result is a dev bot that cannot
+                # start rather than one pointed at the right tree.
+                **({} if cfg.is_prod else {"SSM_PREFIX": cfg.ssm_prefix}),
             },
         )
 
@@ -203,7 +225,7 @@ class GreybotStack(Stack):
         # someone remembered to paste the new URL into Discord — a failure with no
         # error message anywhere in AWS. The table is retained for its data; this
         # is retained for its name.
-        api.apply_removal_policy(RemovalPolicy.RETAIN)
+        api.apply_removal_policy(self.removal)
 
         integration = apigw.CfnIntegration(
             self, "InteractionsIntegration",

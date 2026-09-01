@@ -26,7 +26,16 @@
         "iam:PutRolePolicy",
         "iam:DeleteRolePolicy",
         "iam:GetRolePolicy",
-        "iam:ListRolePolicies"
+        "iam:ListRolePolicies",
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:UpdateRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:PassRole"
       ],
       "Resource": [
         "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ryangrey-greybot-role",
@@ -34,6 +43,43 @@
         "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ryangrey-greybot-scheduler-role",
         "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ryangrey-greybot-scheduler-role-dev"
       ]
+    },
+    {
+      "Sid": "CreateGreybotResourcesDevOpsLacks",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy",
+        "scheduler:CreateSchedule",
+        "scheduler:UpdateSchedule",
+        "dynamodb:UpdateTable"
+      ],
+      "Resource": [
+        "arn:aws:logs:us-east-1:${AWS_ACCOUNT_ID}:log-group:/aws/lambda/ryangrey-greybot*",
+        "arn:aws:scheduler:us-east-1:${AWS_ACCOUNT_ID}:schedule/*/ryangrey-greybot*",
+        "arn:aws:dynamodb:us-east-1:${AWS_ACCOUNT_ID}:table/ryangrey-greybot*"
+      ]
+    },
+    {
+      "Sid": "DestructiveOnDevResourcesOnly",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DeleteLogGroup",
+        "scheduler:DeleteSchedule",
+        "dynamodb:DeleteTable"
+      ],
+      "Resource": [
+        "arn:aws:logs:us-east-1:${AWS_ACCOUNT_ID}:log-group:/aws/lambda/ryangrey-greybot-dev*",
+        "arn:aws:scheduler:us-east-1:${AWS_ACCOUNT_ID}:schedule/*/ryangrey-greybot-poll-dev",
+        "arn:aws:dynamodb:us-east-1:${AWS_ACCOUNT_ID}:table/ryangrey-greybot-dev"
+      ]
+    },
+    {
+      "Sid": "ReadCdkAssetBucket",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:GetObjectVersion"],
+      "Resource": "arn:aws:s3:::cdk-hnb659fds-assets-${AWS_ACCOUNT_ID}-us-east-1/*"
     },
     {
       "Sid": "ReadBootstrapVersion",
