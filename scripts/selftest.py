@@ -738,6 +738,58 @@ def test_progress_count():
           store.progress_count(fresh, 0, 8) == 1)
 
 
+def test_tenant_keys():
+    print("\nMulti-tenant key layout")
+    import keys
+
+    # --- namespaces are distinct and derived, not passed in ---------------
+    wow = keys.wow_pk("US", "Proudmoore", "Scrambled")
+    check("WoW partition is case-folded", wow == "WOW#us#proudmoore#scrambled", wow)
+    check("WoW partition is not the old GUILD# prefix",
+          not wow.startswith("GUILD#"), wow)
+
+    t1 = keys.tenant_pk("1544178250518102016")
+    t2 = keys.tenant_pk(1544178250518102016)          # int and str agree
+    check("tenant partition from snowflake", t1 == "TENANT#1544178250518102016", t1)
+    check("int and str snowflakes agree", t1 == t2)
+
+    # --- a tenant id must be a bare snowflake -----------------------------
+    #
+    # Not decoration. A tenant id carrying '#' could forge a sort-key boundary,
+    # and an empty or blank one would collide every such tenant into a single
+    # partition -- which is a cross-tenant data leak wearing a typo's clothes.
+    for bad in ("", "   ", None, "123#456", "TENANT#1", "abc", "12 34", "-1", "1.0"):
+        try:
+            keys.tenant_pk(bad)
+            check(f"rejects tenant id {bad!r}", False, "was accepted")
+        except ValueError:
+            check(f"rejects tenant id {bad!r}", True)
+
+    # --- the two namespaces can never collide ----------------------------
+    check("WoW and tenant partitions cannot collide",
+          not wow.startswith("TENANT#") and not t1.startswith("WOW#"))
+
+    # --- dedupe lives under the TENANT, which is the whole point ----------
+    check("announced set is a tenant sort key",
+          keys.announced_sk("abyss") == "ANNOUNCED#abyss")
+    check("tier metadata is a WoW sort key",
+          keys.tier_sk("abyss") == "TIER#abyss")
+
+    # Two Discord servers tracking the SAME WoW guild: shared upstream,
+    # separate dedupe. This is the pair of properties Phase 2 exists to create.
+    a = keys.Scope.build("us", "proudmoore", "Scrambled", "111111111111111111")
+    b = keys.Scope.build("us", "proudmoore", "Scrambled", "222222222222222222")
+    check("same guild, two installs SHARE upstream", a.wow == b.wow, a.wow)
+    check("same guild, two installs SPLIT dedupe", a.tenant != b.tenant,
+          f"{a.tenant} vs {b.tenant}")
+
+    # And the converse: one install tracking a different guild must not reuse
+    # another guild's upstream rows.
+    c = keys.Scope.build("eu", "draenor", "Scrambled", "111111111111111111")
+    check("different guild, same install SPLITS upstream", a.wow != c.wow)
+    check("different guild, same install SHARES tenant", a.tenant == c.tenant)
+
+
 def test_dedupe():
     print("\nDedupe and the announce-once claim")
     FAKE_DDB.items.clear()
@@ -2306,7 +2358,8 @@ def test_recap_end_to_end():
 def main():
     print("greyBot self-test")
     for fn in (test_config, test_boss_art, test_name_normalisation, test_slug_resolution,
-               test_seed_names, test_progress_count, test_dedupe, test_aotc_guard,
+               test_seed_names, test_progress_count,
+               test_tenant_keys, test_dedupe, test_aotc_guard,
                test_roster_derivation, test_team_resolution, test_roster_state,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
                test_interactions, test_progress_slow_path,
