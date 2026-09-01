@@ -93,6 +93,22 @@ PROD = StageConfig(
     ssm_prefix="/greybot",
 )
 
+# NOTE ON THE DEV SSM PREFIX
+#
+# `docs/dev-discord-ids.md` suggested `/greybot/dev/...`. This uses
+# `/greybot-dev/...` instead, deliberately: the dev tree must not be a SUBTREE of
+# the prod tree.
+#
+# Today it would not matter, because the prod role grants each parameter by full
+# literal ARN and none of them match a dev path. But the first time anyone
+# reaches for the obvious shortcut — `parameter/greybot/*`, which is exactly what
+# the multi-tenant phase will want when the parameter list stops being
+# enumerable — that wildcard silently swallows every dev parameter too, and prod
+# gains read access to the dev bot's token. Keeping the trees siblings means that
+# shortcut stays safe to take.
+#
+# Leaf structure matches prod (`discord/bot_token`, not `bot_token`) so the two
+# stages are diffable.
 DEV = StageConfig(
     stage="dev",
     function_name="ryangrey-greybot-dev",
