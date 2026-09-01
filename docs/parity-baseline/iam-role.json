@@ -1,0 +1,30 @@
+{
+    "Role": {
+        "Path": "/",
+        "RoleName": "ryangrey-greybot-role",
+        "RoleId": "AROASMNMA3WNQOCYDYZUZ",
+        "Arn": "arn:aws:iam::164106395035:role/ryangrey-greybot-role",
+        "CreateDate": "2026-08-29T02:09:45+00:00",
+        "AssumeRolePolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {
+                        "Service": "lambda.amazonaws.com"
+                    },
+                    "Action": "sts:AssumeRole"
+                }
+            ]
+        },
+        "MaxSessionDuration": 3600,
+        "PermissionsBoundary": {
+            "PermissionsBoundaryType": "Policy",
+            "PermissionsBoundaryArn": "arn:aws:iam::164106395035:policy/ryangrey-app-boundary"
+        },
+        "RoleLastUsed": {
+            "LastUsedDate": "2026-09-01T02:33:22+00:00",
+            "Region": "us-east-1"
+        }
+    }
+}

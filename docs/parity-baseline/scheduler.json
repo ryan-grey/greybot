@@ -1,0 +1,22 @@
+{
+    "ActionAfterCompletion": "NONE",
+    "Arn": "arn:aws:scheduler:us-east-1:164106395035:schedule/default/ryangrey-greybot-poll",
+    "CreationDate": "2026-08-28T22:32:31.949000-04:00",
+    "FlexibleTimeWindow": {
+        "Mode": "OFF"
+    },
+    "GroupName": "default",
+    "LastModificationDate": "2026-08-28T22:32:31.949000-04:00",
+    "Name": "ryangrey-greybot-poll",
+    "ScheduleExpression": "rate(15 minutes)",
+    "ScheduleExpressionTimezone": "UTC",
+    "State": "ENABLED",
+    "Target": {
+        "Arn": "arn:aws:lambda:us-east-1:164106395035:function:ryangrey-greybot",
+        "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 86400,
+            "MaximumRetryAttempts": 2
+        },
+        "RoleArn": "arn:aws:iam::164106395035:role/ryangrey-greybot-scheduler-role"
+    }
+}

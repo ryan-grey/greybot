@@ -1,0 +1,82 @@
+{
+    "RoleName": "ryangrey-greybot-role",
+    "PolicyName": "greybot-runtime",
+    "PolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "Logs",
+                "Effect": "Allow",
+                "Action": [
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                ],
+                "Resource": "arn:aws:logs:us-east-1:164106395035:log-group:/aws/lambda/ryangrey-greybot:*"
+            },
+            {
+                "Sid": "StateTableNoScanNoDelete",
+                "Effect": "Allow",
+                "Action": [
+                    "dynamodb:GetItem",
+                    "dynamodb:PutItem",
+                    "dynamodb:UpdateItem"
+                ],
+                "Resource": "arn:aws:dynamodb:us-east-1:164106395035:table/ryangrey-greybot"
+            },
+            {
+                "Sid": "ReadOwnConfigAndSecrets",
+                "Effect": "Allow",
+                "Action": [
+                    "ssm:GetParameter",
+                    "ssm:GetParameters"
+                ],
+                "Resource": [
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/wcl/client_id",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/wcl/client_secret",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/discord/webhook_url",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/discord/prog_role_id",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/discord/bot_token",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/discord/public_key",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/discord/guild_id",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/guild/name",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/guild/realm",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/guild/region",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/blizzard/client_id",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/blizzard/client_secret",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/recap/enabled",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/recap/show_worst_parse",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/recap/schedule",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/team/roster_min_first_kill_pct",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/team/prog_overlap_high",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/team/prog_overlap_low",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/team/prog_tag",
+                    "arn:aws:ssm:us-east-1:164106395035:parameter/greybot/alerts/sns_topic_arn"
+                ]
+            },
+            {
+                "Sid": "DecryptThoseSecretsOnly",
+                "Effect": "Allow",
+                "Action": "kms:Decrypt",
+                "Resource": "arn:aws:kms:us-east-1:164106395035:key/8e811ee5-0cfa-456f-905f-7b664255201e",
+                "Condition": {
+                    "StringEquals": {
+                        "kms:ViaService": "ssm.us-east-1.amazonaws.com"
+                    }
+                }
+            },
+            {
+                "Sid": "DeferSlowInteractionsToItself",
+                "Effect": "Allow",
+                "Action": "lambda:InvokeFunction",
+                "Resource": "arn:aws:lambda:us-east-1:164106395035:function:ryangrey-greybot"
+            },
+            {
+                "Sid": "PublishHealthAlertsToOneTopic",
+                "Effect": "Allow",
+                "Action": "sns:Publish",
+                "Resource": "arn:aws:sns:us-east-1:164106395035:ryangrey-dev-alerts"
+            }
+        ]
+    }
+}

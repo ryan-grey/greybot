@@ -1,0 +1,45 @@
+{
+    "FunctionName": "ryangrey-greybot",
+    "FunctionArn": "arn:aws:lambda:us-east-1:164106395035:function:ryangrey-greybot",
+    "Runtime": "python3.12",
+    "Role": "arn:aws:iam::164106395035:role/ryangrey-greybot-role",
+    "Handler": "handler.handler",
+    "CodeSize": 1516963,
+    "Description": "greyBot 035122",
+    "Timeout": 60,
+    "MemorySize": 512,
+    "LastModified": "2026-08-31T20:48:45.000+0000",
+    "CodeSha256": "TjO6bc/qPzR7TdEFFxK/zGOFUaqkWR/nofsJI02soj0=",
+    "Version": "$LATEST",
+    "Environment": {
+        "Variables": {
+            "REPO_URL": "https://github.com/ryan-grey/greybot",
+            "ANNOUNCE_TZ": "America/New_York",
+            "STATE_TABLE": "ryangrey-greybot"
+        }
+    },
+    "TracingConfig": {
+        "Mode": "PassThrough"
+    },
+    "RevisionId": "d839eb04-938a-4c77-ad9b-3e7d482028d1",
+    "State": "Active",
+    "LastUpdateStatus": "Successful",
+    "PackageType": "Zip",
+    "Architectures": [
+        "arm64"
+    ],
+    "EphemeralStorage": {
+        "Size": 512
+    },
+    "SnapStart": {
+        "ApplyOn": "None",
+        "OptimizationStatus": "Off"
+    },
+    "RuntimeVersionConfig": {
+        "RuntimeVersionArn": "arn:aws:lambda:us-east-1::runtime:8e339e4b8f1ed61cb2a625080dc0250e8ffb3832fe1cf18907c712cdf6de04b0"
+    },
+    "LoggingConfig": {
+        "LogFormat": "Text",
+        "LogGroup": "/aws/lambda/ryangrey-greybot"
+    }
+}

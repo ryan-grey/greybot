@@ -1,0 +1,116 @@
+[
+    {
+        "Name": "/greybot/alerts/sns_topic_arn",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-31T13:50:04.823000-04:00"
+    },
+    {
+        "Name": "/greybot/blizzard/client_id",
+        "Type": "String",
+        "Version": 2,
+        "LastModified": "2026-08-28T23:03:30.096000-04:00"
+    },
+    {
+        "Name": "/greybot/blizzard/client_secret",
+        "Type": "SecureString",
+        "Version": 2,
+        "LastModified": "2026-08-28T23:10:23.031000-04:00"
+    },
+    {
+        "Name": "/greybot/discord/bot_token",
+        "Type": "SecureString",
+        "Version": 2,
+        "LastModified": "2026-08-28T23:49:53.422000-04:00"
+    },
+    {
+        "Name": "/greybot/discord/guild_id",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-28T23:45:55.902000-04:00"
+    },
+    {
+        "Name": "/greybot/discord/prog_role_id",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-28T21:54:17.484000-04:00"
+    },
+    {
+        "Name": "/greybot/discord/public_key",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-28T23:45:54.999000-04:00"
+    },
+    {
+        "Name": "/greybot/discord/webhook_url",
+        "Type": "SecureString",
+        "Version": 1,
+        "LastModified": "2026-08-28T21:54:15.934000-04:00"
+    },
+    {
+        "Name": "/greybot/guild/name",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-28T21:54:18.243000-04:00"
+    },
+    {
+        "Name": "/greybot/guild/realm",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-28T21:54:19.020000-04:00"
+    },
+    {
+        "Name": "/greybot/guild/region",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-28T21:54:19.819000-04:00"
+    },
+    {
+        "Name": "/greybot/recap/enabled",
+        "Type": "String",
+        "Version": 2,
+        "LastModified": "2026-08-29T15:26:58.289000-04:00"
+    },
+    {
+        "Name": "/greybot/recap/schedule",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-29T15:11:24.658000-04:00"
+    },
+    {
+        "Name": "/greybot/recap/show_worst_parse",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-29T15:11:22.943000-04:00"
+    },
+    {
+        "Name": "/greybot/team/prog_overlap_high",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-29T15:11:28.080000-04:00"
+    },
+    {
+        "Name": "/greybot/team/prog_overlap_low",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-29T15:11:29.845000-04:00"
+    },
+    {
+        "Name": "/greybot/team/roster_min_first_kill_pct",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-29T15:11:26.369000-04:00"
+    },
+    {
+        "Name": "/greybot/wcl/client_id",
+        "Type": "String",
+        "Version": 1,
+        "LastModified": "2026-08-28T21:54:16.733000-04:00"
+    },
+    {
+        "Name": "/greybot/wcl/client_secret",
+        "Type": "SecureString",
+        "Version": 1,
+        "LastModified": "2026-08-28T21:54:14.938000-04:00"
+    }
+]

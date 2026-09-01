@@ -1,0 +1,15 @@
+{
+    "logGroups": [
+        {
+            "logGroupName": "/aws/lambda/ryangrey-greybot",
+            "creationTime": 1787969643662,
+            "metricFilterCount": 0,
+            "arn": "arn:aws:logs:us-east-1:164106395035:log-group:/aws/lambda/ryangrey-greybot:*",
+            "storedBytes": 271239,
+            "logGroupClass": "STANDARD",
+            "logGroupArn": "arn:aws:logs:us-east-1:164106395035:log-group:/aws/lambda/ryangrey-greybot",
+            "deletionProtectionEnabled": false,
+            "bearerTokenAuthenticationEnabled": false
+        }
+    ]
+}

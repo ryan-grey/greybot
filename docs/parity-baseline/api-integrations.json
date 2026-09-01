@@ -1,0 +1,13 @@
+{
+    "Items": [
+        {
+            "ConnectionType": "INTERNET",
+            "IntegrationId": "wg2h5j1",
+            "IntegrationMethod": "POST",
+            "IntegrationType": "AWS_PROXY",
+            "IntegrationUri": "arn:aws:lambda:us-east-1:164106395035:function:ryangrey-greybot",
+            "PayloadFormatVersion": "2.0",
+            "TimeoutInMillis": 10000
+        }
+    ]
+}
