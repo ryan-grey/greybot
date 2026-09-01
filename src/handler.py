@@ -51,6 +51,7 @@ import interactions
 import notify
 import raiderio
 import recap as recap_mod
+import keys
 import store
 import team
 import wcl
@@ -284,7 +285,7 @@ def history_by_slug(token, gid, cfg, profile, index, days, limit, max_pages=1):
     return grouped, rate
 
 
-def bootstrap(token, gid, pk, cfg, profile, index, now_iso):
+def bootstrap(token, gid, scope, cfg, profile, index, now_iso):
     """First run for this guild: seed every tier, announce nothing.
 
     This function never calls discord.post, and handler() returns immediately after it.
@@ -312,7 +313,7 @@ def bootstrap(token, gid, pk, cfg, profile, index, now_iso):
         # A baseline above the boss total is arithmetically impossible and is exactly what
         # manufactures a premature "8 of 8". Clamp it rather than trusting the inputs.
         baseline = min(killed or 0, total) if total else (killed or 0)
-        created = store.seed_tier(pk, slug, names, baseline, label, now_iso,
+        created = store.seed_tier(scope, slug, names, baseline, label, now_iso,
                                   aotc_already=aotc_already)
 
         log("seeded_tier", slug=slug, raid=label, created=created, seededBosses=len(names),
@@ -326,14 +327,14 @@ def bootstrap(token, gid, pk, cfg, profile, index, now_iso):
                 note="log history was short; seeded the first N bosses in published order")
         summary.append({"slug": slug, "bosses": len(names), "aotc": aotc_already})
 
-    store.mark_bootstrapped(pk, now_iso, len(summary),
+    store.mark_bootstrapped(scope, now_iso, len(summary),
                             note="seeded from raid_progression + log history")
     log("bootstrap_complete", guild=cfg["guild_name"], realm=cfg["guild_realm"],
         tiers=len(summary), detail=summary, announced=0, points=rate,
         note="SEEDED, did not announce — no messages were posted on this run")
 
 
-def seed_new_tier(token, gid, pk, cfg, slug, raid_label, profile, index,
+def seed_new_tier(token, gid, scope, cfg, slug, raid_label, profile, index,
                   window_start_ms, now_iso):
     """A raid slug seen for the first time AFTER bootstrap: a tier rollover.
 
@@ -357,7 +358,7 @@ def seed_new_tier(token, gid, pk, cfg, slug, raid_label, profile, index,
     # must be zero -- otherwise the first boss of a new tier announces as "2 of 8".
     baseline = (killed or 0) if silent else 0
     aotc_already = bool(total and killed is not None and killed >= total)
-    created = store.seed_tier(pk, slug, names, baseline, raid_label, now_iso,
+    created = store.seed_tier(scope, slug, names, baseline, raid_label, now_iso,
                               aotc_already=aotc_already)
     log("seeded_new_tier", slug=slug, raid=raid_label, created=created, silent=silent,
         seededBosses=len(names), historySeen=len(mine), olderThanWindow=len(older),
@@ -366,7 +367,7 @@ def seed_new_tier(token, gid, pk, cfg, slug, raid_label, profile, index,
     return silent
 
 
-def record_roster(token, cfg, pk, slug, boss_key, kill, now_iso):
+def record_roster(token, cfg, scope, slug, boss_key, kill, now_iso):
     """Who was standing there for a first kill, recorded for the prog roster.
 
     Called only after an announcement actually went out, and only for a boss that was
@@ -385,7 +386,7 @@ def record_roster(token, cfg, pk, slug, boss_key, kill, now_iso):
         people, rate = wcl.kill_participants(token, kill["reportCode"],
                                              kill["encounterID"])
         players = {team.player_key(p["name"], p.get("server")) for p in people}
-        wrote = store.record_first_kill(pk, slug, boss_key, players,
+        wrote = store.record_first_kill(scope, slug, boss_key, players,
                                         kill["killedAtMs"], kill["reportCode"], now_iso)
         log("first_kill_roster_recorded", slug=slug, boss=kill["name"], players=len(players),
             written=wrote, report=kill["reportCode"], points=rate)
@@ -396,7 +397,7 @@ def record_roster(token, cfg, pk, slug, boss_key, kill, now_iso):
         return False
 
 
-def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None,
+def announce_kill(cfg, scope, slug, raid_label, kill, state, profile, thumb=None,
                   now_iso=None, token=None):
     """Claim, then post. In that order -- see store.claim_boss."""
     key = boss_key(kill["name"])
@@ -416,7 +417,7 @@ def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None,
             note="already recorded under a shorter or longer form of the same name")
         return False
 
-    if not store.claim_boss(pk, slug, key):
+    if not store.claim_boss(scope, slug, key):
         log("skip_rekill", slug=slug, boss=kill["name"], key=key)
         return False
 
@@ -440,12 +441,12 @@ def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None,
     except discord.DiscordError as exc:
         # Hand the boss back so the next poll retries it. A missed announcement recovers
         # in fifteen minutes; a duplicate one never recovers at all.
-        store.release_boss(pk, slug, key)
+        store.release_boss(scope, slug, key)
         state["announced"].discard(key)
         log("announce_failed", slug=slug, boss=kill["name"], error=str(exc))
         return False
 
-    record_roster(token, cfg, pk, slug, key, kill,
+    record_roster(token, cfg, scope, slug, key, kill,
                   now_iso or _iso(datetime.now(timezone.utc)))
     log("announced_kill", slug=slug, boss=kill["name"], key=key,
         encounterID=kill.get("encounterID"), count=count, total=total, realmRank=rank,
@@ -455,8 +456,8 @@ def announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb=None,
     return True
 
 
-def announce_aotc(cfg, pk, slug, raid_label, state, when, thumb=None, profile=None):
-    if not store.claim_aotc(pk, slug):
+def announce_aotc(cfg, scope, slug, raid_label, state, when, thumb=None, profile=None):
+    if not store.claim_aotc(scope, slug):
         log("skip_aotc_already", slug=slug)
         return False
     payload = discord.aotc_payload(
@@ -468,7 +469,7 @@ def announce_aotc(cfg, pk, slug, raid_label, state, when, thumb=None, profile=No
     try:
         discord.post(cfg["webhook"], payload)
     except discord.DiscordError as exc:
-        store.release_aotc(pk, slug)
+        store.release_aotc(scope, slug)
         log("aotc_failed", slug=slug, error=str(exc))
         return False
     state["aotcAnnounced"] = True
@@ -556,7 +557,7 @@ def _snapshot_age(snapshot, now):
         return None
 
 
-def handle_progress(body, cfg, pk, now):
+def handle_progress(body, cfg, scope, now):
     """Answer /progress inside the three-second window if at all possible.
 
     The snapshot the poller leaves behind makes that a single GetItem. When it is missing
@@ -566,7 +567,7 @@ def handle_progress(body, cfg, pk, now):
     """
     snapshot = None
     try:
-        snapshot = store.get_snapshot(pk)
+        snapshot = store.get_snapshot(scope)
     except Exception as exc:                                   # noqa: BLE001
         log("snapshot_read_failed", error=repr(exc))
 
@@ -601,14 +602,14 @@ def handle_progress(body, cfg, pk, now):
              "color": discord.BRAND_ACCENT}, ephemeral=EPHEMERAL_REPLIES)
 
 
-def handle_followup(spec, cfg, pk, now):
+def handle_followup(spec, cfg, scope, now):
     """The deferred half: fetch live and PATCH the placeholder into the real answer."""
     profile = raiderio.guild_profile(cfg["guild_region"], cfg["guild_realm"],
                                      cfg["guild_name"])
     index, _exp = raiderio.build_index(profile, EXPANSION_HINT)
     snapshot = None
     try:
-        snapshot = store.get_snapshot(pk)
+        snapshot = store.get_snapshot(scope)
     except Exception:                                          # noqa: BLE001
         pass
     embed = progress_embed_live(cfg, profile, index, snapshot)
@@ -620,7 +621,7 @@ def handle_followup(spec, cfg, pk, now):
     return {"ok": True, "followup": True}
 
 
-def handle_interaction(event, cfg, pk, now):
+def handle_interaction(event, cfg, scope, now):
     """Verify, then dispatch. Verification is not optional and not conditional."""
     headers = interactions.lower_headers(event)
     body_bytes = interactions.raw_body(event)
@@ -649,7 +650,7 @@ def handle_interaction(event, cfg, pk, now):
         name = interactions.command_name(body)
         log("interaction_command", command=name)
         if name == "progress":
-            return interactions.http(200, handle_progress(body, cfg, pk, now))
+            return interactions.http(200, handle_progress(body, cfg, scope, now))
         return interactions.http(200, interactions.message(
             {"description": f"Unknown command `{name}`.",
              "color": discord.BRAND_ACCENT}, ephemeral=True))
@@ -677,7 +678,7 @@ def _reminder_due(prev, now):
     return (now - last) >= timedelta(hours=HEALTH_REMIND_HOURS)
 
 
-def refresh_snapshot(pk, cfg, profile, index, now_iso):
+def refresh_snapshot(scope, cfg, profile, index, now_iso):
     """Write the /progress snapshot from the Raider.IO profile this poll already holds.
 
     Deliberately weaker than the snapshot the announcer writes, and it never overwrites a
@@ -694,7 +695,7 @@ def refresh_snapshot(pk, cfg, profile, index, now_iso):
     killed, total = raiderio.progress_for(profile, slug)
     meta = index.raids.get(slug) if index else None
     try:
-        store.put_snapshot(pk, slug, (meta or {}).get("name") or slug,
+        store.put_snapshot(scope, slug, (meta or {}).get("name") or slug,
                            killed or 0, total or 0,
                            raiderio.realm_rank(profile, slug, "heroic"), now_iso)
     except Exception as exc:                                   # noqa: BLE001
@@ -728,7 +729,7 @@ def _alert_kind(prev, status, now, forced=False):
     return None
 
 
-def run_source_check(cfg, pk, now, now_iso, blind, detail=None):
+def run_source_check(cfg, scope, now, now_iso, blind, detail=None):
     """Can greyBot still SEE the raid logs it exists to read?
 
     A different axis from health.py entirely, and the one that was missing. On 2026-08-31
@@ -746,7 +747,7 @@ def run_source_check(cfg, pk, now, now_iso, blind, detail=None):
     Consecutive polls, not one. A single empty answer is a bad minute at Warcraft Logs, and
     the same rule holds here as for Discord -- only a state that persists is an event.
     """
-    prev = store.get_source(pk) or {}
+    prev = store.get_source(scope) or {}
     streak = int(prev.get("blindPolls") or 0)
     streak = streak + 1 if blind else 0
 
@@ -770,7 +771,7 @@ def run_source_check(cfg, pk, now, now_iso, blind, detail=None):
             log("source_alert_undeliverable", status=status, kind=kind, error=str(exc))
 
     if changed or sent or streak != int(prev.get("blindPolls") or 0):
-        store.put_source(pk, status, streak, since,
+        store.put_source(scope, status, streak, since,
                          now_iso if sent else (prev.get("notifiedAt") or ""))
 
     log("source_checked", status=status, blind=blind, blindPolls=streak,
@@ -779,7 +780,7 @@ def run_source_check(cfg, pk, now, now_iso, blind, detail=None):
     return status
 
 
-def run_health_check(cfg, pk, now, now_iso, forced=False):
+def run_health_check(cfg, scope, now, now_iso, forced=False):
     """Probe Discord, and mail on the TRANSITION rather than on the state.
 
     The whole design lives in one rule: a definite answer that differs from the last
@@ -798,7 +799,7 @@ def run_health_check(cfg, pk, now, now_iso, forced=False):
     be this feature causing exactly the outage it exists to report.
     """
     result = health.check(cfg, now)
-    prev = store.get_health(pk) or {}
+    prev = store.get_health(scope) or {}
     prev_status = prev.get("status") or ""
     status = result["status"]
 
@@ -843,7 +844,7 @@ def run_health_check(cfg, pk, now, now_iso, forced=False):
     # false and said nothing.
     seat_moved = member is not None and member != prev.get("member")
     if changed or sent or seat_moved:
-        store.put_health(pk, status, json.dumps(result["cause"], sort_keys=True)
+        store.put_health(scope, status, json.dumps(result["cause"], sort_keys=True)
                          if result["cause"] else "", since,
                          now_iso if sent else (prev.get("notifiedAt") or ""),
                          member=member if member is not None else prev.get("member"))
@@ -854,13 +855,13 @@ def run_health_check(cfg, pk, now, now_iso, forced=False):
     return result
 
 
-def handle_admin(event, cfg, pk, now, now_iso):
+def handle_admin(event, cfg, scope, now, now_iso):
     action = event.get("admin")
     if action == "health":
         # The manual path, and the only one that mails while everything is fine -- which
         # is how the SNS grant and the SES forwarder get proved end to end without waiting
         # for something to actually go wrong.
-        return {"ok": True, "health": run_health_check(cfg, pk, now, now_iso,
+        return {"ok": True, "health": run_health_check(cfg, scope, now, now_iso,
                                                        forced=bool(event.get("notify")))}
     if action != "register_commands":
         raise RuntimeError(f"unknown admin action: {action}")
@@ -884,18 +885,23 @@ def handler(event, context):
 
     now = datetime.now(timezone.utc)
     now_iso = _iso(now)
-    pk = store.guild_pk(cfg["guild_region"], cfg["guild_realm"], cfg["guild_name"])
+    # One Scope for the whole invocation: the shared WoW partition and this
+    # install's tenant partition. The Discord guild id comes from configuration
+    # written by a verified interaction, never from a request body -- see
+    # keys.tenant_pk.
+    scope = keys.Scope.build(cfg["guild_region"], cfg["guild_realm"],
+                             cfg["guild_name"], cfg["discord_guild_id"])
 
     # Interactions first, and before any Warcraft Logs work: this path has three seconds
     # including cold start, and an OAuth round trip it does not need would spend them.
     if isinstance(event, dict):
         if event.get("requestContext", {}).get("http") or "x-signature-ed25519" in {
                 str(k).lower() for k in (event.get("headers") or {})}:
-            return handle_interaction(event, cfg, pk, now)
+            return handle_interaction(event, cfg, scope, now)
         if event.get("followup"):
-            return handle_followup(event["followup"], cfg, pk, now)
+            return handle_followup(event["followup"], cfg, scope, now)
         if event.get("admin"):
-            return handle_admin(event, cfg, pk, now, now_iso)
+            return handle_admin(event, cfg, scope, now, now_iso)
 
     # Standing in the Discord, checked BEFORE any Warcraft Logs work. Every other branch
     # below this point can return early -- rate-limit backoff, an idle poll, a recap that
@@ -906,7 +912,7 @@ def handler(event, context):
     # or Discord returning something this code has never seen, is allowed to stop an
     # announcement going out.
     try:
-        run_health_check(cfg, pk, now, now_iso)
+        run_health_check(cfg, scope, now, now_iso)
     except Exception as exc:                                       # noqa: BLE001
         log("health_check_error", error=repr(exc))
 
@@ -937,18 +943,18 @@ def handler(event, context):
     # guild has ever been seeded has no announced set to reason about, and would classify
     # every boss as fresh progression.
     if isinstance(event, dict) and str(event.get("mode") or "").lower() == "recap":
-        if not store.is_bootstrapped(pk):
+        if not store.is_bootstrapped(scope):
             log("recap_before_bootstrap",
                 note="the guild has not been seeded yet — nothing to recap against")
             return {"ok": True, "skipped": "not_bootstrapped"}
-        return recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started,
+        return recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started,
                            dry=bool(event.get("dry")), hours=event.get("hours"),
                            manual=bool(event.get("manual")))
 
     # The first-run branch. Nothing below this line can run until a bootstrap has been
     # recorded, so there is no ordering in which run one announces anything.
-    if not store.is_bootstrapped(pk):
-        bootstrap(token, gid, pk, cfg, profile, index, now_iso)
+    if not store.is_bootstrapped(scope):
+        bootstrap(token, gid, scope, cfg, profile, index, now_iso)
         return {"ok": True, "bootstrapped": True, "announced": 0,
                 "ms": int((time.time() - started) * 1000)}
 
@@ -985,7 +991,7 @@ def handler(event, context):
                      "ANOTHER guild returns reports before concluding. "
                      "See docs/wcl-reportdata-blind.md.")
 
-        run_source_check(cfg, pk, now, now_iso, blind,
+        run_source_check(cfg, scope, now, now_iso, blind,
                          detail={"heroicKills": heroic, "reportsVisible": len(seen)})
 
         # Refresh the /progress snapshot even though nothing was announced. It used to be
@@ -995,13 +1001,13 @@ def handler(event, context):
         # cold start and a Raider.IO round trip for an answer already sitting in the
         # profile this poll ALREADY fetched. Free here, and it keeps the slow path genuinely
         # exceptional rather than routine.
-        refresh_snapshot(pk, cfg, profile, index, now_iso)
+        refresh_snapshot(scope, cfg, profile, index, now_iso)
         log("poll_idle", lookbackDays=LOOKBACK_DAYS, points=rate, reportsVisible=len(seen),
             ms=int((time.time() - started) * 1000))
         return {"ok": True, "kills": 0}
 
     # Kills came back, so the source is answering. Nothing to ask and nothing to pay for.
-    run_source_check(cfg, pk, now, now_iso, False)
+    run_source_check(cfg, scope, now, now_iso, False)
 
     # Resolve every kill to a raid from the boss that died, rather than deciding on one
     # "current tier" up front. A raid night that clears the new tier and then farms an old
@@ -1028,17 +1034,17 @@ def handler(event, context):
         raid_label = bundle["kills"][0].get("zoneName") or bundle["label"]
         thumb = raiderio.icon_url(bundle.get("meta"))
 
-        state = store.load_tier(pk, slug)
+        state = store.load_tier(scope, slug)
         if state is None:
-            if seed_new_tier(token, gid, pk, cfg, slug, raid_label, profile, index,
+            if seed_new_tier(token, gid, scope, cfg, slug, raid_label, profile, index,
                              window_start_ms, now_iso):
                 continue
-            state = store.load_tier(pk, slug) or {"announced": set(), "seedSize": 0,
+            state = store.load_tier(scope, slug) or {"announced": set(), "seedSize": 0,
                                                   "baseline": 0, "aotcAnnounced": False}
 
         last_announced_ms = None
         for kill in bundle["kills"]:
-            if announce_kill(cfg, pk, slug, raid_label, kill, state, profile, thumb,
+            if announce_kill(cfg, scope, slug, raid_label, kill, state, profile, thumb,
                              now_iso, token=token):
                 announced += 1
                 last_announced_ms = kill["killedAtMs"]
@@ -1050,9 +1056,9 @@ def handler(event, context):
             # in the window would date AOTC by a re-kill on a later farm night, in the case
             # where Raider.IO only caught up after the real clear.
             when_ms = last_announced_ms or bundle["kills"][-1]["killedAtMs"]
-            announce_aotc(cfg, pk, slug, raid_label, state, _at(when_ms))
+            announce_aotc(cfg, scope, slug, raid_label, state, _at(when_ms))
 
-        store.touch(pk, slug, now_iso, raid_name=raid_label)
+        store.touch(scope, slug, now_iso, raid_name=raid_label)
         # Leave the display values behind for /progress. Written for the tier of the most
         # recent kill, so the snapshot's notion of "current" comes from an actual kill
         # rather than from a heuristic over Raider.IO's progression.
@@ -1067,7 +1073,7 @@ def handler(event, context):
 
     if newest_seen["ms"] >= 0:
         try:
-            store.put_snapshot(pk, newest_seen["slug"], newest_seen["raid"],
+            store.put_snapshot(scope, newest_seen["slug"], newest_seen["raid"],
                                newest_seen["killed"], newest_seen["total"],
                                newest_seen["rank"], now_iso)
         except Exception as exc:                               # noqa: BLE001
@@ -1096,7 +1102,7 @@ def previous_slug(profile, slug):
     return order[i - 1] if i > 0 else None
 
 
-def killed_before(pk, slug, announced, report_start_ms):
+def killed_before(scope, slug, announced, report_start_ms):
     """Bosses that were already dead when this report started.
 
     Not the same thing as the announced set, and the difference is the whole point. The
@@ -1110,7 +1116,7 @@ def killed_before(pk, slug, announced, report_start_ms):
     dead = set()
     for key in announced or ():
         try:
-            rec = store.get_first_kill(pk, slug, key)
+            rec = store.get_first_kill(scope, slug, key)
         except Exception as exc:                               # noqa: BLE001
             log("first_kill_read_failed", slug=slug, boss=key, error=repr(exc))
             rec = None
@@ -1119,7 +1125,7 @@ def killed_before(pk, slug, announced, report_start_ms):
     return dead
 
 
-def prog_roster(pk, slug, announced, profile, cfg, now_iso, persist=True):
+def prog_roster(scope, slug, announced, profile, cfg, now_iso, persist=True):
     """The roster to classify against, and an honest account of where it came from.
 
     Three states, in preference order. A roster derived from enough of this tier's own
@@ -1129,7 +1135,7 @@ def prog_roster(pk, slug, announced, profile, cfg, now_iso, persist=True):
     fresh tier, not a failure.
     """
     try:
-        records = store.first_kills(pk, slug, announced)
+        records = store.first_kills(scope, slug, announced)
     except Exception as exc:                                   # noqa: BLE001
         log("roster_read_failed", slug=slug, error=repr(exc))
         records = {}
@@ -1138,14 +1144,14 @@ def prog_roster(pk, slug, announced, profile, cfg, now_iso, persist=True):
                                  cfg.get("roster_min_pct", 50))
     if persist:
         try:
-            store.save_derived_roster(pk, slug, derived["roster"], derived["sample"],
+            store.save_derived_roster(scope, slug, derived["roster"], derived["sample"],
                                       derived["provisional"], now_iso)
         except Exception as exc:                               # noqa: BLE001
             log("roster_write_failed", slug=slug, error=repr(exc))
 
     state = None
     try:
-        state = store.load_roster(pk, slug)
+        state = store.load_roster(scope, slug)
     except Exception as exc:                                   # noqa: BLE001
         log("roster_state_read_failed", slug=slug, error=repr(exc))
 
@@ -1156,9 +1162,9 @@ def prog_roster(pk, slug, announced, profile, cfg, now_iso, persist=True):
         prev = previous_slug(profile, slug) if persist else None
         if prev:
             try:
-                prev_state = store.load_roster(pk, prev) or {}
+                prev_state = store.load_roster(scope, prev) or {}
                 candidate = prev_state.get("derived") or set()
-                if candidate and store.seed_roster(pk, slug, candidate, prev, now_iso):
+                if candidate and store.seed_roster(scope, slug, candidate, prev, now_iso):
                     seed = candidate
                     log("roster_seeded_from_previous_tier", slug=slug, fromSlug=prev,
                         players=len(candidate))
@@ -1179,7 +1185,7 @@ def prog_roster(pk, slug, announced, profile, cfg, now_iso, persist=True):
                                       "sample": derived["sample"]}
 
 
-def report_tier(detail, scope, base, cfg, profile, index):
+def report_tier(detail, raid_scope, base, cfg, profile, index):
     """Which raid this report was, and the fights that belong to it.
 
     A report is not one tier any more than it is one activity. The captured Scrambled
@@ -1189,12 +1195,12 @@ def report_tier(detail, scope, base, cfg, profile, index):
     two pulls, look up the wrong boss list, and compare the wipes against the wrong
     killed-boss set.
 
-    So the tier is the one holding the MOST of the night's Heroic fights, and the scope is
+    So the tier is the one holding the MOST of the night's Heroic fights, and the raid_scope is
     narrowed to that tier's fights alone. The warm-up kill in another raid then falls out
     of the leaderboards too, which is correct: it was not part of this raid.
     """
     tally = {}
-    for f in scope["fights"]:
+    for f in raid_scope["fights"]:
         slug, rmeta, how = raiderio.resolve_raid(
             profile, f.get("name"), (detail.get("zone") or {}).get("name"),
             _at(base + (f.get("startTime") or 0)), cfg["guild_region"], index)
@@ -1203,7 +1209,7 @@ def report_tier(detail, scope, base, cfg, profile, index):
         rec = tally.setdefault(slug, {"meta": rmeta, "how": how, "fights": []})
         rec["fights"].append(f)
     if not tally:
-        return None, None, None, scope
+        return None, None, None, raid_scope
     slug = max(tally, key=lambda s: len(tally[s]["fights"]))
     rec = tally[slug]
     if len(tally) > 1:
@@ -1213,7 +1219,7 @@ def report_tier(detail, scope, base, cfg, profile, index):
     return slug, rec["meta"], rec["how"], recap_mod.raid_scope(rec["fights"], wcl.HEROIC)
 
 
-def recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started, dry=False,
+def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, dry=False,
                 hours=None, manual=False):
     """Post one raid night's recap, or post nothing and say why.
 
@@ -1285,14 +1291,15 @@ def recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started, dry=
     chosen, skipped, tier = [], [], None
     for meta in reports:
         detail, rate = wcl.report_detail(token, meta["code"])
-        scope = recap_mod.raid_scope(detail.get("fights"), wcl.HEROIC)
-        if not scope["fightIDs"]:
+        raid_scope = recap_mod.raid_scope(detail.get("fights"), wcl.HEROIC)
+        if not raid_scope["fightIDs"]:
             skipped.append({"report": meta["code"], "why": "no Heroic raid fights",
                             "title": meta.get("title")})
             continue
 
         base = int(detail.get("startTime") or meta.get("startTime") or 0)
-        slug, rmeta, how, scope = report_tier(detail, scope, base, cfg, profile, index)
+        slug, rmeta, how, raid_scope = report_tier(detail, raid_scope, base,
+                                                   cfg, profile, index)
         if not slug:
             skipped.append({"report": meta["code"], "why": "could not resolve the raid"})
             continue
@@ -1305,9 +1312,9 @@ def recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started, dry=
             skipped.append({"report": meta["code"], "why": "different tier to the night's"})
             continue
 
-        state = store.load_tier(pk, slug) or {"announced": set()}
-        dead = killed_before(pk, slug, state.get("announced") or set(), base)
-        roster, seeded, roster_info = prog_roster(pk, slug, state.get("announced") or set(),
+        state = store.load_tier(scope, slug) or {"announced": set()}
+        dead = killed_before(scope, slug, state.get("announced") or set(), base)
+        roster, seeded, roster_info = prog_roster(scope, slug, state.get("announced") or set(),
                                                   profile, cfg, now_iso, persist=not dry)
         # Kept for the eligibility filter below rather than derived a second time. Both
         # reports of one night are the same tier by the time they get here, so the last
@@ -1316,7 +1323,7 @@ def recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started, dry=
 
         actors = recap_mod.actor_index(detail.get("masterData"))
         raiders = {team.player_key(actors[i]["name"], actors[i]["server"])
-                   for i in scope["raiderIDs"] if i in actors}
+                   for i in raid_scope["raiderIDs"] if i in actors}
 
         # The tag is authoritative when it exists. Scrambled tags nothing today, so this
         # is always None and the two signals do the work -- but the day somebody tags the
@@ -1333,7 +1340,7 @@ def recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started, dry=
                 # kind of inference this bot does not make.
                 log("recap_tag_seen_but_unconfigured", report=meta["code"], tag=tag,
                     note="set /greybot/team/prog_tag to use tags as the authority")
-            verdict, why = team.resolve_team(raiders, scope["fights"], roster, dead,
+            verdict, why = team.resolve_team(raiders, raid_scope["fights"], roster, dead,
                                              cfg.get("overlap_high", 70),
                                              cfg.get("overlap_low", 35),
                                              difficulty=wcl.HEROIC, roster_seeded=seeded)
@@ -1345,10 +1352,10 @@ def recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started, dry=
         if verdict != team.PROG:
             skipped.append({"report": meta["code"], "why": f"classified {verdict}"})
             continue
-        chosen.append({"meta": meta, "detail": detail, "scope": scope, "actors": actors,
+        chosen.append({"meta": meta, "detail": detail, "raidScope": raid_scope, "actors": actors,
                        "base": base, "code": meta["code"], "start": base,
                        "end": int(detail.get("endTime") or meta.get("endTime") or base),
-                       "heroicFights": len(scope["fightIDs"])})
+                       "heroicFights": len(raid_scope["fightIDs"])})
 
     # Two people in the guild both log, so one night routinely produces two reports of the
     # same pulls. Summing those doubles every number on the card.
@@ -1371,7 +1378,7 @@ def recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started, dry=
     earliest = min(chosen, key=lambda c: c["base"])
     night = _local(_at(earliest["base"]))
     night_key = night.strftime("%Y-%m-%d")
-    if not dry and not store.claim_recap(pk, night_key):
+    if not dry and not store.claim_recap(scope, night_key):
         log("recap_already_posted", night=night_key, note="claimed by an earlier run")
         return {"ok": True, "night": night_key, "posted": False, "duplicate": True}
 
@@ -1383,18 +1390,18 @@ def recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started, dry=
     # the night's most deaths.
     sources = []
     for c in chosen:
-        tables, rate = wcl.report_tables(token, c["meta"]["code"], c["scope"]["fightIDs"])
+        tables, rate = wcl.report_tables(token, c["meta"]["code"], c["raidScope"]["fightIDs"])
         span = int(c["detail"].get("endTime") or 0) - c["base"]
         pages, rate, calls = wcl.deaths_pages(
-            token, c["meta"]["code"], c["scope"]["fightIDs"], max(span, 1),
+            token, c["meta"]["code"], c["raidScope"]["fightIDs"], max(span, 1),
             is_truncated=recap_mod.page_is_truncated,
             cursor_of=recap_mod.last_timestamp)
         if calls > 1:
             log("recap_deaths_paged", report=c["meta"]["code"], pages=calls,
                 note="the Deaths table caps at 200 rows and does not say so")
         sources.append({"report": c["meta"]["code"], "actors": c["actors"],
-                        "eligible": set(c["scope"]["raiderIDs"]),
-                        "fightIDs": list(c["scope"]["fightIDs"]),
+                        "eligible": set(c["raidScope"]["raiderIDs"]),
+                        "fightIDs": list(c["raidScope"]["fightIDs"]),
                         "damage": tables.get("damage"), "deaths": pages,
                         "rankings": tables.get("rankings")})
 
@@ -1408,7 +1415,7 @@ def recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started, dry=
     excluded = recap_mod.restrict_to_roster(sources, roster)
 
     combined = recap_mod.raid_scope(
-        [f for c in chosen for f in c["scope"]["fights"]], wcl.HEROIC)
+        [f for c in chosen for f in c["raidScope"]["fights"]], wcl.HEROIC)
     summary = recap_mod.summarise(combined, sources,
                                   show_worst_parse=bool(cfg.get("recap_worst_parse")))
 
@@ -1434,7 +1441,7 @@ def recap_night(token, cfg, pk, now, now_iso, gid, profile, index, started, dry=
     except discord.DiscordError as exc:
         # Hand the night back so the next run retries it, exactly as a failed kill
         # announcement hands the boss back.
-        store.release_recap(pk, night_key)
+        store.release_recap(scope, night_key)
         log("recap_failed", night=night_key, error=str(exc))
         return {"ok": False, "night": night_key, "posted": False}
 
