@@ -167,7 +167,54 @@ PROGRESS_COMMAND = {
     "type": 1,
 }
 
-COMMANDS = [PROGRESS_COMMAND]
+SETUP_COMMAND = {
+    "name": "setup",
+    "description": "Point this server at a WoW guild and choose where to post",
+    "type": 1,
+    # Restricted to members who can manage the server. `default_member_permissions`
+    # is a STRING of the permission bitfield; 0x20 is MANAGE_GUILD. Discord
+    # enforces this itself, so an ordinary member never gets as far as the
+    # handler -- but the handler does not rely on that alone, because a
+    # permission set on a command is a client-side default a server admin can
+    # override, not a guarantee.
+    "default_member_permissions": "32",
+    # No DMs: every option here is about a server's configuration.
+    "dm_permission": False,
+    "options": [
+        {"name": "region", "description": "us, eu, kr, tw or cn", "type": 3,
+         "required": True,
+         "choices": [{"name": r.upper(), "value": r}
+                     for r in ("us", "eu", "kr", "tw", "cn")]},
+        {"name": "realm", "description": "Realm name, e.g. Proudmoore",
+         "type": 3, "required": True},
+        {"name": "guild", "description": "Guild name, e.g. Scrambled",
+         "type": 3, "required": True},
+        # Type 7 is CHANNEL, and the type filter keeps the picker to places a
+        # webhook can actually post. Asking for a channel id as text would work
+        # and would also mean typo'd ids that only fail at announcement time.
+        {"name": "channel", "description": "Where announcements go",
+         "type": 7, "required": True, "channel_types": [0, 5]},
+        {"name": "role", "description": "Optional role to mention on a first kill",
+         "type": 8, "required": False},
+    ],
+}
+
+COMMANDS = [PROGRESS_COMMAND, SETUP_COMMAND]
+
+
+def command_options(body):
+    """Flatten an application command's options into a plain dict.
+
+    Discord sends options as a list of {name, type, value}. Returning a dict
+    keeps the call sites from index-juggling, and missing optional options simply
+    do not appear.
+    """
+    out = {}
+    for opt in ((body.get("data") or {}).get("options") or []):
+        name = opt.get("name")
+        if name is not None:
+            out[name] = opt.get("value")
+    return out
 
 
 def application_id(bot_token, timeout=15):
