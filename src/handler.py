@@ -436,7 +436,8 @@ def announce_kill(cfg, scope, slug, raid_label, kill, state, profile, thumb=None
         thumbnail_url=thumb,
         guild_label=raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
         guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
-                                       cfg["guild_name"]))
+                                       cfg["guild_name"]),
+        world_boss=raiderio.is_world_boss(profile, slug))
     try:
         discord.post_to(destination(cfg), payload)
     except discord.DiscordError as exc:
@@ -1471,14 +1472,31 @@ def report_tier(detail, raid_scope, base, cfg, profile, index):
         rec = tally.setdefault(slug, {"meta": rmeta, "how": how, "fights": []})
         rec["fights"].append(f)
     if not tally:
-        return None, None, None, raid_scope
-    slug = max(tally, key=lambda s: len(tally[s]["fights"]))
-    rec = tally[slug]
-    if len(tally) > 1:
+        return None, None, None, raid_scope, {}
+    # The tier is the one holding most of the night. A WORLD BOSS is not competing for
+    # that title -- it is one encounter that takes ten minutes -- so it is picked out
+    # separately rather than being dropped with the rest of the other-raid fights. A guild
+    # that killed the world boss on Heroic did something worth saying, and the old
+    # behaviour said nothing at all.
+    tiers = {s: v for s, v in tally.items() if not raiderio.is_world_boss(profile, s)}
+    worlds = {s: v for s, v in tally.items() if raiderio.is_world_boss(profile, s)}
+    if not tiers:
+        # A night that was ONLY a world boss. There is no tier to label the card with, so
+        # it is not a raid night and the recap says nothing -- same rule as always.
+        return None, None, None, raid_scope, worlds
+
+    slug = max(tiers, key=lambda s: len(tiers[s]["fights"]))
+    rec = tiers[slug]
+    if len(tiers) > 1:
         log("recap_report_spans_tiers", chosen=slug,
-            counts={s: len(v["fights"]) for s, v in tally.items()},
+            counts={s: len(v["fights"]) for s, v in tiers.items()},
             note="fights from other raids are excluded from the night's card")
-    return slug, rec["meta"], rec["how"], recap_mod.raid_scope(rec["fights"], wcl.HEROIC)
+    if worlds:
+        log("recap_world_boss_seen",
+            bosses={s: [f.get("name") for f in v["fights"] if f.get("kill")]
+                    for s, v in worlds.items()},
+            note="kept out of the tier's boss numbering, reported separately")
+    return slug, rec["meta"], rec["how"], recap_mod.raid_scope(rec["fights"], wcl.HEROIC), worlds
 
 
 def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, dry=False,
@@ -1560,8 +1578,8 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
             continue
 
         base = int(detail.get("startTime") or meta.get("startTime") or 0)
-        slug, rmeta, how, raid_scope = report_tier(detail, raid_scope, base,
-                                                   cfg, profile, index)
+        slug, rmeta, how, raid_scope, worlds = report_tier(detail, raid_scope, base,
+                                                           cfg, profile, index)
         if not slug:
             skipped.append({"report": meta["code"], "why": "could not resolve the raid"})
             continue
@@ -1569,10 +1587,21 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
             tier = {"slug": slug, "meta": rmeta,
                     "label": (detail.get("zone") or {}).get("name")
                              or (rmeta or {}).get("name") or slug,
-                    "roster": None, "seeded": False, "rosterInfo": None}
+                    "roster": None, "seeded": False, "rosterInfo": None,
+                    "worldBosses": []}
         elif slug != tier["slug"]:
             skipped.append({"report": meta["code"], "why": "different tier to the night's"})
             continue
+
+        # Heroic world-boss kills from the same night, named and credited separately.
+        for wslug, wrec in (worlds or {}).items():
+            for f in wrec["fights"]:
+                if f.get("kill") and f.get("name") not in [
+                        w["name"] for w in tier["worldBosses"]]:
+                    tier["worldBosses"].append(
+                        {"name": f.get("name"), "slug": wslug,
+                         "raid": (wrec.get("meta") or {}).get("name") or wslug,
+                         "difficulty": "Heroic"})
 
         state = store.load_tier(scope, slug) or {"announced": set()}
         dead = killed_before(scope, slug, state.get("announced") or set(), base)
@@ -1582,6 +1611,11 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         # reports of one night are the same tier by the time they get here, so the last
         # answer is the only answer.
         tier.update({"roster": roster, "seeded": seeded, "rosterInfo": roster_info})
+        # Which bosses were ALREADY dead when this report opened. Kept on the tier so the
+        # card can separate "killed again" from "killed for the first time" -- the second
+        # is the only one that is news, and the two are indistinguishable from the kill
+        # list alone.
+        tier.setdefault("dead", set()).update(dead)
 
         actors = recap_mod.actor_index(detail.get("masterData"))
         raiders = {team.player_key(actors[i]["name"], actors[i]["server"])
@@ -1664,7 +1698,10 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         sources.append({"report": c["meta"]["code"], "actors": c["actors"],
                         "eligible": set(c["raidScope"]["raiderIDs"]),
                         "fightIDs": list(c["raidScope"]["fightIDs"]),
-                        "damage": tables.get("damage"), "deaths": pages,
+                        "damage": tables.get("damage"),
+                        "healing": tables.get("healing"),
+                        "damageTaken": tables.get("damageTaken"),
+                        "playerDetails": tables.get("playerDetails"), "deaths": pages,
                         "rankings": tables.get("rankings")})
 
     # The explicit pug rule. Eligibility is "took part in a Heroic raid fight tonight",
@@ -1680,7 +1717,9 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         [f for c in chosen for f in c["raidScope"]["fights"]], wcl.HEROIC)
     summary = recap_mod.summarise(combined, sources,
                                   show_worst_parse=bool(cfg.get("recap_worst_parse")),
-                                  encounters=(tier.get("meta") or {}).get("encounters"))
+                                  encounters=(tier.get("meta") or {}).get("encounters"),
+                                  dead=tier.get("dead") or set())
+    summary["worldBosses"] = tier.get("worldBosses") or []
 
     # The full scorecard. Built unconditionally because it is pure computation over blobs
     # already in memory and it is what the dry run has to show; PUBLISHING it is what the
@@ -1690,12 +1729,16 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     night_text = night.strftime("%A, %B %-d")
     sources_meta = [{"code": c["meta"]["code"], "title": c["meta"].get("title"),
                      "url": report_url(c["meta"]["code"]),
+                     "owner": (c["meta"].get("owner") or {}).get("name"),
+                     "ownerUrl": scorecard.guild_reports_url(gid),
                      "when": _iso(_at(c["base"]))} for c in chosen]
     page_url = f"{cfg['scorecard_base_url']}/{night_key}/" if cfg.get("scorecard_base_url") else None
     page_html = scorecard.render(
         cfg["guild_name"], tier["label"], night_text,
         summary.get("bossLabels") or summary.get("bosses"), rows, sources_meta,
-        raiders=summary.get("raiders"), canonical=page_url)
+        raiders=summary.get("raiders"), canonical=page_url,
+        region=cfg.get("guild_region"),
+        world_bosses=summary.get("worldBosses"))
 
     # Published BEFORE the card is posted, and the link is dropped if the put fails. A card
     # in the channel saying "full scorecard here" that 404s is worse than a card with no

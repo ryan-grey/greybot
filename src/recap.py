@@ -67,7 +67,35 @@ def actor_index(master_data):
         aid = a.get("id")
         if aid is None or not a.get("name"):
             continue
-        out[int(aid)] = {"name": a["name"], "server": a.get("server") or ""}
+        # subType is the class ("Priest", "DeathKnight"). Taken from masterData rather
+        # than from the rankings blob because masterData covers EVERY raider, and rankings
+        # only covers the ones who were in a ranked kill -- colouring half a roster and
+        # leaving the rest grey would read as a bug rather than as missing data.
+        out[int(aid)] = {"name": a["name"], "server": a.get("server") or "",
+                         "class": a.get("subType") or ""}
+    return out
+
+
+# Warcraft Logs buckets both playerDetails and rankings as "tanks"/"healers"/"dps".
+# Folded to the singular here because the card and the page talk about ONE person's role.
+ROLES = {"tanks": "tank", "healers": "healer", "dps": "dps"}
+
+
+def role_index(player_details):
+    """Actor id -> "tank" | "healer" | "dps", for every raider in the report.
+
+    Read from playerDetails rather than from the rankings blob on purpose. Rankings only
+    contain people who were in a ranked KILL, so a wipe night ranks nobody and a raider who
+    sat the only kill is missing -- and a role icon that appears for two thirds of the raid
+    reads as a bug rather than as missing data. playerDetails covers everyone who swung.
+    """
+    node = (player_details or {}).get("data") or {}
+    node = node.get("playerDetails") if isinstance(node, dict) else None
+    out = {}
+    for bucket, role in ROLES.items():
+        for p in (node or {}).get(bucket) or ():
+            if isinstance(p, dict) and p.get("id") is not None:
+                out[int(p["id"])] = role
     return out
 
 
@@ -152,6 +180,48 @@ def boss_labels(bosses, encounters):
     return [f"{i}/{total} {b}" for i, b in numbered] + [b for _, b in plain]
 
 
+def unkilled(scope):
+    """Bosses that were pulled tonight and did NOT die, worst-first by effort spent.
+
+    Not the same as `prog_encounter`, which returns the single boss the night was mostly
+    about. A night can end with two bosses still standing, and a card that mentions one of
+    them is describing part of the evening.
+
+    A boss that was wiped on and then killed is absent from this: it is a kill, and it is
+    already named as one. `best` is the closest attempt, or None where no percentage came
+    back -- reported separately from the pull count because "12 pulls" is true even when
+    the health percentages could not be read.
+    """
+    tally = {}
+    for f in scope["fights"]:
+        key = raiderio.normalize(f.get("name"))
+        if not key:
+            continue
+        rec = tally.setdefault(key, {"name": f.get("name"), "pulls": 0, "killed": False,
+                                     "best": None})
+        rec["pulls"] += 1
+        if f.get("kill"):
+            rec["killed"] = True
+            continue
+        pct = f.get("fightPercentage")
+        # fightPercentage is the boss's REMAINING health, so lower is closer.
+        if isinstance(pct, (int, float)) and (rec["best"] is None or pct < rec["best"]):
+            rec["best"] = float(pct)
+    rows = [r for r in tally.values() if not r["killed"]]
+    return sorted(rows, key=lambda r: (-r["pulls"], r["name"]))
+
+
+def first_kills(bosses, dead):
+    """Of tonight's kills, the ones that had not died before -- the actual progression.
+
+    `dead` is the set of normalised boss keys already killed when the night opened. A
+    farm night returns [], which is correct and is why the card has to be able to say
+    "killed four bosses" with no "including" clause after it.
+    """
+    already = {raiderio.normalize(d) for d in (dead or ())}
+    return [b for b in bosses or () if raiderio.normalize(b) not in already]
+
+
 def prog_encounter(scope):
     """The boss the night was actually spent on: most wipes, ties broken by total pulls.
 
@@ -211,6 +281,64 @@ def raider_keys(sources):
     return out
 
 
+def _roles_by_key(sources):
+    """Player key -> role, merged across the night's reports."""
+    out = {}
+    for src in sources or ():
+        roles = role_index(src.get("playerDetails"))
+        actors = src.get("actors") or {}
+        for aid, role in roles.items():
+            found = _person(actors, aid)
+            if found:
+                out.setdefault(found[0], role)
+    return out
+
+
+def totals(sources, blob_key, limit=None):
+    """Highest total of one numeric table, summed per PLAYER across the night's reports.
+
+    DamageDone, Healing and DamageTaken are the same table shape with a different
+    dataType, so they are read by the same function rather than by three that would drift.
+    Every filter that matters is shared as a result: pets excluded, eligibility enforced,
+    and the per-report actor ids resolved to a stable player key before anything is summed.
+    """
+    out = {}
+    for src in sources or ():
+        actors, elig = src.get("actors") or {}, src.get("eligible") or set()
+        for e in _entries(src.get(blob_key), "data", "entries"):
+            aid, total = e.get("id"), e.get("total")
+            if aid is None or not isinstance(total, (int, float)):
+                continue
+            aid = int(aid)
+            if aid not in elig:
+                continue
+            found = _person(actors, aid)
+            if not found:
+                continue
+            key, a = found
+            rec = out.setdefault(key, {"key": key, "name": a["name"],
+                                       "server": a.get("server") or "",
+                                       "class": a.get("class") or "", "total": 0})
+            rec["total"] += int(total)
+    roles = _roles_by_key(sources)
+    for key, rec in out.items():
+        rec["role"] = roles.get(key)
+    rows = sorted(out.values(), key=lambda r: (-r["total"], r["name"]))
+    return rows[:limit]
+
+
+def top_healing(sources, limit=3):
+    """Most effective healing done. `total` is effective; overheal is a separate field and
+    is deliberately not counted -- healing that landed on a full health bar did nothing."""
+    return totals(sources, "healing", limit)
+
+
+def top_damage_taken(sources, limit=3):
+    """Most damage taken. Presented without judgement: on most fights the tank is supposed
+    to be at the top of this list, which is why it is a category and not a leaderboard."""
+    return totals(sources, "damageTaken", limit)
+
+
 def top_damage(sources, limit=3):
     """Highest total damage, summed per PLAYER across every report of the night.
 
@@ -223,25 +351,7 @@ def top_damage(sources, limit=3):
     but a pug standing in the raid itself is still in it and would otherwise top the
     guild's own leaderboard.
     """
-    totals = {}
-    for src in sources or ():
-        actors, elig = src.get("actors") or {}, src.get("eligible") or set()
-        for e in _entries(src.get("damage"), "data", "entries"):
-            aid, total = e.get("id"), e.get("total")
-            if aid is None or not isinstance(total, (int, float)):
-                continue
-            aid = int(aid)
-            if aid not in elig:
-                continue
-            found = _person(actors, aid)
-            if not found:
-                continue
-            key, a = found
-            rec = totals.setdefault(key, {"key": key, "name": a["name"],
-                                          "server": a.get("server") or "", "total": 0})
-            rec["total"] += int(total)
-    rows = sorted(totals.values(), key=lambda r: (-r["total"], r["name"]))
-    return rows[:limit]
+    return totals(sources, "damage", limit)
 
 
 def death_counts(sources):
@@ -277,8 +387,12 @@ def death_counts(sources):
                     continue
                 key, a = found
                 rec = counts.setdefault(key, {"key": key, "name": a["name"],
-                                              "server": a.get("server") or "", "deaths": 0})
+                                              "server": a.get("server") or "",
+                                              "class": a.get("class") or "", "deaths": 0})
                 rec["deaths"] += 1
+    roles = _roles_by_key(sources)
+    for key, rec in counts.items():
+        rec["role"] = roles.get(key)
     return sorted(counts.values(), key=lambda r: (-r["deaths"], r["name"]))
 
 
@@ -294,15 +408,23 @@ def last_timestamp(blob):
 
 
 def _rank_rows(r, eligible_names, difficulty):
-    """One rankings entry flattened to per-character rows, or nothing."""
+    """One rankings entry flattened to per-character rows, or nothing.
+
+    The role bucket is kept on every row, and it is the whole reason the parse column can
+    be trusted. Warcraft Logs ranks each bucket on its OWN metric -- tanks and damage
+    dealers on damage, healers on healing -- so a healer's 82 is a healing rank and mixing
+    it into a damage average would be averaging two different measurements. Verified
+    against the live rankings blob: a Resto Druid's `amount` is HPS, a Blood DK's is DPS.
+    """
     if int(r.get("difficulty") or 0) != int(difficulty) or not r.get("kill"):
         return []
     boss = (r.get("encounter") or {}).get("name") or ""
     roles = r.get("roles") if isinstance(r.get("roles"), dict) else {}
     out = []
-    for role in roles.values():
+    for bucket, role in roles.items():
         if not isinstance(role, dict):
             continue
+        role_name = ROLES.get(bucket)
         for c in role.get("characters") or []:
             if not isinstance(c, dict):
                 continue
@@ -319,6 +441,7 @@ def _rank_rows(r, eligible_names, difficulty):
                     continue
             out.append({"key": team.player_key(name, server), "name": name,
                         "server": server or "", "percent": float(pct), "boss": boss,
+                        "role": role_name,
                         "spec": c.get("spec") or "", "class": c.get("class") or ""})
     return out
 
@@ -367,7 +490,8 @@ def parses(sources, eligible_names, difficulty=HEROIC):
             "sample": len(rows)}
 
 
-def summarise(scope, sources, show_worst_parse=False, encounters=None):
+def summarise(scope, sources, show_worst_parse=False, encounters=None,
+              dead=None):
     """Everything the card needs, with each section independently omittable.
 
     A section that could not be read is absent from the result rather than present and
@@ -389,7 +513,18 @@ def summarise(scope, sources, show_worst_parse=False, encounters=None):
     out = {"bosses": bosses_killed(scope), "prog": prog_encounter(scope),
            "raiders": len(people)}
     out["bossLabels"] = boss_labels(out["bosses"], encounters)
+    # The card leads on the count and then on the progression, because those answer two
+    # different questions: how much did the night clear, and did any of it matter. Naming
+    # every kill was answering neither -- a farm clear and a breakthrough read identically.
+    out["killed"] = len(out["bosses"])
+    out["firstKills"] = first_kills(out["bosses"], dead)
+    out["firstKillLabels"] = boss_labels(out["firstKills"], encounters)
+    order, tier_total = boss_order(encounters)
+    out["unkilled"] = [dict(r, label=boss_label(r["name"], order, tier_total))
+                       for r in unkilled(scope)]
     out["damage"] = top_damage(sources)
+    out["healing"] = top_healing(sources)
+    out["damageTaken"] = top_damage_taken(sources)
     out["deaths"] = death_counts(sources)
     out["parses"] = parses(sources, eligible_names)
     if not show_worst_parse and out["parses"]:
@@ -400,7 +535,7 @@ def summarise(scope, sources, show_worst_parse=False, encounters=None):
     # Numbering is attached to every boss the card names, not just the kill list. `name`
     # and `boss` are left untouched beside the labels, because those are what the logs
     # carry and a position is only meaningful while the tier is current.
-    order, total = boss_order(encounters)
+    total = tier_total
     if out["prog"]:
         out["prog"]["label"] = boss_label(out["prog"].get("name"), order, total)
     for value in (out["parses"] or {}).values():
@@ -408,7 +543,8 @@ def summarise(scope, sources, show_worst_parse=False, encounters=None):
         if isinstance(value, dict):
             value["bossLabel"] = boss_label(value.get("boss"), order, total)
 
-    out["missing"] = [k for k in ("damage", "deaths", "parses") if not out.get(k)]
+    out["missing"] = [k for k in ("damage", "healing", "damageTaken", "deaths",
+                                  "parses") if not out.get(k)]
     return out
 
 
@@ -502,15 +638,33 @@ def scorecard(sources, eligible_names, difficulty=HEROIC):
     parse did not parse 0, they killed nothing that ranks, and rendering that as a number
     would be inventing data. The renderer prints an em dash for None and never a 0.
 
-    `parses` is the raider's BEST of the night. The card's global best is the maximum of
-    this column by construction, so the page can never contradict the post it came from.
+    SCOPED TO THE TIER, AND THE WORLD BOSS IS NOT IN IT. Every column here is built from
+    sources whose fightIDs are the night's tier fights, so a Heroic world boss killed the
+    same evening is named on the card and the page but contributes no damage, no deaths and
+    no parse. That is a decision rather than an oversight: a world boss is a ten-minute tag
+    with a full raid on it, and averaging its parse against progression pulls flatters
+    everybody and means nothing.
+
+    The parse column is the raider's MEAN rankPercent across the kills they were actually
+    in. Kills they missed are not counted as anything -- not zero, not absent-and-averaged
+    -- because a raider who sat one boss did not parse badly on it. That makes the column
+    "how did you do on the bosses you were there for", which is the only version of an
+    overall parse that does not silently punish attendance.
     """
     rows = {}
 
-    def row(key, name, server=""):
-        return rows.setdefault(key, {"key": key, "name": name, "server": server or "",
-                                     "damage": None, "deaths": None,
-                                     "parse": None, "parseBoss": None, "parses": 0})
+    def row(key, name, server="", klass=""):
+        rec = rows.setdefault(key, {"key": key, "name": name, "server": server or "",
+                                    "class": klass or "",
+                                    "damage": None, "healing": None,
+                                    "damageTaken": None, "deaths": None,
+                                    "parse": None, "parseBoss": None,
+                                    "parseAvg": None, "parseCount": 0,
+                                    "parseRole": None, "role": None, "_parses": []})
+        # A later source may know the class when the first one did not.
+        if klass and not rec.get("class"):
+            rec["class"] = klass
+        return rec
 
     # Seeded from who RAIDED, not from who appears in a table. Anything else makes the
     # roster a function of which blobs happened to parse.
@@ -518,10 +672,13 @@ def scorecard(sources, eligible_names, difficulty=HEROIC):
         for aid in src.get("eligible") or ():
             found = _person(src.get("actors"), aid)
             if found:
-                row(found[0], found[1]["name"], found[1].get("server"))
+                row(found[0], found[1]["name"], found[1].get("server"),
+                    found[1].get("class"))
 
-    for r in top_damage(sources, limit=None):
-        row(r["key"], r["name"], r.get("server"))["damage"] = r["total"]
+    for blob, field in (("damage", "damage"), ("healing", "healing"),
+                        ("damageTaken", "damageTaken")):
+        for r in totals(sources, blob):
+            row(r["key"], r["name"], r.get("server"), r.get("class"))[field] = r["total"]
     for r in death_counts(sources):
         row(r["key"], r["name"], r.get("server"))["deaths"] = r["deaths"]
 
@@ -530,10 +687,31 @@ def scorecard(sources, eligible_names, difficulty=HEROIC):
         # key to somebody already seeded under a bare name. Fall back to that rather than
         # opening a second row for one person.
         key = p["key"] if p["key"] in rows else team.normalize_player(p["name"])
-        rec = row(key, p["name"], p.get("server"))
-        rec["parses"] += 1
+        rec = row(key, p["name"], p.get("server"), p.get("class"))
+        rec["_parses"].append((p.get("role"), p["percent"]))
         if rec["parse"] is None or p["percent"] > rec["parse"]:
             rec["parse"], rec["parseBoss"] = p["percent"], p["boss"]
+
+    roles = _roles_by_key(sources)
+    for key, rec in rows.items():
+        rec["role"] = roles.get(key) or rec.get("role")
+        got = rec.pop("_parses")
+        if not got:
+            continue
+        # ONE role's parses, never a blend. Somebody who tanked three bosses and then went
+        # damage for one has a tank average and a damage average, and the mean of the two
+        # is a number about nobody. The role they killed the most bosses in wins; a tie
+        # falls back to the role playerDetails lists them under, which is what the rest of
+        # the page already calls them.
+        by_role = {}
+        for role, pct in got:
+            by_role.setdefault(role, []).append(pct)
+        best = max(by_role, key=lambda r: (len(by_role[r]), r == rec.get("role")))
+        picked = by_role[best]
+        rec["parseRole"] = best or rec.get("role")
+        rec["parseCount"] = len(picked)
+        rec["parseAvg"] = sum(picked) / len(picked)
+        rec["parseRoles"] = {r: len(v) for r, v in by_role.items()}
 
     # Damage descending, because that is the column people look at first. Nobody with a
     # missing damage figure is promoted above somebody with a real one.

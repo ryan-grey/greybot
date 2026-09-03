@@ -24,6 +24,59 @@ AOTC_GOLD = 0xE8B44A
 
 MAX_ATTEMPTS = 4
 
+# How many still-standing bosses the card will name. A night that touched five and killed
+# none is a real thing, and five pull lines under a two-line summary is not a card any
+# more. The full picture is what the scorecard page is for.
+MAX_UNKILLED_ON_CARD = 3
+
+
+# NO ANSI BLOCK, BY CHOICE. Discord will colour text only inside a fenced ```ansi block,
+# and a code block will not render a custom server emoji -- so the card can have colour or
+# it can have real role artwork, never both. Role icons won.
+#
+# What that buys back is markdown: outside a code block the names can be bold, so rank and
+# name still separate from the number below them without a monospace grid doing the work.
+#
+# ROLE_EMOJI is unicode so it works on day one with nothing set up. To swap in the actual
+# WoW role icons, upload them to the server as emoji and put their Discord ids here in the
+# form "<:tank:123456789>" -- everything else on the card stays exactly as it is.
+ROLE_EMOJI = {"tank": "\U0001F6E1\uFE0F", "healer": "\U0001F49A",
+              "dps": "\u2694\uFE0F"}
+ROLE_BLANK = "\u2003"
+
+# Three inline fields fill one row on desktop, which is what makes the card read as
+# columns rather than as a list. More than three per row is not a layout Discord offers.
+TOP_N = 3
+
+
+def _column(rows):
+    """One category as a ranked block: name on its line, its number on the next.
+
+    Stacked rather than "1. Name — 602M" because three of these sit side by side in a
+    phone-width column, and a single line of rank-icon-name-number wraps into a mess at
+    that width.
+    """
+    if not rows:
+        return None
+    out = []
+    for i, (name, _klass, value, role) in enumerate(rows, 1):
+        out.append(f"{ROLE_EMOJI.get(role, ROLE_BLANK)} **{i}.** {name}")
+        out.append(f"\u2003\u2003{value}")
+    return "\n".join(out)
+
+
+def _field(label, rows):
+    block = _column(rows)
+    return [{"name": label, "value": block, "inline": True}] if block else []
+
+
+def _join(items):
+    """"a", "a and b", "a, b and c"."""
+    items = [f"**{i}**" for i in items]
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + f" and {items[-1]}"
+
 
 class DiscordError(RuntimeError):
     pass
@@ -93,21 +146,29 @@ def _author(guild_label, guild_url):
 
 def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
                report_url=None, iso_ts=None, thumbnail_url=None,
-               guild_label=None, guild_url=None):
+               guild_label=None, guild_url=None, world_boss=False):
     """The three lines from the spec, as a card.
 
     The rank line is omitted entirely when the rank is unknown rather than rendered as
     "Ranked server #0". Raider.IO writes 0 for "not ranked yet", and a guild that has not
     placed is not the zeroth best guild on its realm.
+
+    A WORLD BOSS gets a different middle line. Raider.IO carries one as a raid with a
+    single encounter, so the ordinary progress line comes out as "now 1 of 1 in Heroic The
+    Tidebound Grotto" -- technically true, and it reads like a bug. The kill is the news;
+    the progress fraction is not.
     """
-    lines = [f"They are now **{killed}** of **{total}** in Heroic {raid_name}"]
-    if realm_rank:
+    if world_boss:
+        lines = [f"**World boss** &mdash; killed on **Heroic**".replace("&mdash;", "—")]
+    else:
+        lines = [f"They are now **{killed}** of **{total}** in Heroic {raid_name}"]
+    if realm_rank and not world_boss:
         lines.append(f"Ranked server **#{realm_rank}**")
     embed = {
         "title": f"{guild_name} just killed {boss_name}",
         "description": "\n".join(lines),
         "color": BRAND_ACCENT,
-        "footer": {"text": f"Heroic {raid_name}"},
+        "footer": {"text": ("World boss" if world_boss else f"Heroic {raid_name}")},
     }
     if report_url:
         embed["url"] = report_url
@@ -181,14 +242,25 @@ def progress_embed(guild_name, raid_name, killed, total, realm_rank,
 def _short(n):
     """Damage totals, at a length a phone can read.
 
-    565,524,499 is nine characters of noise in a field three of these have to share.
-    Nobody reads the units digit of a damage meter.
+    565,524,499 is nine characters of noise in a field three of these have to share, and
+    nobody reads the units digit of a damage meter -- so it rounds to a whole unit: 602M,
+    not 601.6M. The tenth was never information, it was just width.
+
+    Rounding is done BEFORE the suffix is chosen, which is what stops 999.6M rendering as
+    "1000M": once it rounds up to a full thousand of its own unit it is promoted to the
+    next one and comes out as 1B.
     """
-    n = float(n or 0)
-    for cut, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
-        if n >= cut:
-            return f"{n / cut:.1f}{suffix}"
-    return str(int(n))
+    if not isinstance(n, (int, float)):
+        return ""
+    n = float(n)
+    for cutoff, suffix, bigger in ((1e12, "T", None), (1e9, "B", "T"),
+                                   (1e6, "M", "B"), (1e3, "K", "M")):
+        if n >= cutoff:
+            value = round(n / cutoff)
+            if value >= 1000 and bigger:
+                return f"1{bigger}"
+            return f"{value}{suffix}"
+    return str(int(round(n)))
 
 
 def _tied(rows, key):
@@ -214,28 +286,46 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
     than the alternative of failing the whole post.
     """
     lines = []
+    # THE COUNT FIRST, THEN THE PROGRESSION. Listing every kill answered neither question
+    # a reader has: an eight-boss farm clear and a night that finally broke through read
+    # exactly the same. The count says how much fell; the "including first kills on" clause
+    # says how much of it was new, and it is simply absent on a night that was all farm.
+    #
     # Labels carry the tier position ("3/8 Entombed Sentinels"); bare names are the
     # fallback for a tier whose encounter list could not be read. This module stays free of
-    # raiderio -- the numbering is decided in recap.summarise, where the raid index already
-    # lives, and arrives here as text.
-    bosses = summary.get("bossLabels") or summary.get("bosses") or []
-    if bosses:
-        if len(bosses) == 1:
-            lines.append(f"Killed **{bosses[0]}**")
-        else:
-            lines.append("Killed " + ", ".join(f"**{b}**" for b in bosses[:-1])
-                         + f" and **{bosses[-1]}**")
+    # raiderio -- numbering is decided in recap.summarise and arrives here as text.
+    killed = summary.get("killed")
+    if killed is None:
+        killed = len(summary.get("bosses") or [])
+    firsts = summary.get("firstKillLabels") or summary.get("firstKills") or []
+    if killed:
+        line = (f"{guild_name} killed **{killed}** Heroic "
+                f"{'boss' if killed == 1 else 'bosses'}")
+        if firsts:
+            line += ", including first kills on " + _join(firsts)
+        lines.append(line)
     else:
         lines.append("No kills — a full night on progression")
 
-    prog = summary.get("prog")
-    if prog:
-        line = f"**{prog['pulls']}** pulls on {prog.get('label') or prog['name']}"
-        # The best attempt is only interesting while the boss is still alive. Once it is
-        # dead the number is 0% and saying so reads as a bug.
-        if prog.get("best") and prog["best"] > 0:
-            line += f" — best **{prog['best']:.1f}%**"
+    # Pulls on what is STILL STANDING. A pull count on a boss that died is a statistic
+    # about a solved problem; on a boss that did not, it is the story of the night.
+    for boss in (summary.get("unkilled") or [])[:MAX_UNKILLED_ON_CARD]:
+        line = (f"**{boss['pulls']}** "
+                f"{'pull' if boss['pulls'] == 1 else 'pulls'} on "
+                f"{boss.get('label') or boss['name']}")
+        # fightPercentage is REMAINING health, so a low number is a close attempt.
+        if isinstance(boss.get("best"), (int, float)) and boss["best"] > 0:
+            line += f" — best **{boss['best']:.1f}%**"
         lines.append(line)
+
+    # The world boss gets its own line rather than joining the kill list. It is not
+    # 1/8 of anything -- Raider.IO carries it as a one-encounter raid of its own -- so
+    # numbering it beside the tier's bosses would misstate the guild's progress. The
+    # difficulty is named because on a world boss that is the whole of the news.
+    for wb in summary.get("worldBosses") or []:
+        diff = wb.get("difficulty")
+        lines.append(f"Also killed the world boss **{wb['name']}**"
+                     + (f" on **{diff}**" if diff else ""))
 
     # In the DESCRIPTION, not the footer field. Discord renders no markdown and no links
     # in an embed footer, so a URL put there arrives as unclickable text -- which for a
@@ -254,32 +344,30 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
                               if summary.get("raiders") else "")},
     }
 
-    damage = summary.get("damage") or []
-    if damage:
-        embed["fields"].append({
-            "name": "Top damage",
-            "value": "\n".join(f"**{i}.** {r['name']} — {_short(r['total'])}"
-                               for i, r in enumerate(damage, 1)),
-            "inline": True})
+    # Five categories, three to a row. Damage / heals / damage taken is one row and reads
+    # as the night's output; deaths and parse is the next and reads as how it went.
+    for label, key in (("Top damage", "damage"), ("Top heals", "healing"),
+                       ("Damage taken", "damageTaken")):
+        embed["fields"] += _field(label, [
+            (r["name"], r.get("class"), _short(r["total"]), r.get("role"))
+            for r in (summary.get(key) or [])[:TOP_N]])
 
-    deaths = summary.get("deaths") or []
-    tied = _tied(deaths, "deaths")
-    if tied:
-        embed["fields"].append({
-            "name": "Most deaths",
-            "value": ", ".join(r["name"] for r in tied[:3])
-                     + f" — **{tied[0]['deaths']}**",
-            "inline": True})
+    embed["fields"] += _field("Most deaths", [
+        (r["name"], r.get("class"), str(r["deaths"]), r.get("role"))
+        for r in (summary.get("deaths") or [])[:TOP_N]])
 
+    # The parse column is coloured by the PARSE, not by the class -- it is the one number
+    # on the card where the colour is the reader's shorthand for the value.
     parses = summary.get("parses") or {}
     for key, label in (("best", "Best parse"), ("worst", "Worst parse")):
-        p = parses.get(key)
-        if not p:
+        pr = parses.get(key)
+        if not pr:
             continue
+        pct = int(round(pr["percent"]))
         embed["fields"].append({
             "name": label,
-            "value": f"{p['name']} — **{int(round(p['percent']))}**\n"
-                     f"{p.get('bossLabel') or p['boss']}",
+            "value": (f"{ROLE_EMOJI.get(pr.get('role'), ROLE_BLANK)} "
+                      f"**{pct}** {pr['name']}\n\u2003\u2003{pr['boss']}"),
             "inline": True})
 
     if not embed["fields"]:

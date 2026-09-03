@@ -2494,6 +2494,31 @@ def test_recap_parsers():
     # Boss numbering, including the two ways it must decline to answer. A position that
     # cannot be established is dropped, never guessed: "1/8" on a boss the list does not
     # contain would claim progression the guild does not have.
+    # The two shapes the fixture night does not have. A farm clear must NOT claim a
+    # first kill, and a boss left standing is the one worth a pull count.
+    night = [src(damage=FIXTURE["damageScoped"], deaths=pages,
+                 rankings=FIXTURE["rankings"])]
+    # Everything this scope killed, marked as already dead -- so the night is pure farm.
+    # Keyed off what was actually killed rather than off ABYSS, because this fixture spans
+    # two raids and the warm-up kill is not an Abyss boss.
+    farm = recap.summarise(scope, night, encounters=ABYSS,
+                           dead={raiderio.normalize(b)
+                                 for b in recap.bosses_killed(scope)})
+    check("a farm night claims no first kills", farm["firstKills"] == [], farm["firstKills"])
+    check("...but still counts what it killed", farm["killed"] == len(farm["bosses"]),
+          farm["killed"])
+    fresh = recap.summarise(scope, night, encounters=ABYSS, dead=set())
+    check("a first kill is a boss that had not died before",
+          fresh["firstKills"] == fresh["bosses"], fresh["firstKills"])
+
+    standing = recap.unkilled(recap.raid_scope(
+        [dict(f, kill=False) for f in FIXTURE["fights"]], wcl.HEROIC))
+    check("a boss that never died is listed with its pull count",
+          standing and all(r["pulls"] > 0 for r in standing), standing[:2])
+    check("...and a boss that DID die is not listed as standing",
+          not [r for r in recap.unkilled(scope) if r["name"] in fresh["bosses"]],
+          recap.unkilled(scope))
+
     check("a boss is numbered by its place in the published order",
           recap.boss_labels(["The Lost Explorers"], ABYSS) == ["3/8 The Lost Explorers"],
           recap.boss_labels(["The Lost Explorers"], ABYSS))
@@ -2664,8 +2689,36 @@ def test_recap_end_to_end():
     embed = posts[0]["embeds"][0]
     check("the card is labelled with the tier holding most of the night",
           "The Venomous Abyss" in embed["footer"]["text"], embed["footer"]["text"])
-    check("the warm-up kill in another raid is not on the card",
-          "Nymrissa" not in embed["description"], embed["description"])
+    # Nymrissa Wavecaller is a WORLD BOSS -- Raider.IO carries it as a one-encounter raid,
+    # the same shape as sporefall. It must not be numbered among the tier's bosses, and it
+    # must not inflate the tier's count, but it IS reported: a Heroic world boss kill is
+    # news, and the old behaviour dropped it silently.
+    # Option A, pinned. The world boss is reported but its fights are NOT in any column.
+    # The scope handed to summarise is the tier's, so the one thing that could leak a
+    # world-boss number into a leaderboard -- a rankings row for it -- is filtered out by
+    # the fightID scoping every aggregate already shares.
+    wb = "Nymrissa Wavecaller"
+    tier_only = recap.raid_scope(
+        [f for f in FIXTURE["fights"]
+         if raiderio.normalize(f.get("name")) != raiderio.normalize(wb)], wcl.HEROIC)
+    leaked = recap.parse_rows(
+        [_src(actors=recap.actor_index(FIXTURE["masterData"]),
+              elig=tier_only["raiderIDs"], fids=tier_only["fightIDs"],
+              rankings=FIXTURE["rankings"])], None)
+    check("the world boss is in the fixture to begin with",
+          any(raiderio.normalize(f.get("name")) == raiderio.normalize(wb)
+              for f in FIXTURE["fights"]))
+    check("...but no world-boss parse reaches the tier's columns",
+          not [r for r in leaked if r["boss"] == wb],
+          sorted({r["boss"] for r in leaked}))
+
+    check("the world boss is not numbered among the tier's bosses",
+          "/8 Nymrissa" not in embed["description"], embed["description"])
+    check("...and does not inflate the tier's kill count",
+          "killed **2** Heroic bosses" in embed["description"], embed["description"])
+    check("...but is reported on its own line, with its difficulty",
+          "world boss **Nymrissa Wavecaller** on **Heroic**" in embed["description"],
+          embed["description"])
 
     # Each kill carries its place in the tier's PUBLISHED order, against the tier's real
     # boss total. The fixture kills the 1st and 3rd bosses of eight, and it kills them in
@@ -2678,11 +2731,19 @@ def test_recap_end_to_end():
 
     # EVERY boss the card names is numbered. A card that numbers the kill list and leaves
     # the pull count and the parse bare reads as three different kinds of boss.
-    check("the progression boss is numbered too",
-          "pulls on 3/8 The Lost Explorers" in embed["description"], embed["description"])
+    # The card leads on the count, then on what was NEW. Nothing had been killed before
+    # this fixture night, so both kills are first kills.
+    check("the card counts the kills rather than listing them",
+          "killed **2** Heroic bosses" in embed["description"], embed["description"])
+    check("...and names the first kills, numbered",
+          "including first kills on **1/8 Nek'zali the Soulcoiler** and "
+          "**3/8 The Lost Explorers**" in embed["description"], embed["description"])
+
+    # A parse is about a person. A tier position next to their name reads as part of
+    # their score, so the parse fields carry the bare boss name.
     parse_field = [f for f in embed.get("fields", []) if f["name"] == "Best parse"]
-    check("...and so is the boss the best parse was on",
-          parse_field and "/8 " in parse_field[0]["value"],
+    check("the best parse names its boss WITHOUT a tier number",
+          parse_field and "/8 " not in parse_field[0]["value"],
           parse_field[0]["value"] if parse_field else None)
     check("the progression boss is the one with the most wipes",
           "The Lost Explorers" in embed["description"], embed["description"])
