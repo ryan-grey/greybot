@@ -257,9 +257,11 @@ section { margin-top:48px; }
 .sources .by { color:var(--muted); }
 .note { margin-top:14px; font-size:14px; color:var(--muted); }
 .footnote {
-  margin-top:10px; padding-top:10px; border-top:1px solid var(--line);
-  font-size:13px;
+  margin-top:14px; padding:10px 12px; border-left:3px solid var(--accent);
+  background:var(--chip); border-radius:0 6px 6px 0; font-size:13.5px;
 }
+.footnote b { color:var(--ink); font-weight:600; }
+.killed sup { font-size:9px; margin-left:2px; }
 footer {
   max-width:1400px; margin:64px auto 0; padding:20px;
   border-top:1px solid var(--line); color:var(--muted); font-size:14px;
@@ -403,7 +405,11 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
     # guild is 5/8.
     for wb in world_bosses or ():
         diff = f" &middot; {_esc(wb['difficulty'])}" if wb.get("difficulty") else ""
-        killed += (f'<span class="wb">World boss: {_esc(wb["name"])}{diff}</span>')
+        # The dagger ties the chip to the note under the columns. Without a marker the
+        # two are just a chip at the top and a grey paragraph at the bottom, and a reader
+        # has no reason to connect them -- which is the same as not explaining it.
+        killed += (f'<span class="wb">World boss: {_esc(wb["name"])}{diff}'
+                   f'<sup>&dagger;</sup></span>')
     killed_block = (f'<div class="killed">{killed}</div>' if killed
                     else '<p class="lede">No kills &mdash; a full night on progression.</p>')
     title = f"{guild_name} — {night_text}"
@@ -466,9 +472,9 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
       were in; bosses they sat are not counted against them.
     </p>
     <p class="note footnote">
-      Every figure above excludes the world boss. A world boss is one encounter with a full
-      raid on it and it is not part of the tier, so counting it would flatter every column
-      and mean nothing.
+      <sup>&dagger;</sup> <b>Every figure above excludes the world boss.</b> A world boss is
+      one encounter with a full raid on it and it is not part of the tier, so counting it
+      would flatter every column and mean nothing.
     </p>
   </section>
 
