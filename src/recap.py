@@ -103,11 +103,23 @@ def bosses_killed(scope):
     return out
 
 
-def boss_labels(bosses, encounters):
-    """Each killed boss as "3/8 Name" -- its place in the tier's PUBLISHED boss order.
+def boss_order(encounters):
+    """(normalised boss name -> its 1-based place in the tier, the tier's boss count)."""
+    seq = [e for e in (encounters or ()) if e]
+    order = {}
+    for i, name in enumerate(seq, 1):
+        # First occurrence wins. A name appearing twice in one raid's list would be a
+        # Raider.IO oddity rather than two bosses, and picking the later index would push
+        # every subsequent boss's number out by one.
+        order.setdefault(raiderio.normalize(name), i)
+    return order, len(seq)
 
-    Not the order they died tonight. Raider.IO's encounter list is the raid's own running
-    order, so Entombed Sentinels is 5/8 whether it fell first on a farm night or last on a
+
+def boss_label(name, order, total):
+    """One boss as "3/8 The Lost Explorers" -- its place in the tier's PUBLISHED order.
+
+    Not the order it died tonight. Raider.IO's encounter list is the raid's own running
+    order, so Entombed Sentinels is 2/8 whether it fell first on a farm night or last on a
     prog one, and the number means the same thing every week. Deriving it from tonight's
     kill order instead would produce a "1/8" for whatever the raid happened to open with.
 
@@ -115,14 +127,18 @@ def boss_labels(bosses, encounters):
     yields the bare name. That is the same rule as every other section of the card: a
     number that cannot be established is omitted, never guessed. A wrong position is worse
     than no position here, because it reads as progression the guild does not have.
+
+    EVERY place the card names a boss goes through this -- the kill list, the pull count,
+    and the parse fields. A card that numbers one of the three reads as though the other
+    two are bosses of some different kind.
     """
-    seq = [e for e in (encounters or ()) if e]
-    order, total = {}, len(seq)
-    for i, name in enumerate(seq, 1):
-        # First occurrence wins. A name appearing twice in one raid's list would be a
-        # Raider.IO oddity rather than two bosses, and picking the later index would push
-        # every subsequent boss's number out by one.
-        order.setdefault(raiderio.normalize(name), i)
+    i = (order or {}).get(raiderio.normalize(name))
+    return f"{i}/{total} {name}" if name and i and total else (name or "")
+
+
+def boss_labels(bosses, encounters):
+    """The night's kills, each numbered, ordered by position in the tier."""
+    order, total = boss_order(encounters)
     numbered, plain = [], []
     for b in bosses or ():
         i = order.get(raiderio.normalize(b))
@@ -367,6 +383,17 @@ def summarise(scope, sources, show_worst_parse=False, encounters=None):
         # Dropped here rather than at render time, so a card that is not supposed to carry
         # a worst parse never has one in the object at all.
         out["parses"] = {k: v for k, v in out["parses"].items() if k != "worst"}
+
+    # Numbering is attached to every boss the card names, not just the kill list. `name`
+    # and `boss` are left untouched beside the labels, because those are what the logs
+    # carry and a position is only meaningful while the tier is current.
+    order, total = boss_order(encounters)
+    if out["prog"]:
+        out["prog"]["label"] = boss_label(out["prog"].get("name"), order, total)
+    for value in (out["parses"] or {}).values():
+        # `parses` also carries `sample`, which is an int rather than a parse row.
+        if isinstance(value, dict):
+            value["bossLabel"] = boss_label(value.get("boss"), order, total)
 
     out["missing"] = [k for k in ("damage", "deaths", "parses") if not out.get(k)]
     return out

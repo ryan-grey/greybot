@@ -2669,6 +2669,15 @@ def test_recap_end_to_end():
           "**1/8 Nek'zali the Soulcoiler**" in embed["description"], embed["description"])
     check("...and the numbers follow the published order, not tonight's kill order",
           "**3/8 The Lost Explorers**" in embed["description"], embed["description"])
+
+    # EVERY boss the card names is numbered. A card that numbers the kill list and leaves
+    # the pull count and the parse bare reads as three different kinds of boss.
+    check("the progression boss is numbered too",
+          "pulls on 3/8 The Lost Explorers" in embed["description"], embed["description"])
+    parse_field = [f for f in embed.get("fields", []) if f["name"] == "Best parse"]
+    check("...and so is the boss the best parse was on",
+          parse_field and "/8 " in parse_field[0]["value"],
+          parse_field[0]["value"] if parse_field else None)
     check("the progression boss is the one with the most wipes",
           "The Lost Explorers" in embed["description"], embed["description"])
     fields = {f["name"] for f in embed.get("fields", [])}

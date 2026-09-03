@@ -230,7 +230,7 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
 
     prog = summary.get("prog")
     if prog:
-        line = f"**{prog['pulls']}** pulls on {prog['name']}"
+        line = f"**{prog['pulls']}** pulls on {prog.get('label') or prog['name']}"
         # The best attempt is only interesting while the boss is still alive. Once it is
         # dead the number is 0% and saying so reads as a bug.
         if prog.get("best") and prog["best"] > 0:
@@ -271,7 +271,8 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
             continue
         embed["fields"].append({
             "name": label,
-            "value": f"{p['name']} — **{int(round(p['percent']))}**\n{p['boss']}",
+            "value": f"{p['name']} — **{int(round(p['percent']))}**\n"
+                     f"{p.get('bossLabel') or p['boss']}",
             "inline": True})
 
     if not embed["fields"]:
