@@ -142,8 +142,26 @@ class FakeDynamo:
                 item.pop(attr, None)             # DynamoDB drops an emptied set
         elif UpdateExpression.startswith("SET"):
             attrs = ExpressionAttributeNames or {}
-            for assign in UpdateExpression[4:].split(", "):
-                field, placeholder = [p.strip() for p in assign.split("=")]
+            # list_append is modelled rather than rejected. store.record_post uses it to
+            # append atomically, and a fake that could not express that would have left
+            # the only interesting property of that call -- that two overlapping writers
+            # both survive -- untested.
+            appends = re.findall(
+                r"(\w+)\s*=\s*list_append\(\s*(?:if_not_exists\(\s*\w+\s*,\s*(:\w+)\s*\)"
+                r"|(\w+))\s*,\s*(:\w+)\s*\)", UpdateExpression)
+            for attr, empty_ph, _plain, new_ph in appends:
+                have = list((item.get(attr) or {}).get("L")
+                            or (vals.get(empty_ph, {}) or {}).get("L") or [])
+                item[attr] = {"L": have + list(vals[new_ph]["L"])}
+            body = re.sub(r"\w+\s*=\s*list_append\([^)]*\)[^,]*\)", "",
+                          UpdateExpression[4:])
+            for assign in body.split(", "):
+                assign = assign.strip().strip(",").strip()
+                if not assign or "=" not in assign:
+                    continue
+                field, placeholder = [p.strip() for p in assign.split("=", 1)]
+                if not placeholder.startswith(":"):
+                    continue
                 if field.startswith("#"):
                     field = attrs[field]
                 elif field.lower() in RESERVED_WORDS:
@@ -1858,6 +1876,18 @@ def test_deleted_post_probe():
         p = health.posts_probe("tok", posts)
         check("losing read access is UNKNOWN, not a deletion",
               p["verdict"] == health.UNKNOWN, p)
+
+        # The bug this replaced: a read-then-write lost a record the first time two
+        # writers overlapped, and the lost post's deletion could then never be noticed.
+        FAKE_DDB.items.clear()
+        pk2 = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
+        store.record_post(pk2, "A", "C1", "kill", "t1")
+        store.record_post(pk2, "B", "C1", "recap", "t2")
+        got = [p["id"] for p in store.recent_posts(pk2)]
+        check("two posts recorded back to back both survive", got == ["A", "B"], got)
+        store.forget_post(pk2, "A", "t3")
+        check("...and forgetting one keeps the other",
+              [p["id"] for p in store.recent_posts(pk2)] == ["B"])
 
         check("no tracked posts is not a failure",
               health.posts_probe("tok", [])["verdict"] == health.OK)
