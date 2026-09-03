@@ -180,6 +180,17 @@ class GreybotStack(Stack):
             ),
         )
         policy.attach_to_role(role)
+        # PutObject ONLY, and only under the one bucket, and only when a bucket is
+        # configured for this stage. Not ListBucket, not GetObject, not Delete: the bot
+        # writes a night's page and never needs to read one back or remove one. Dev
+        # configures no bucket and therefore gets no statement at all -- a dev deploy
+        # must not be able to overwrite a published night.
+        if cfg.scorecard_bucket:
+            role.add_to_policy(iam.PolicyStatement(
+                actions=["s3:PutObject"],
+                resources=[f"arn:aws:s3:::{cfg.scorecard_bucket}/*"],
+            ))
+
         return role
 
     # ------------------------------------------------------------- function
