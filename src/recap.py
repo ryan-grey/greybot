@@ -449,7 +449,7 @@ def _rank_rows(r, eligible_names, difficulty):
 def parse_rows(sources, eligible_names, difficulty=HEROIC):
     """Every ranked parse of the night, one row per character per kill.
 
-    Split out of `parses` because the card needs the two extremes and the scorecard needs
+    Split out of `parses` because the card needs the two extremes and the page needs
     all of it. One traversal, one set of filters, so the page and the card can never
     disagree about whose parses counted.
     """
@@ -623,11 +623,11 @@ def drop_duplicate_logs(reports, overlap_threshold=0.5):
     return kept, dropped
 
 
-def scorecard(sources, eligible_names, difficulty=HEROIC):
+def raider_rows(sources, eligible_names, difficulty=HEROIC):
     """Every raider of the night, across every category the card samples.
 
     The card shows three names for damage, whoever tied for most deaths, and two parses.
-    That is the right amount for a Discord embed and it is not a scorecard: eighteen people
+    That is the right amount for a Discord embed and it is not a full account: eighteen people
     raided and fifteen of them appear nowhere. This is the same numbers with nothing
     dropped -- one row per person, joined on the player key rather than the display name,
     for the same reason every other aggregate here does. Actor ids are per-report and two

@@ -74,13 +74,13 @@ TEAM_OVERLAP_LOW = f"{PREFIX}/team/prog_overlap_low"
 # into an authoritative answer with no code change.
 TEAM_PROG_TAG = f"{PREFIX}/team/prog_tag"
 
-# Where the full scorecard is published, e.g. "https://raids.ryangrey.dev". EMPTY IS OFF,
+# Where the full recap page is published, e.g. "https://raids.ryangrey.dev". EMPTY IS OFF,
 # and off is the default: with no base URL the bot builds no page, puts nothing to S3, and
 # the Discord card carries no link. That is what makes shipping this code a no-op until
 # the subdomain actually exists -- a card linking a hostname that does not resolve yet is
 # worse than a card with no link, and the link is the part a reader will click first.
-SCORECARD_BASE_URL = f"{PREFIX}/scorecard/base_url"
-SCORECARD_BUCKET = f"{PREFIX}/scorecard/bucket"
+RECAP_PAGE_URL = f"{PREFIX}/recap/page_url"
+RECAP_PAGE_BUCKET = f"{PREFIX}/recap/page_bucket"
 
 # Where a health alert is published. Optional, and unset is how the alerts are switched
 # off: the probes still run and still log, they simply have nowhere to mail. That is the
@@ -93,7 +93,7 @@ OPTIONAL_NAMES = [BLIZZARD_CLIENT_ID, BLIZZARD_CLIENT_SECRET,
                   DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID,
                   RECAP_ENABLED, RECAP_WORST_PARSE, RECAP_SCHEDULE,
                   TEAM_ROSTER_MIN_PCT, TEAM_OVERLAP_HIGH, TEAM_OVERLAP_LOW,
-                  TEAM_PROG_TAG, SCORECARD_BASE_URL, SCORECARD_BUCKET,
+                  TEAM_PROG_TAG, RECAP_PAGE_URL, RECAP_PAGE_BUCKET,
                   ALERT_TOPIC_ARN]
 
 # Defaults for everything the recap reads. A missing parameter is a configured default,
@@ -112,8 +112,8 @@ DEFAULTS = {
     TEAM_OVERLAP_HIGH: "70",
     TEAM_OVERLAP_LOW: "35",
     TEAM_PROG_TAG: "",
-    SCORECARD_BASE_URL: "",
-    SCORECARD_BUCKET: "",
+    RECAP_PAGE_URL: "",
+    RECAP_PAGE_BUCKET: "",
     ALERT_TOPIC_ARN: "",
 }
 
@@ -206,10 +206,10 @@ def load(now=None):
         "prog_tag": got.get(TEAM_PROG_TAG, DEFAULTS[TEAM_PROG_TAG]).strip(),
         # Trailing slash stripped here so every caller can join with "/" and none of them
         # has to remember which form the parameter was typed in.
-        "scorecard_base_url": got.get(SCORECARD_BASE_URL,
-                                      DEFAULTS[SCORECARD_BASE_URL]).strip().rstrip("/"),
-        "scorecard_bucket": got.get(SCORECARD_BUCKET,
-                                    DEFAULTS[SCORECARD_BUCKET]).strip(),
+        "recap_page_url": got.get(RECAP_PAGE_URL,
+                                  DEFAULTS[RECAP_PAGE_URL]).strip().rstrip("/"),
+        "recap_page_bucket": got.get(RECAP_PAGE_BUCKET,
+                                     DEFAULTS[RECAP_PAGE_BUCKET]).strip(),
         "alert_topic_arn": got.get(ALERT_TOPIC_ARN,
                                    DEFAULTS[ALERT_TOPIC_ARN]).strip(),
     })
