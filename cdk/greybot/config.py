@@ -74,6 +74,12 @@ class StageConfig:
         # parameter be created later without touching IAM. Deleting it would
         # turn "set prog_tag" into an AccessDenied at the next poll.
         "team/prog_tag",
+        # Same situation as team/prog_tag: granted, not yet created. Empty is OFF for both
+        # of these, so the bot runs fine without them, and having the grant already in
+        # place is what lets the subdomain be switched on with an SSM write rather than an
+        # IAM change on a live role.
+        "scorecard/base_url",
+        "scorecard/bucket",
         "alerts/sns_topic_arn",
     ))
 
