@@ -237,8 +237,8 @@ def top_damage(sources, limit=3):
             if not found:
                 continue
             key, a = found
-            rec = totals.setdefault(key, {"name": a["name"], "server": a.get("server") or "",
-                                          "total": 0})
+            rec = totals.setdefault(key, {"key": key, "name": a["name"],
+                                          "server": a.get("server") or "", "total": 0})
             rec["total"] += int(total)
     rows = sorted(totals.values(), key=lambda r: (-r["total"], r["name"]))
     return rows[:limit]
@@ -276,7 +276,8 @@ def death_counts(sources):
                 if not found:
                     continue
                 key, a = found
-                rec = counts.setdefault(key, {"name": a["name"], "deaths": 0})
+                rec = counts.setdefault(key, {"key": key, "name": a["name"],
+                                              "server": a.get("server") or "", "deaths": 0})
                 rec["deaths"] += 1
     return sorted(counts.values(), key=lambda r: (-r["deaths"], r["name"]))
 
@@ -316,9 +317,28 @@ def _rank_rows(r, eligible_names, difficulty):
                 if (team.player_key(name, server) not in eligible_names
                         and team.normalize_player(name) not in eligible_names):
                     continue
-            out.append({"name": name, "percent": float(pct), "boss": boss,
+            out.append({"key": team.player_key(name, server), "name": name,
+                        "server": server or "", "percent": float(pct), "boss": boss,
                         "spec": c.get("spec") or "", "class": c.get("class") or ""})
     return out
+
+
+def parse_rows(sources, eligible_names, difficulty=HEROIC):
+    """Every ranked parse of the night, one row per character per kill.
+
+    Split out of `parses` because the card needs the two extremes and the scorecard needs
+    all of it. One traversal, one set of filters, so the page and the card can never
+    disagree about whose parses counted.
+    """
+    rows = []
+    for src in sources or ():
+        allowed = set(src.get("fightIDs") or ()) or None
+        for r in _entries(src.get("rankings"), "data"):
+            fid = r.get("fightID")
+            if allowed is not None and fid is not None and int(fid) not in allowed:
+                continue
+            rows.extend(_rank_rows(r, eligible_names, difficulty))
+    return rows
 
 
 def parses(sources, eligible_names, difficulty=HEROIC):
@@ -339,14 +359,7 @@ def parses(sources, eligible_names, difficulty=HEROIC):
     Returns None when there is nothing to report, which is the ordinary state of a wipe
     night: rankings only exist for kills.
     """
-    rows = []
-    for src in sources or ():
-        allowed = set(src.get("fightIDs") or ()) or None
-        for r in _entries(src.get("rankings"), "data"):
-            fid = r.get("fightID")
-            if allowed is not None and fid is not None and int(fid) not in allowed:
-                continue
-            rows.extend(_rank_rows(r, eligible_names, difficulty))
+    rows = parse_rows(sources, eligible_names, difficulty)
     if not rows:
         return None
     return {"best": max(rows, key=lambda r: r["percent"]),
@@ -472,3 +485,57 @@ def drop_duplicate_logs(reports, overlap_threshold=0.5):
     order = {r.get("code"): i for i, r in enumerate(reports or ())}
     kept.sort(key=lambda r: order.get(r.get("code"), 0))
     return kept, dropped
+
+
+def scorecard(sources, eligible_names, difficulty=HEROIC):
+    """Every raider of the night, across every category the card samples.
+
+    The card shows three names for damage, whoever tied for most deaths, and two parses.
+    That is the right amount for a Discord embed and it is not a scorecard: eighteen people
+    raided and fifteen of them appear nowhere. This is the same numbers with nothing
+    dropped -- one row per person, joined on the player key rather than the display name,
+    for the same reason every other aggregate here does. Actor ids are per-report and two
+    raiders genuinely can share a name across realms.
+
+    A person who raided but whose damage row was missing still gets a row, with the
+    sections that could not be read left as None. Absent is not zero: a raider with no
+    parse did not parse 0, they killed nothing that ranks, and rendering that as a number
+    would be inventing data. The renderer prints an em dash for None and never a 0.
+
+    `parses` is the raider's BEST of the night. The card's global best is the maximum of
+    this column by construction, so the page can never contradict the post it came from.
+    """
+    rows = {}
+
+    def row(key, name, server=""):
+        return rows.setdefault(key, {"key": key, "name": name, "server": server or "",
+                                     "damage": None, "deaths": None,
+                                     "parse": None, "parseBoss": None, "parses": 0})
+
+    # Seeded from who RAIDED, not from who appears in a table. Anything else makes the
+    # roster a function of which blobs happened to parse.
+    for src in sources or ():
+        for aid in src.get("eligible") or ():
+            found = _person(src.get("actors"), aid)
+            if found:
+                row(found[0], found[1]["name"], found[1].get("server"))
+
+    for r in top_damage(sources, limit=None):
+        row(r["key"], r["name"], r.get("server"))["damage"] = r["total"]
+    for r in death_counts(sources):
+        row(r["key"], r["name"], r.get("server"))["deaths"] = r["deaths"]
+
+    for p in parse_rows(sources, eligible_names, difficulty):
+        # Rankings carry a real server and the damage tables do not, so a rankings row can
+        # key to somebody already seeded under a bare name. Fall back to that rather than
+        # opening a second row for one person.
+        key = p["key"] if p["key"] in rows else team.normalize_player(p["name"])
+        rec = row(key, p["name"], p.get("server"))
+        rec["parses"] += 1
+        if rec["parse"] is None or p["percent"] > rec["parse"]:
+            rec["parse"], rec["parseBoss"] = p["percent"], p["boss"]
+
+    # Damage descending, because that is the column people look at first. Nobody with a
+    # missing damage figure is promoted above somebody with a real one.
+    return sorted(rows.values(),
+                  key=lambda r: (r["damage"] is None, -(r["damage"] or 0), r["name"]))

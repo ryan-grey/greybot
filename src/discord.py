@@ -205,7 +205,7 @@ def _tied(rows, key):
 
 
 def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso_ts=None,
-                thumbnail_url=None, guild_label=None, guild_url=None):
+                thumbnail_url=None, guild_label=None, guild_url=None, scorecard_url=None):
     """The morning-after card. One embed, no ping, same visual language as a kill card.
 
     Every section is optional and silently absent when it could not be read. A recap that
@@ -236,6 +236,13 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
         if prog.get("best") and prog["best"] > 0:
             line += f" — best **{prog['best']:.1f}%**"
         lines.append(line)
+
+    # In the DESCRIPTION, not the footer field. Discord renders no markdown and no links
+    # in an embed footer, so a URL put there arrives as unclickable text -- which for a
+    # line whose entire job is to be clicked is the same as not shipping it. This sits at
+    # the bottom of the description, which is where a footer reads from anyway.
+    if scorecard_url:
+        lines.append(f"Full scorecard here: {scorecard_url}")
 
     embed = {
         "title": f"{guild_name} — {night_text}",

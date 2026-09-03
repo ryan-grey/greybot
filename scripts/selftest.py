@@ -1866,12 +1866,18 @@ def test_iam_grant_covers_config():
     print("\nThe role policy covers everything config.py reads")
     import re
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-    grant = open(os.path.join(root, "infra", "grant-alerts.sh"),
+    # Read from the CDK stage config, which is what actually builds the role today.
+    # This used to read infra/grant-alerts.sh, and that script has not owned the policy
+    # since the Phase 1 cutover -- so the gate was green against an artifact nothing
+    # deploys. A check pointed at a stale source is not a weaker check, it is a check
+    # that reports success for a policy the account has never seen.
+    grant = open(os.path.join(root, "cdk", "greybot", "config.py"),
                  encoding="utf-8").read()
     src = open(os.path.join(root, "src", "config.py"), encoding="utf-8").read()
 
     wanted = set(re.findall(r'f"\{PREFIX\}(/[a-z_/]+)"', src))
-    granted = set(re.findall(r'\$P(/[a-z_/]+)"', grant))
+    leaves = grant.split("ssm_leaves")[1] if "ssm_leaves" in grant else ""
+    granted = {"/" + m for m in re.findall(r'"([a-z_]+(?:/[a-z_]+)+)",', leaves)}
     check("config.py asks for a plausible number of parameters", len(wanted) >= 19,
           len(wanted))
     check("the role grants every one of them", wanted <= granted,
