@@ -2485,6 +2485,21 @@ def test_recap_parsers():
     check("...and simply carries no parse section", wipe["parses"] is None)
     check("...which is reported as a missing section", "parses" in wipe["missing"])
 
+    # Boss numbering, including the two ways it must decline to answer. A position that
+    # cannot be established is dropped, never guessed: "1/8" on a boss the list does not
+    # contain would claim progression the guild does not have.
+    check("a boss is numbered by its place in the published order",
+          recap.boss_labels(["The Lost Explorers"], ABYSS) == ["3/8 The Lost Explorers"],
+          recap.boss_labels(["The Lost Explorers"], ABYSS))
+    check("...matched through the same fold as every other boss key",
+          recap.boss_labels(["Nekzali the Soulcoiler"], ABYSS)
+          == ["1/8 Nekzali the Soulcoiler"])
+    check("a boss the tier does not contain keeps its bare name",
+          recap.boss_labels(["Nymrissa Wavecaller"], ABYSS) == ["Nymrissa Wavecaller"])
+    check("an unreadable encounter list numbers nothing at all",
+          recap.boss_labels(ABYSS[:2], []) == ABYSS[:2],
+          recap.boss_labels(ABYSS[:2], []))
+
     # Fields that vanish. Every one has to cost one section, never the card.
     for label, kw in (
             ("damage blob is empty", {"damage": {}}),
@@ -2645,6 +2660,15 @@ def test_recap_end_to_end():
           "The Venomous Abyss" in embed["footer"]["text"], embed["footer"]["text"])
     check("the warm-up kill in another raid is not on the card",
           "Nymrissa" not in embed["description"], embed["description"])
+
+    # Each kill carries its place in the tier's PUBLISHED order, against the tier's real
+    # boss total. The fixture kills the 1st and 3rd bosses of eight, and it kills them in
+    # that order -- so numbering by tonight's kill order would produce "2/8 The Lost
+    # Explorers" and read as a boss the guild has not reached yet.
+    check("the first kill carries its position in the tier",
+          "**1/8 Nek'zali the Soulcoiler**" in embed["description"], embed["description"])
+    check("...and the numbers follow the published order, not tonight's kill order",
+          "**3/8 The Lost Explorers**" in embed["description"], embed["description"])
     check("the progression boss is the one with the most wipes",
           "The Lost Explorers" in embed["description"], embed["description"])
     fields = {f["name"] for f in embed.get("fields", [])}

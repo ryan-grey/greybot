@@ -1645,7 +1645,8 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     combined = recap_mod.raid_scope(
         [f for c in chosen for f in c["raidScope"]["fights"]], wcl.HEROIC)
     summary = recap_mod.summarise(combined, sources,
-                                  show_worst_parse=bool(cfg.get("recap_worst_parse")))
+                                  show_worst_parse=bool(cfg.get("recap_worst_parse")),
+                                  encounters=(tier.get("meta") or {}).get("encounters"))
 
     payload = discord.recap_embed(
         cfg["guild_name"], tier["label"], night.strftime("%A, %B %-d"), summary,

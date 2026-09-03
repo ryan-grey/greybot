@@ -103,6 +103,39 @@ def bosses_killed(scope):
     return out
 
 
+def boss_labels(bosses, encounters):
+    """Each killed boss as "3/8 Name" -- its place in the tier's PUBLISHED boss order.
+
+    Not the order they died tonight. Raider.IO's encounter list is the raid's own running
+    order, so Entombed Sentinels is 5/8 whether it fell first on a farm night or last on a
+    prog one, and the number means the same thing every week. Deriving it from tonight's
+    kill order instead would produce a "1/8" for whatever the raid happened to open with.
+
+    A boss the encounter list does not contain, or a tier whose list could not be read,
+    yields the bare name. That is the same rule as every other section of the card: a
+    number that cannot be established is omitted, never guessed. A wrong position is worse
+    than no position here, because it reads as progression the guild does not have.
+    """
+    seq = [e for e in (encounters or ()) if e]
+    order, total = {}, len(seq)
+    for i, name in enumerate(seq, 1):
+        # First occurrence wins. A name appearing twice in one raid's list would be a
+        # Raider.IO oddity rather than two bosses, and picking the later index would push
+        # every subsequent boss's number out by one.
+        order.setdefault(raiderio.normalize(name), i)
+    numbered, plain = [], []
+    for b in bosses or ():
+        i = order.get(raiderio.normalize(b))
+        (numbered if i and total else plain).append((i, b))
+
+    # Sorted by POSITION, which reorders the list away from the order they died in. That
+    # is the point of numbering them: "1/8, 3/8, 2/8, 4/8" reads as a mistake on the card
+    # even though every number is right. Kill order is still what `bosses` carries, so the
+    # log line remains the record of how the night actually went.
+    numbered.sort(key=lambda p: p[0])
+    return [f"{i}/{total} {b}" for i, b in numbered] + [b for _, b in plain]
+
+
 def prog_encounter(scope):
     """The boss the night was actually spent on: most wipes, ties broken by total pulls.
 
@@ -305,12 +338,16 @@ def parses(sources, eligible_names, difficulty=HEROIC):
             "sample": len(rows)}
 
 
-def summarise(scope, sources, show_worst_parse=False):
+def summarise(scope, sources, show_worst_parse=False, encounters=None):
     """Everything the card needs, with each section independently omittable.
 
     A section that could not be read is absent from the result rather than present and
     empty, so the card renders what is known and says nothing about what is not. The log
     line the caller writes from `missing` is what makes a thin card explicable.
+
+    `bosses` and `bossLabels` are both returned and both are load-bearing. The card renders
+    the labels; the LOGS record the bare names, because "3/8" is meaningless six months
+    later when the tier has rolled over and `recap_posted` is the only record of what died.
     """
     people = raider_keys(sources)
     eligible_names = set(people)
@@ -322,6 +359,7 @@ def summarise(scope, sources, show_worst_parse=False):
 
     out = {"bosses": bosses_killed(scope), "prog": prog_encounter(scope),
            "raiders": len(people)}
+    out["bossLabels"] = boss_labels(out["bosses"], encounters)
     out["damage"] = top_damage(sources)
     out["deaths"] = death_counts(sources)
     out["parses"] = parses(sources, eligible_names)
