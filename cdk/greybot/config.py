@@ -43,6 +43,12 @@ class StageConfig:
     # alerting, deliberately: one topic, one delivery pipeline.
     alerts_topic_name: str = "ryangrey-dev-alerts"
 
+    # The bucket behind raids.ryangrey.dev. Prod writes the published scorecard here;
+    # dev has no subdomain and writes nowhere, so its grant is empty rather than
+    # pointed at prod's bucket -- a dev deploy must not be able to overwrite a real
+    # night's published page.
+    scorecard_bucket: str = ""
+
     # KMS key that encrypts the SecureString parameters. Same key both stages —
     # it is an account-level key, not a per-environment one.
     kms_key_id: str = "8e811ee5-0cfa-456f-905f-7b664255201e"
@@ -97,6 +103,7 @@ PROD = StageConfig(
     scheduler_role_name="ryangrey-greybot-scheduler-role",
     api_name="greybot-interactions",
     ssm_prefix="/greybot",
+    scorecard_bucket="raids.ryangrey.dev",
 )
 
 # NOTE ON THE DEV SSM PREFIX
