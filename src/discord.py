@@ -101,9 +101,28 @@ class DiscordError(RuntimeError):
     pass
 
 
+class _Posted(int):
+    """The HTTP status, with the created message's ids hung off it.
+
+    An int subclass rather than a tuple or a dict because every existing caller treats the
+    return of a post as a status code and several of them compare it numerically. Widening
+    the type would have meant finding all of them and being wrong about one.
+    """
+    message_id = None
+    channel_id = None
+
+
 def post(webhook_url, payload, timeout=10, sleep=time.sleep):
-    """POST one message to a webhook, retrying 429 and 5xx."""
-    return _post_json(webhook_url, payload, timeout=timeout, sleep=sleep)
+    """POST one message to a webhook, retrying 429 and 5xx.
+
+    `?wait=true` is appended so Discord answers with the created message rather than a
+    bare 204. That one query parameter is what makes "did somebody delete our post"
+    answerable at all: without the message id there is nothing to ask about later, and
+    Discord will not tell you after the fact.
+    """
+    sep = "&" if "?" in webhook_url else "?"
+    return _post_json(f"{webhook_url}{sep}wait=true", payload,
+                      timeout=timeout, sleep=sleep)
 
 
 def _post_json(url, payload, headers=None, timeout=10, sleep=time.sleep):
@@ -128,7 +147,20 @@ def _post_json(url, payload, headers=None, timeout=10, sleep=time.sleep):
                      **(headers or {})})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as res:
-                return res.status
+                raw = res.read().decode("utf-8", "replace")
+                try:
+                    body = json.loads(raw) if raw.strip() else {}
+                except ValueError:
+                    body = {}
+                # The status is what every existing caller reads, so it stays the return
+                # value and the message rides along as an attribute. A 204 with no body
+                # still returns cleanly -- posting must not start failing because the
+                # bookkeeping around it could not read an id.
+                out = _Posted(res.status)
+                if isinstance(body, dict):
+                    out.message_id = body.get("id")
+                    out.channel_id = body.get("channel_id")
+                return out
         except urllib.error.HTTPError as exc:
             text = exc.read().decode("utf-8", "replace")[:300]
             last = f"HTTP {exc.code}: {text}"

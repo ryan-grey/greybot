@@ -398,6 +398,22 @@ def record_roster(token, cfg, scope, slug, boss_key, kill, now_iso):
         return False
 
 
+def _remember_post(scope, sent, kind, now_iso):
+    """Record a posted message so its later deletion can be noticed.
+
+    Swallows everything. The announcement has already landed by the time this runs, and no
+    amount of bookkeeping failure justifies making a successful post look failed.
+    """
+    try:
+        mid = getattr(sent, "message_id", None)
+        cid = getattr(sent, "channel_id", None)
+        if mid:
+            store.record_post(scope, mid, cid, kind, now_iso)
+    except Exception as exc:                                       # noqa: BLE001
+        log("post_record_failed", kind=kind, error=repr(exc),
+            note="the announcement went out; only the deletion check loses this one")
+
+
 def announce_kill(cfg, scope, slug, raid_label, kill, state, profile, thumb=None,
                   now_iso=None, token=None):
     """Claim, then post. In that order -- see store.claim_boss."""
@@ -439,7 +455,7 @@ def announce_kill(cfg, scope, slug, raid_label, kill, state, profile, thumb=None
                                        cfg["guild_name"]),
         world_boss=raiderio.is_world_boss(profile, slug))
     try:
-        discord.post_to(destination(cfg), payload)
+        sent = discord.post_to(destination(cfg), payload)
     except discord.DiscordError as exc:
         # Hand the boss back so the next poll retries it. A missed announcement recovers
         # in fifteen minutes; a duplicate one never recovers at all.
@@ -447,6 +463,7 @@ def announce_kill(cfg, scope, slug, raid_label, kill, state, profile, thumb=None
         state["announced"].discard(key)
         log("announce_failed", slug=slug, boss=kill["name"], error=str(exc))
         return False
+    _remember_post(scope, sent, "kill", now_iso or _iso(datetime.now(timezone.utc)))
 
     record_roster(token, cfg, scope, slug, key, kill,
                   now_iso or _iso(datetime.now(timezone.utc)))
@@ -948,7 +965,16 @@ def run_health_check(cfg, scope, now, now_iso, forced=False):
     announcement that failed to go out because the health check could not reach SNS would
     be this feature causing exactly the outage it exists to report.
     """
-    result = health.check(cfg, now)
+    # The tracked posts are read here rather than inside health.check, so that module
+    # stays a pure prober with no opinion about DynamoDB.
+    probe_cfg = dict(cfg)
+    try:
+        probe_cfg["recent_posts"] = store.recent_posts(scope)
+    except Exception as exc:                                       # noqa: BLE001
+        log("post_list_read_failed", error=repr(exc),
+            note="the deletion check is skipped this poll; every other probe still runs")
+
+    result = health.check(probe_cfg, now)
     prev = store.get_health(scope) or {}
     prev_status = prev.get("status") or ""
     status = result["status"]
@@ -998,6 +1024,17 @@ def run_health_check(cfg, scope, now, now_iso, forced=False):
                          if result["cause"] else "", since,
                          now_iso if sent else (prev.get("notifiedAt") or ""),
                          member=member if member is not None else prev.get("member"))
+
+    # A deleted post is a ONE-SHOT event, not a state to sit in. Once it has been
+    # reported the message is dropped from the tracked list, because it is never coming
+    # back on its own -- leaving it would re-alert on every poll forever, which is how a
+    # health alert becomes something people filter to a folder.
+    cause = result.get("cause") or {}
+    if cause.get("verdict") == health.POST_DELETED and cause.get("messageId"):
+        try:
+            store.forget_post(scope, cause["messageId"], now_iso)
+        except Exception as exc:                                   # noqa: BLE001
+            log("post_forget_failed", messageId=cause["messageId"], error=repr(exc))
 
     log("health_checked", status=status, previous=prev_status or None, changed=changed,
         since=since, notified=kind if sent else None, botMember=member,
@@ -1774,13 +1811,14 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
                 "sources": sources_meta}
 
     try:
-        discord.post_to(destination(cfg), payload)
+        sent = discord.post_to(destination(cfg), payload)
     except discord.DiscordError as exc:
         # Hand the night back so the next run retries it, exactly as a failed kill
         # announcement hands the boss back.
         store.release_recap(scope, night_key)
         log("recap_failed", night=night_key, error=str(exc))
         return {"ok": False, "night": night_key, "posted": False}
+    _remember_post(scope, sent, "recap", now_iso)
 
     log("recap_posted", night=night_key, manual=bool(manual),
         slug=tier["slug"], raid=tier["label"],
