@@ -1,4 +1,4 @@
-"""The full scorecard page: every raider, ranked in every category, as one static file.
+"""The full recap page: every raider, ranked in every category, as one static file.
 
 The Discord card is a summary and is meant to be -- three damage names, whoever tied for
 most deaths, two parses. Eighteen people raid and most of them appear nowhere on it. This
@@ -340,7 +340,7 @@ def _column(title, subtitle, entries, empty):
     return f'<div class="col"><h3>{title}{sub}</h3>{body}</div>'
 
 
-def columns(scorecard, region=None):
+def columns(rows, region=None):
     """The three ranked lists, each with its own membership rule.
 
     DPS      every raider with a damage figure, highest first.
@@ -353,7 +353,7 @@ def columns(scorecard, region=None):
     """
     def ranked(field):
         return [(_who(r, region), _short(r[field]))
-                for r in sorted((r for r in scorecard if r.get(field) is not None),
+                for r in sorted((r for r in rows if r.get(field) is not None),
                                 key=lambda r: (-r[field], r["name"]))]
 
     dps = ranked("damage")
@@ -361,19 +361,19 @@ def columns(scorecard, region=None):
     taken = ranked("damageTaken")
 
     deaths = [(_who(r, region), str(r["deaths"]))
-              for r in sorted((r for r in scorecard if (r.get("deaths") or 0) > 0),
+              for r in sorted((r for r in rows if (r.get("deaths") or 0) > 0),
                               key=lambda r: (-r["deaths"], r["name"]))]
 
     parses = [(_who(r, region, r.get("parseRole")), _pill(r["parseAvg"]))
-              for r in sorted((r for r in scorecard if r.get("parseAvg") is not None),
+              for r in sorted((r for r in rows if r.get("parseAvg") is not None),
                               key=lambda r: (-r["parseAvg"], r["name"]))]
     return dps, heals, taken, deaths, parses
 
 
-def render(guild_name, raid_name, night_text, boss_labels, scorecard, reports,
+def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
            raiders=None, canonical=None, region=None, world_bosses=None):
-    """One night's scorecard as a complete HTML document."""
-    dps, heals, taken, deaths, parses = columns(scorecard or [], region)
+    """One night's recap page as a complete HTML document."""
+    dps, heals, taken, deaths, parses = columns(rows or [], region)
     killed = "".join(f"<span>{_esc(b)}</span>" for b in boss_labels or ())
     # World bosses sit in the same chip row but marked, because they are not part of the
     # tier's count -- a reader glancing at four chips should not come away thinking the
@@ -407,8 +407,8 @@ def render(guild_name, raid_name, night_text, boss_labels, scorecard, reports,
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{_esc(title)} &mdash; scorecard</title>
-<meta name="description" content="{_esc(f'{guild_name} raid scorecard, {night_text}. Heroic {raid_name}.')}">
+<title>{_esc(title)} &mdash; recap</title>
+<meta name="description" content="{_esc(f'{guild_name} raid recap, {night_text}. Heroic {raid_name}.')}">
 <meta name="robots" content="noindex">{canonical_tag}
 <style>{STYLE}</style>
 </head>
@@ -418,7 +418,7 @@ def render(guild_name, raid_name, night_text, boss_labels, scorecard, reports,
   <span class="lede">greyBot</span>
 </header>
 <main class="wrap">
-  <p class="kicker">Raid scorecard</p>
+  <p class="kicker">Raid recap</p>
   <h1>{_esc(title)}</h1>
   <p class="lede">{subtitle}</p>
   {killed_block}

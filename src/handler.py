@@ -51,7 +51,7 @@ import interactions
 import notify
 import raiderio
 import recap as recap_mod
-import scorecard
+import recap_page
 import keys
 import store
 import team
@@ -1315,12 +1315,12 @@ def poll_one(event, cfg, scope, now, now_iso, started):
     return {"ok": True, "kills": len(kills), "announced": announced}
 
 
-# ---------------------------------------------------------------- the scorecard page
+# ---------------------------------------------------------------- the recap page
 
 _s3 = None
 
 
-def publish_scorecard(cfg, night_key, page_html):
+def publish_recap_page(cfg, night_key, page_html):
     """Put one night's page into the site bucket.
 
     `<night>/index.html`, not `<night>.html`, so the URL a reader sees ends in a slash and
@@ -1336,9 +1336,9 @@ def publish_scorecard(cfg, night_key, page_html):
     the renderer, and the only thing a shorter one buys is requests to S3.
     """
     global _s3                                                 # noqa: PLW0603
-    bucket = cfg.get("scorecard_bucket")
+    bucket = cfg.get("recap_page_bucket")
     if not bucket:
-        raise RuntimeError("scorecard/bucket is not set")
+        raise RuntimeError("recap/page_bucket is not set")
     if _s3 is None:
         _s3 = boto3.client("s3")
     _s3.put_object(
@@ -1721,19 +1721,19 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
                                   dead=tier.get("dead") or set())
     summary["worldBosses"] = tier.get("worldBosses") or []
 
-    # The full scorecard. Built unconditionally because it is pure computation over blobs
+    # The full recap page. Built unconditionally: it is pure computation over blobs
     # already in memory and it is what the dry run has to show; PUBLISHING it is what the
     # base URL gates.
     eligible_names = set(recap_mod.raider_keys(sources))
-    rows = recap_mod.scorecard(sources, eligible_names)
+    rows = recap_mod.raider_rows(sources, eligible_names)
     night_text = night.strftime("%A, %B %-d")
     sources_meta = [{"code": c["meta"]["code"], "title": c["meta"].get("title"),
                      "url": report_url(c["meta"]["code"]),
                      "owner": (c["meta"].get("owner") or {}).get("name"),
-                     "ownerUrl": scorecard.guild_reports_url(gid),
+                     "ownerUrl": recap_page.guild_reports_url(gid),
                      "when": _iso(_at(c["base"]))} for c in chosen]
-    page_url = f"{cfg['scorecard_base_url']}/{night_key}/" if cfg.get("scorecard_base_url") else None
-    page_html = scorecard.render(
+    page_url = f"{cfg['recap_page_url']}/{night_key}/" if cfg.get("recap_page_url") else None
+    page_html = recap_page.render(
         cfg["guild_name"], tier["label"], night_text,
         summary.get("bossLabels") or summary.get("bosses"), rows, sources_meta,
         raiders=summary.get("raiders"), canonical=page_url,
@@ -1741,16 +1741,16 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         world_bosses=summary.get("worldBosses"))
 
     # Published BEFORE the card is posted, and the link is dropped if the put fails. A card
-    # in the channel saying "full scorecard here" that 404s is worse than a card with no
+    # in the channel saying "full recap here" that 404s is worse than a card with no
     # link at all -- the reader cannot tell a broken deploy from a bot that lies.
     if page_url and not dry:
         try:
-            publish_scorecard(cfg, night_key, page_html)
-            log("scorecard_published", night=night_key, url=page_url, bytes=len(page_html),
+            publish_recap_page(cfg, night_key, page_html)
+            log("recap_page_published", night=night_key, url=page_url, bytes=len(page_html),
                 raiders=len(rows))
         except Exception as exc:                               # noqa: BLE001
-            log("scorecard_publish_failed", night=night_key, error=repr(exc),
-                note="the card will be posted without a scorecard link")
+            log("recap_page_publish_failed", night=night_key, error=repr(exc),
+                note="the card will be posted without a recap link")
             page_url = None
 
     payload = discord.recap_embed(
@@ -1760,7 +1760,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         guild_label=raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
         guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
                                        cfg["guild_name"]),
-        scorecard_url=page_url)
+        recap_url=page_url)
     if dry:
         log("recap_dry_run", night=night_key, slug=tier["slug"],
             bosses=summary.get("bosses"), prog=(summary.get("prog") or {}).get("name"),
@@ -1769,8 +1769,8 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
             missingSections=summary["missing"], posted=False, stateWritten=False,
             note="DRY RUN — nothing posted, no night claimed")
         return {"ok": True, "night": night_key, "posted": False, "dry": True,
-                "payload": payload, "summary": summary, "scorecard": rows,
-                "scorecardHtml": page_html, "scorecardUrl": page_url,
+                "payload": payload, "summary": summary, "recapPageRows": rows,
+                "recapPageHtml": page_html, "recapPageUrl": page_url,
                 "sources": sources_meta}
 
     try:

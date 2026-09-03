@@ -43,11 +43,11 @@ class StageConfig:
     # alerting, deliberately: one topic, one delivery pipeline.
     alerts_topic_name: str = "ryangrey-dev-alerts"
 
-    # The bucket behind raids.ryangrey.dev. Prod writes the published scorecard here;
+    # The bucket behind raids.ryangrey.dev. Prod writes the published recap page here;
     # dev has no subdomain and writes nowhere, so its grant is empty rather than
     # pointed at prod's bucket -- a dev deploy must not be able to overwrite a real
     # night's published page.
-    scorecard_bucket: str = ""
+    recap_page_bucket: str = ""
 
     # KMS key that encrypts the SecureString parameters. Same key both stages —
     # it is an account-level key, not a per-environment one.
@@ -84,8 +84,8 @@ class StageConfig:
         # of these, so the bot runs fine without them, and having the grant already in
         # place is what lets the subdomain be switched on with an SSM write rather than an
         # IAM change on a live role.
-        "scorecard/base_url",
-        "scorecard/bucket",
+        "recap/page_url",
+        "recap/page_bucket",
         "alerts/sns_topic_arn",
     ))
 
@@ -103,7 +103,7 @@ PROD = StageConfig(
     scheduler_role_name="ryangrey-greybot-scheduler-role",
     api_name="greybot-interactions",
     ssm_prefix="/greybot",
-    scorecard_bucket="raids.ryangrey.dev",
+    recap_page_bucket="raids.ryangrey.dev",
 )
 
 # NOTE ON THE DEV SSM PREFIX

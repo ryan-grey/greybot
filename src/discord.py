@@ -26,7 +26,7 @@ MAX_ATTEMPTS = 4
 
 # How many still-standing bosses the card will name. A night that touched five and killed
 # none is a real thing, and five pull lines under a two-line summary is not a card any
-# more. The full picture is what the scorecard page is for.
+# more. The full picture is what the recap page is for.
 MAX_UNKILLED_ON_CARD = 3
 
 
@@ -50,24 +50,43 @@ TOP_N = 3
 
 
 def _column(rows):
-    """One category as a ranked block: name on its line, its number on the next.
+    """One category as a ranked list, ONE LINE PER ENTRY.
 
-    Stacked rather than "1. Name — 602M" because three of these sit side by side in a
-    phone-width column, and a single line of rank-icon-name-number wraps into a mess at
-    that width.
+    The first version put the number on its own line under the name, indented. It cannot
+    work: an embed field renders in a proportional font, so leading spaces buy no alignment
+    at all -- three entries indented by the same two spaces still start at three different
+    x positions, and the result reads as ragged rather than as a column.
+
+    So there is nothing left to align. Name and number share a line separated by an em
+    dash, which lines up by construction because every row is the same shape. Field values
+    are a third of the embed wide on desktop and full width on mobile, and "Deathbrewst
+    602M" fits both.
     """
     if not rows:
         return None
-    out = []
-    for i, (name, _klass, value, role) in enumerate(rows, 1):
-        out.append(f"{ROLE_EMOJI.get(role, ROLE_BLANK)} **{i}.** {name}")
-        out.append(f"\u2003\u2003{value}")
-    return "\n".join(out)
+    return "\n".join(
+        f"{ROLE_EMOJI.get(role, ROLE_BLANK)} `{i}.` {name} — **{value}**"
+        for i, (name, _klass, value, role) in enumerate(rows, 1))
 
 
 def _field(label, rows):
     block = _column(rows)
     return [{"name": label, "value": block, "inline": True}] if block else []
+
+
+def _pad_rows(fields):
+    """Fill the last row of inline fields out to three.
+
+    Discord lays inline fields three to a row and STRETCHES a short final row to fill the
+    width, so five fields render as three normal columns and then two wide ones. A blank
+    field is not decoration here: it is what keeps the second row on the same grid as the
+    first. The name is a zero-width space because Discord rejects an empty one.
+    """
+    remainder = len(fields) % 3
+    if remainder:
+        fields += [{"name": "\u200b", "value": "\u200b", "inline": True}
+                   for _ in range(3 - remainder)]
+    return fields
 
 
 def _join(items):
@@ -130,18 +149,29 @@ def _post_json(url, payload, headers=None, timeout=10, sleep=time.sleep):
     raise DiscordError(f"gave up after {MAX_ATTEMPTS} attempts: {last}")
 
 
-def _author(guild_label, guild_url):
-    """Attribution, not promotion.
+def _author(guild_label, guild_url, icon_url=None):
+    """Attribution, not promotion -- and the only left-hand image slot an embed has.
 
     Raider.IO require a link back from anything public using their data, and a footer
     cannot carry one -- embed footers render as plain text, so a link there is dead
     characters. The author block is the one place a link fits without touching the three
     lines of the message itself, and it happens to be useful: one click to the guild's
     progress page.
+
+    `icon_url` is where the boss art goes when it is wanted on the LEFT. Discord's embed
+    layout is fixed and offers exactly two image slots -- `thumbnail`, always top-right,
+    and `image`, always full width underneath -- with no field controlling the position or
+    the rendered size of either. The docs are explicit that a thumbnail's height and width
+    are metadata Discord returns, not values a sender sets. So the author icon is not a
+    smaller version of the thumbnail idea, it is the only alternative that exists: a ~20px
+    circle on the left of the author line.
     """
     if not guild_url:
         return None
-    return {"name": guild_label or "Raider.IO", "url": guild_url}
+    author = {"name": guild_label or "Raider.IO", "url": guild_url}
+    if icon_url:
+        author["icon_url"] = icon_url
+    return author
 
 
 def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
@@ -178,7 +208,7 @@ def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
     # Discord simply omits a thumbnail it cannot fetch rather than rejecting the message.
     if thumbnail_url:
         embed["thumbnail"] = {"url": thumbnail_url}
-    author = _author(guild_label, guild_url)
+    author = _author(guild_label, guild_url, icon_url=thumbnail_url)
     if author:
         embed["author"] = author
     return {"embeds": [embed], "allowed_mentions": {"parse": []}}
@@ -277,7 +307,7 @@ def _tied(rows, key):
 
 
 def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso_ts=None,
-                thumbnail_url=None, guild_label=None, guild_url=None, scorecard_url=None):
+                thumbnail_url=None, guild_label=None, guild_url=None, recap_url=None):
     """The morning-after card. One embed, no ping, same visual language as a kill card.
 
     Every section is optional and silently absent when it could not be read. A recap that
@@ -298,12 +328,28 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
     if killed is None:
         killed = len(summary.get("bosses") or [])
     firsts = summary.get("firstKillLabels") or summary.get("firstKills") or []
+
+    # The world boss is COUNTED, not named. The card names two things and both are
+    # things the guild has to do again: a first kill, and a boss still standing. A world
+    # boss is neither -- it is the same tag every week -- so it earns a clause and not a
+    # name. The page still names it, where there is room to be complete.
+    world = [w["name"] for w in (summary.get("worldBosses") or []) if w.get("name")]
+    world_clause = ""
+    if world:
+        world_clause = " & the world boss" if len(world) == 1 else \
+                       f" & {len(world)} world bosses"
+
     if killed:
         line = (f"{guild_name} killed **{killed}** Heroic "
-                f"{'boss' if killed == 1 else 'bosses'}")
+                f"{'boss' if killed == 1 else 'bosses'}{world_clause}")
         if firsts:
             line += ", including first kills on " + _join(firsts)
         lines.append(line)
+    elif world:
+        # No tier kills at all, but the world boss died. Saying "no kills" here would be
+        # flatly untrue, so the sentence starts from what did happen.
+        lines.append(f"{guild_name} killed the "
+                     f"{'world boss' if len(world) == 1 else f'{len(world)} world bosses'}")
     else:
         lines.append("No kills — a full night on progression")
 
@@ -317,22 +363,6 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
         if isinstance(boss.get("best"), (int, float)) and boss["best"] > 0:
             line += f" — best **{boss['best']:.1f}%**"
         lines.append(line)
-
-    # The world boss gets its own line rather than joining the kill list. It is not
-    # 1/8 of anything -- Raider.IO carries it as a one-encounter raid of its own -- so
-    # numbering it beside the tier's bosses would misstate the guild's progress. The
-    # difficulty is named because on a world boss that is the whole of the news.
-    for wb in summary.get("worldBosses") or []:
-        diff = wb.get("difficulty")
-        lines.append(f"Also killed the world boss **{wb['name']}**"
-                     + (f" on **{diff}**" if diff else ""))
-
-    # In the DESCRIPTION, not the footer field. Discord renders no markdown and no links
-    # in an embed footer, so a URL put there arrives as unclickable text -- which for a
-    # line whose entire job is to be clicked is the same as not shipping it. This sits at
-    # the bottom of the description, which is where a footer reads from anyway.
-    if scorecard_url:
-        lines.append(f"Full scorecard here: {scorecard_url}")
 
     embed = {
         "title": f"{guild_name} — {night_text}",
@@ -367,10 +397,28 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
         embed["fields"].append({
             "name": label,
             "value": (f"{ROLE_EMOJI.get(pr.get('role'), ROLE_BLANK)} "
-                      f"**{pct}** {pr['name']}\n\u2003\u2003{pr['boss']}"),
+                      f"{pr['name']} — **{pct}**\n{pr['boss']}"),
             "inline": True})
 
-    if not embed["fields"]:
+    if embed["fields"]:
+        # Padded to a full row FIRST, then the link is appended as a full-width field.
+        # Order matters: a non-inline field ends the current row, so appending it before
+        # padding would leave the last two columns stretched again.
+        embed["fields"] = _pad_rows(embed["fields"])
+        if recap_url:
+            # A field, not a second embed and not a line in the description. The
+            # description renders ABOVE the columns, and a second embed reads as a second
+            # post -- a full-width field is the only slot inside one card that is both
+            # below the columns and still able to render a link. The footer cannot: it
+            # renders neither markdown nor links.
+            embed["fields"].append({"name": "\u200b",
+                                    "value": f"Full recap here: {recap_url}",
+                                    "inline": False})
+    elif recap_url:
+        embed["fields"] = [{"name": "\u200b",
+                            "value": f"Full recap here: {recap_url}",
+                            "inline": False}]
+    else:
         embed.pop("fields")
     if report_url:
         embed["url"] = report_url

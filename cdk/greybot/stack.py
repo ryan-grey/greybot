@@ -185,10 +185,10 @@ class GreybotStack(Stack):
         # writes a night's page and never needs to read one back or remove one. Dev
         # configures no bucket and therefore gets no statement at all -- a dev deploy
         # must not be able to overwrite a published night.
-        if cfg.scorecard_bucket:
+        if cfg.recap_page_bucket:
             role.add_to_policy(iam.PolicyStatement(
                 actions=["s3:PutObject"],
-                resources=[f"arn:aws:s3:::{cfg.scorecard_bucket}/*"],
+                resources=[f"arn:aws:s3:::{cfg.recap_page_bucket}/*"],
             ))
 
         return role

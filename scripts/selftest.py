@@ -2716,9 +2716,13 @@ def test_recap_end_to_end():
           "/8 Nymrissa" not in embed["description"], embed["description"])
     check("...and does not inflate the tier's kill count",
           "killed **2** Heroic bosses" in embed["description"], embed["description"])
-    check("...but is reported on its own line, with its difficulty",
-          "world boss **Nymrissa Wavecaller** on **Heroic**" in embed["description"],
+    # Counted, not named. The card names first kills and bosses left standing -- things
+    # the guild has to go back and do -- and a world boss is neither.
+    check("...but is counted in the same sentence, without being named",
+          "killed **2** Heroic bosses & the world boss" in embed["description"],
           embed["description"])
+    check("...and is not named anywhere on the card",
+          "Nymrissa" not in json.dumps(posts[0]), embed["description"])
 
     # Each kill carries its place in the tier's PUBLISHED order, against the tier's real
     # boss total. The fixture kills the 1st and 3rd bosses of eight, and it kills them in
