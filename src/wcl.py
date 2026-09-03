@@ -230,7 +230,8 @@ query($guildID: Int!, $start: Float!, $end: Float!, $limit: Int!) {
   %s
   reportData {
     reports(guildID: $guildID, startTime: $start, endTime: $end, limit: $limit) {
-      data { code title startTime endTime guildTag { id name } zone { id name } }
+      data { code title startTime endTime guildTag { id name } zone { id name }
+             owner { id name } }
     }
   }
 }
@@ -264,6 +265,17 @@ query($code: String!, $fightIDs: [Int]!) {
     report(code: $code) {
       damage: table(dataType: DamageDone, killType: Encounters, viewBy: Source,
                     fightIDs: $fightIDs)
+      # Healing and DamageTaken ride along in the SAME query rather than in two more of
+      # their own. Measured against the live report: both together cost 1.00 point, where
+      # a separate round trip would pay the base cost twice for the same fight list.
+      healing: table(dataType: Healing, killType: Encounters, viewBy: Source,
+                     fightIDs: $fightIDs)
+      damageTaken: table(dataType: DamageTaken, killType: Encounters, viewBy: Source,
+                         fightIDs: $fightIDs)
+      # Roles for EVERY raider, which the rankings blob cannot give: rankings only covers
+      # people who were in a ranked kill, and a card that shows a role icon for two thirds
+      # of the raid reads as broken rather than as incomplete. Measured at 1.00 point.
+      playerDetails(killType: Encounters, fightIDs: $fightIDs)
       rankings
     }
   }

@@ -219,6 +219,23 @@ def resolve_raid(profile, boss_name, zone_name, killed_at, region, index):
     return None, None, "unresolved"
 
 
+def is_world_boss(profile, slug):
+    """Is this "raid" actually a world boss?
+
+    Raider.IO models a world boss as a raid with exactly ONE encounter -- Scrambled's
+    profile carries `sporefall` and `the-tidebound-grotto` at 1/1 H alongside the eight
+    boss `the-venomous-abyss`. Keying on that shape rather than on a list of boss names
+    means the next world boss is handled the day it appears, with no code change and no
+    name to keep up to date.
+
+    Consequence worth stating: a genuine one-boss RAID would read as a world boss here.
+    None exists in the expansions this bot loads, and the cost if one ever ships is a card
+    that calls it a world boss -- not a wrong number.
+    """
+    _, total = progress_for(profile, slug)
+    return total == 1
+
+
 def progress_for(profile, slug):
     """(heroic_bosses_killed, total_bosses) for a raid, or (None, None) if absent."""
     entry = (profile.get("raid_progression") or {}).get(slug) or {}
