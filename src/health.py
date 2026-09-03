@@ -60,6 +60,7 @@ NOT_A_MEMBER = "not_a_member"
 TIMED_OUT = "timed_out"
 SERVER_MUTED = "server_muted"
 WEBHOOK_GONE = "webhook_gone"
+POST_DELETED = "post_deleted"
 # Not a Discord state at all. The log source has stopped answering, which silences the bot
 # just as completely as being kicked and is invisible to every probe above.
 SOURCE_BLIND = "source_blind"
@@ -67,7 +68,8 @@ SOURCE_BLIND = "source_blind"
 # Worst first. Several of these go wrong at the same instant -- removing the app fails the
 # commands fetch AND deletes any webhook the app created -- so the mail has to lead with
 # the cause rather than whichever symptom happened to be probed first.
-SEVERITY = [NOT_INSTALLED, NOT_A_MEMBER, WEBHOOK_GONE, BAD_TOKEN, TIMED_OUT, SERVER_MUTED]
+SEVERITY = [NOT_INSTALLED, NOT_A_MEMBER, WEBHOOK_GONE, BAD_TOKEN, TIMED_OUT,
+            SERVER_MUTED, POST_DELETED]
 
 HEADLINE = {
     NOT_INSTALLED: "greyBot has been removed from the {guild} Discord",
@@ -75,6 +77,7 @@ HEADLINE = {
     BAD_TOKEN: "greyBot's Discord bot token is being rejected",
     TIMED_OUT: "greyBot has been timed out in the {guild} Discord",
     SERVER_MUTED: "greyBot has been server-muted in the {guild} Discord",
+    POST_DELETED: "A greyBot post was deleted in the {guild} Discord",
     WEBHOOK_GONE: "greyBot's announcement webhook no longer exists",
     SOURCE_BLIND: "greyBot cannot see any Warcraft Logs reports",
 }
@@ -102,6 +105,12 @@ ADVICE = {
     SERVER_MUTED: ("Voice-only, so nothing this bot does is actually blocked -- greyBot "
                    "never joins voice. Worth knowing because somebody moderated the app "
                    "on purpose."),
+    POST_DELETED: ("Somebody removed a message greyBot had posted. Nothing is broken -- "
+                   "the bot's own dedupe state still records that boss or that night as "
+                   "announced, so it will NOT repost it, which is why this is worth "
+                   "telling you rather than silently healing. If the post should come "
+                   "back it has to be released by hand. This also fires when a moderator "
+                   "prunes the channel, which is usually the boring explanation."),
     WEBHOOK_GONE: ("This is the one that stops announcements. Create a new webhook on the "
                    "announce channel and put its URL in /greybot/discord/webhook_url; "
                    "nothing needs redeploying, config.py re-reads it within five minutes."),
@@ -153,6 +162,46 @@ def _get(url, token=None, timeout=10):
         # Timeouts, DNS, TLS, a truncated body. All of it is "we did not get an answer",
         # and none of it is evidence about the bot's standing in the server.
         return None, {"error": repr(exc)}
+
+
+def posts_probe(bot_token, posts):
+    """Are the messages greyBot posted still in the channel?
+
+    Discord has no "was my message deleted" event that a scheduled function can read --
+    MESSAGE_DELETE is a gateway event and this bot deliberately holds no gateway
+    connection. So the question is asked the only way a poller can ask it: fetch each
+    message we know we posted and see whether it is still there. 404 with code 10008,
+    Unknown Message, is a deletion.
+
+    Only the newest tracked messages are checked, and a MISSING channel id or an empty
+    list is not a failure -- posts made before this tracking existed have no id to ask
+    about, and reporting that as a deletion would alarm about the feature being new.
+
+    403 is deliberately NOT a deletion. Losing read access to the channel means the bot
+    cannot see its own posts any more, which is a different problem with a different fix,
+    and calling it a deletion would send somebody looking for a message that is still
+    there.
+    """
+    if not posts:
+        return _probe("posts", OK, tracked=0)
+    checked = 0
+    for entry in reversed(posts):
+        mid, cid = entry.get("id"), entry.get("channel")
+        if not (mid and cid):
+            continue
+        code, body = _get(f"{API_BASE}/channels/{cid}/messages/{mid}", token=bot_token)
+        body = body if isinstance(body, dict) else {}
+        if code == 200:
+            checked += 1
+            continue
+        if code == 404:
+            return _probe("posts", POST_DELETED, messageId=mid, channelId=cid,
+                          kind=entry.get("kind"), postedAt=entry.get("at"),
+                          discordCode=body.get("code"))
+        # Anything else -- 403, a timeout, a 5xx -- is not evidence either way.
+        return _probe("posts", UNKNOWN, http=code, checked=checked,
+                      note=body.get("error") or body.get("raw"))
+    return _probe("posts", OK, tracked=checked)
 
 
 def _probe(name, verdict, **fields):
@@ -317,6 +366,10 @@ def check(cfg, now=None):
             # that has no member returns 404 and would read as a second failure.
             if member:
                 probes.append(member_probe(token, gid, app_id, now))
+            # Checked last, and only with a token: reading a message back needs one, and
+            # a webhook-only install has no way to ask.
+            if cfg.get("recent_posts"):
+                probes.append(posts_probe(token, cfg["recent_posts"]))
 
     bad = [p for p in probes if p["verdict"] not in (OK, UNKNOWN)]
     if bad:

@@ -52,6 +52,7 @@ the question is "why did it post that". Names are compared through raiderio.norm
 punctuation drift between the two APIs cannot split one boss into two members.
 """
 
+import json
 import os
 
 import boto3
@@ -506,6 +507,68 @@ def save_derived_roster(scope, slug, players, sample, provisional, now_iso):
                     UpdateExpression="SET " + ", ".join(expr),
                     ExpressionAttributeNames=attr,
                     ExpressionAttributeValues=vals)
+
+
+POSTS_SK = "POSTS"
+
+# How many recent messages are kept and re-checked. Deliberately small. The question is
+# "has one of our posts been removed", and a moderator clearing the channel shows up in
+# the newest handful as readily as in a hundred; keeping a long tail would mean the bot
+# alarms about a post from six weeks ago that somebody tidied on purpose.
+POSTS_TRACKED = 8
+
+
+def record_post(scope, message_id, channel_id, kind, now_iso, keep=POSTS_TRACKED):
+    """Remember one message the bot just posted, so its removal can be noticed.
+
+    Stored as a LIST, newest last, trimmed to `keep`. A DynamoDB string set would lose the
+    order, and order is the whole value here: the newest post is the one whose deletion
+    means something is happening right now.
+
+    Failures are the caller's to swallow. This runs immediately after an announcement has
+    already gone out, and nothing about bookkeeping is allowed to reach back and affect a
+    post that has landed.
+    """
+    if not message_id:
+        return False
+    item = ddb.get_item(TableName=TABLE,
+                        Key={"pk": _s(scope.tenant), "sk": _s(POSTS_SK)},
+                        ConsistentRead=True).get("Item") or {}
+    posts = json.loads((item.get("posts") or {}).get("S") or "[]")
+    posts = [p for p in posts if p.get("id") != str(message_id)]
+    posts.append({"id": str(message_id), "channel": str(channel_id or ""),
+                  "kind": kind, "at": now_iso})
+    posts = posts[-int(keep):]
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(scope.tenant), "sk": _s(POSTS_SK),
+        "posts": _s(json.dumps(posts)), "updatedAt": _s(now_iso)})
+    return True
+
+
+def recent_posts(scope):
+    """The messages the bot has posted lately, oldest first."""
+    item = ddb.get_item(TableName=TABLE,
+                        Key={"pk": _s(scope.tenant), "sk": _s(POSTS_SK)}).get("Item")
+    if not item:
+        return []
+    try:
+        return json.loads((item.get("posts") or {}).get("S") or "[]")
+    except ValueError:
+        return []
+
+
+def forget_post(scope, message_id, now_iso):
+    """Drop one message from the tracked list.
+
+    Called after a deletion has been ALERTED on. Without it the same missing post would
+    re-alert on the next poll and every poll after that, which trains people to ignore the
+    alert -- the one outcome a health notification cannot survive.
+    """
+    posts = [p for p in recent_posts(scope) if p.get("id") != str(message_id)]
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(scope.tenant), "sk": _s(POSTS_SK),
+        "posts": _s(json.dumps(posts)), "updatedAt": _s(now_iso)})
+    return True
 
 
 RECAPS_SK = "RECAPS"

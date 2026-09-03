@@ -1768,6 +1768,66 @@ def test_team_resolution():
     check("at a fresh tier the first kill reads as progression", v == team.PROG, why)
 
 
+def test_deleted_post_probe():
+    print("\nNoticing that one of our posts was deleted")
+    calls = []
+
+    def fake_get(url, token=None, timeout=8):
+        calls.append(url)
+        return FAKE_HTTP.get(url, (200, {"id": "1"}))
+
+    real_get, health._get = health._get, fake_get
+    try:
+        FAKE_HTTP.clear()
+        posts = [{"id": "111", "channel": "C1", "kind": "kill", "at": "t1"},
+                 {"id": "222", "channel": "C1", "kind": "recap", "at": "t2"}]
+
+        p = health.posts_probe("tok", posts)
+        check("every tracked post still present reads ok", p["verdict"] == health.OK, p)
+        check("...and the NEWEST is checked first",
+              calls and calls[0].endswith("/messages/222"), calls[:1])
+
+        FAKE_HTTP["https://discord.com/api/v10/channels/C1/messages/222"] = (
+            404, {"code": 10008, "message": "Unknown Message"})
+        p = health.posts_probe("tok", posts)
+        check("a 404 on a tracked post is a deletion",
+              p["verdict"] == health.POST_DELETED, p)
+        check("...and it says WHICH post, so the alert is actionable",
+              p.get("messageId") == "222" and p.get("kind") == "recap", p)
+
+        # 403 is losing read access, which is a different problem with a different fix.
+        # Calling it a deletion sends somebody hunting for a message that is still there.
+        FAKE_HTTP["https://discord.com/api/v10/channels/C1/messages/222"] = (
+            403, {"code": 50001, "message": "Missing Access"})
+        p = health.posts_probe("tok", posts)
+        check("losing read access is UNKNOWN, not a deletion",
+              p["verdict"] == health.UNKNOWN, p)
+
+        check("no tracked posts is not a failure",
+              health.posts_probe("tok", [])["verdict"] == health.OK)
+        check("a post with no channel id is skipped rather than alarmed about",
+              health.posts_probe("tok", [{"id": "9"}])["verdict"] == health.OK)
+
+        # It has to outrank nothing that is worse, and it has to be IN the ordering at
+        # all -- a verdict missing from SEVERITY raises when check() picks the worst.
+        check("post_deleted is ranked below the outages that stop announcements",
+              health.SEVERITY.index(health.POST_DELETED)
+              > health.SEVERITY.index(health.WEBHOOK_GONE))
+        # The alert has to say the bot will not put it back, because the natural
+        # assumption is that a self-healing bot would.
+        check("...and the advice says the bot will NOT repost it",
+              "not repost" in health.ADVICE[health.POST_DELETED].lower(),
+              health.ADVICE[health.POST_DELETED][:80])
+        check("...and it has a headline naming the server",
+              "{guild}" in health.HEADLINE[health.POST_DELETED],
+              health.HEADLINE[health.POST_DELETED])
+    finally:
+        health._get = real_get
+
+
+FAKE_HTTP = {}
+
+
 def test_roster_state():
     print("\nRoster state, seeding and the recap claim")
     FAKE_DDB.items.clear()
@@ -2783,6 +2843,7 @@ def main():
                test_tenant_keys, test_setup_command, test_tenant_fanout,
                test_dedupe, test_aotc_guard,
                test_roster_derivation, test_team_resolution, test_roster_state,
+               test_deleted_post_probe,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
                test_interactions, test_progress_slow_path,
                test_subtitle_aliases, test_health,
