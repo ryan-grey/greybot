@@ -214,7 +214,11 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
     than the alternative of failing the whole post.
     """
     lines = []
-    bosses = summary.get("bosses") or []
+    # Labels carry the tier position ("3/8 Entombed Sentinels"); bare names are the
+    # fallback for a tier whose encounter list could not be read. This module stays free of
+    # raiderio -- the numbering is decided in recap.summarise, where the raid index already
+    # lives, and arrives here as text.
+    bosses = summary.get("bossLabels") or summary.get("bosses") or []
     if bosses:
         if len(bosses) == 1:
             lines.append(f"Killed **{bosses[0]}**")
