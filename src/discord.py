@@ -208,7 +208,7 @@ def _author(guild_label, guild_url, icon_url=None):
 
 def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
                report_url=None, iso_ts=None, thumbnail_url=None,
-               guild_label=None, guild_url=None, world_boss=False):
+               guild_label=None, guild_url=None, world_boss=False, card_url=None):
     """The three lines from the spec, as a card.
 
     The rank line is omitted entirely when the rank is unknown rather than rendered as
@@ -236,11 +236,18 @@ def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
         embed["url"] = report_url
     if iso_ts:
         embed["timestamp"] = iso_ts
+    if card_url:
+        # The drawn card carries the text, so the embed drops its own copy of it rather
+        # than saying everything twice. Title stays: it is the clickable link to the log,
+        # and an image cannot be clicked.
+        embed["image"] = {"url": card_url}
+        embed.pop("description", None)
+        embed.pop("thumbnail", None)
     # Art is decoration: a missing or dead image URL must never cost an announcement, and
     # Discord simply omits a thumbnail it cannot fetch rather than rejecting the message.
-    if thumbnail_url:
+    elif thumbnail_url:
         embed["thumbnail"] = {"url": thumbnail_url}
-    author = _author(guild_label, guild_url, icon_url=thumbnail_url)
+    author = _author(guild_label, guild_url)
     if author:
         embed["author"] = author
     return {"embeds": [embed], "allowed_mentions": {"parse": []}}

@@ -1768,6 +1768,62 @@ def test_team_resolution():
     check("at a fresh tier the first kill reads as progression", v == team.PROG, why)
 
 
+def test_kill_card_image():
+    print("\nThe first-kill card, drawn")
+    import handler
+    import kill_card
+
+    real_load, kill_card._load = kill_card._load, lambda url, timeout=8: (_ for _ in ()).throw(
+        RuntimeError("offline"))
+    try:
+        # Art that cannot be fetched must not cost the card. The layout falls back to
+        # text from the left margin rather than returning None and losing the drawing.
+        png = kill_card.render("Nek'zali the Soulcoiler", "Scrambled just killed",
+                               ["They are now 5 of 8"], art_url="https://example/x.jpg")
+        check("unreachable art still produces a card", png and png[:8] == b"\x89PNG\r\n\x1a\n",
+              type(png))
+    finally:
+        kill_card._load = real_load
+
+    png = kill_card.render("Boss", "Guild just killed", ["line"], art_url=None)
+    check("a card with no art at all is still a card", bool(png))
+
+    # The boss is already CLAIMED when the card is drawn, so a bug in here loses the
+    # announcement outright rather than just the picture. It happened once, live.
+    check("a broken card returns None instead of taking the announcement down",
+          handler.kill_card_url({"recap_page_url": "https://x", "recap_page_bucket": "b"},
+                                "slug", object(), "Boss", "head", ["body"], None) is None)
+
+    # The failure that matters: no Pillow in the package. It must return None so the
+    # caller falls back to the ordinary embed, NOT raise and take the announcement down.
+    import builtins
+    real_import = builtins.__import__
+
+    def no_pil(name, *a, **kw):
+        if name.startswith("PIL"):
+            raise ImportError("no PIL")
+        return real_import(name, *a, **kw)
+
+    builtins.__import__ = no_pil
+    try:
+        check("without Pillow it returns None rather than raising",
+              kill_card.render("Boss", "x", ["y"]) is None)
+    finally:
+        builtins.__import__ = real_import
+
+    # Long names shrink rather than truncate -- the boss name is the one string on the
+    # card a reader is actually looking for.
+    from PIL import Image, ImageDraw
+    d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    text, font = kill_card._fit("Nek'zali the Soulcoiler", os.path.join(kill_card.FONT_DIR, "DejaVuSans-Bold.ttf"),
+                                d, 626, 54, 32)
+    check("a long boss name shrinks and keeps every character",
+          text == "Nek'zali the Soulcoiler" and font.size < 54, (text, font.size))
+    check("...and a short one keeps the full size",
+          kill_card._fit("Sszorak", os.path.join(kill_card.FONT_DIR, "DejaVuSans-Bold.ttf"),
+                         d, 626, 54, 32)[1].size == 54)
+
+
 def test_deleted_post_probe():
     print("\nNoticing that one of our posts was deleted")
     calls = []
@@ -2843,7 +2899,7 @@ def main():
                test_tenant_keys, test_setup_command, test_tenant_fanout,
                test_dedupe, test_aotc_guard,
                test_roster_derivation, test_team_resolution, test_roster_state,
-               test_deleted_post_probe,
+               test_deleted_post_probe, test_kill_card_image,
                test_discord_payloads, test_wcl_parsing, test_wcl_pagination,
                test_interactions, test_progress_slow_path,
                test_subtitle_aliases, test_health,

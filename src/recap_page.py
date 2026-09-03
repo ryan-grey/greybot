@@ -216,21 +216,21 @@ section { margin-top:48px; }
 @media (min-width:1180px) { .cols { grid-template-columns:repeat(5, minmax(0, 1fr)); } }
 .col { border:1px solid var(--line); border-radius:6px; overflow:hidden; background:var(--card); }
 .col h3 {
-  font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.6px;
-  color:var(--muted); background:var(--chip); padding:10px 14px;
+  display:flex; align-items:center; justify-content:center; gap:7px;
+  font-size:12px; text-transform:uppercase; letter-spacing:0.6px;
+  color:var(--ink); background:var(--chip); padding:10px 14px;
   border-bottom:1px solid var(--line);
 }
-.col h3 span { text-transform:none; letter-spacing:0; font-weight:400; }
+.col h3 b { font-weight:700; }
+.col h3 .role, .col h3 .skull { margin-right:0; }
+.skull { font-size:13px; line-height:1; }
+.parse-badge { min-width:34px; font-size:11px; line-height:18px; }
 .col ol { list-style:none; }
 .col li {
   display:flex; align-items:center; gap:10px;
   padding:8px 14px; border-bottom:1px solid var(--line); font-size:15px;
 }
 .col li:last-child { border-bottom:none; }
-.pos {
-  flex:0 0 22px; text-align:right; color:var(--muted);
-  font-variant-numeric:tabular-nums; font-size:13px;
-}
 .role { width:14px; height:14px; flex:0 0 14px; vertical-align:-2px; margin-right:6px; }
 .role-none { display:inline-block; }
 .who { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -256,6 +256,10 @@ section { margin-top:48px; }
 .sources .meta { display:block; font-size:13.5px; color:var(--muted); }
 .sources .by { color:var(--muted); }
 .note { margin-top:14px; font-size:14px; color:var(--muted); }
+.footnote {
+  margin-top:10px; padding-top:10px; border-top:1px solid var(--line);
+  font-size:13px;
+}
 footer {
   max-width:1400px; margin:64px auto 0; padding:20px;
   border-top:1px solid var(--line); color:var(--muted); font-size:14px;
@@ -303,9 +307,9 @@ def parse_colors(percent):
     return PARSE_BANDS[-1][1], PARSE_BANDS[-1][2]
 
 
-def _pill(percent):
+def _pill(percent, extra=""):
     bg, fg = parse_colors(percent)
-    return (f'<span class="parse" style="background:{bg};color:{fg}">'
+    return (f'<span class="parse{extra}" style="background:{bg};color:{fg}">'
             f'{int(round(percent))}</span>')
 
 
@@ -326,18 +330,37 @@ def _who(row, region=None, role=None):
     return role_icon(role or row.get("role")) + label
 
 
-def _column(title, subtitle, entries, empty):
-    """One ranked list. `entries` is already ordered; the position is its index."""
+def _column(title, entries, empty, icon=None, badge=None):
+    """One ranked list under a centred, bolded header.
+
+    The header used to carry a "1–20" range. It was answering a question nobody asked --
+    the list already shows how many people are in it -- and it made five headers read as
+    five different lengths rather than as five columns of the same thing.
+
+    No rank numbers on the rows either. Order IS the rank in a sorted list, and a column
+    of "1. 2. 3." next to a column of numbers is two rankings competing for the same eye.
+    """
     if not entries:
         body = f'<p class="empty">{empty}</p>'
     else:
         items = "\n".join(
-            f'<li><span class="pos">{i}</span><span class="who">{who}</span>'
-            f'<span class="val">{val}</span></li>'
-            for i, (who, val) in enumerate(entries, 1))
+            f'<li><span class="who">{who}</span><span class="val">{val}</span></li>'
+            for who, val in entries)
         body = f"<ol>{items}</ol>"
-    sub = f' <span>{subtitle}</span>' if subtitle else ""
-    return f'<div class="col"><h3>{title}{sub}</h3>{body}</div>'
+    head = (icon or "") + f"<b>{title}</b>" + (badge or "")
+    return f'<div class="col"><h3>{head}</h3>{body}</div>'
+
+
+def average_parse(rows):
+    """The raid's overall parse: the mean of the per-raider means shown in that column.
+
+    The mean OF THE COLUMN, deliberately, rather than the mean of every individual parse
+    row. It is the number a reader can check by eye against the list underneath it; the
+    other version weights the answer by how many bosses each person was present for, which
+    is a different and less obvious claim to put in a header with no room to explain it.
+    """
+    got = [r["parseAvg"] for r in rows or () if r.get("parseAvg") is not None]
+    return (sum(got) / len(got)) if got else None
 
 
 def columns(rows, region=None):
@@ -390,16 +413,25 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
     if raiders:
         subtitle += f" &middot; {int(raiders)} raiders"
 
-    def rng(rows):
-        return f"1&ndash;{len(rows)}" if rows else ""
-
+    # Each header carries the role the column is about, in the same glyph the rows use.
+    # Deaths gets a skull rather than a role, because dying is not a role.
+    raid_parse = average_parse(rows or [])
     cols = "\n".join((
-        _column("Damage", rng(dps), dps, "No damage table could be read."),
-        _column("Healing", rng(heals), heals, "No healing table could be read."),
-        _column("Damage taken", rng(taken), taken, "No damage-taken table could be read."),
-        _column("Deaths", rng(deaths), deaths, "Nobody died. Genuinely."),
-        _column("Overall parse", rng(parses), parses,
-                "No ranked kills &mdash; parses only exist for kills."),
+        _column("Damage", dps, "No damage table could be read.",
+                icon=role_icon("dps")),
+        _column("Healing", heals, "No healing table could be read.",
+                icon=role_icon("healer")),
+        _column("Damage taken", taken, "No damage-taken table could be read.",
+                icon=role_icon("tank")),
+        _column("Deaths", deaths, "Nobody died. Genuinely.",
+                icon='<span class="skull" aria-hidden="true">\U0001F480</span>'),
+        _column("Overall parse", parses,
+                "No ranked kills &mdash; parses only exist for kills.",
+                # The raid's own average, in the same pill the rows use. Same colours,
+                # same fill: a reader should be able to tell at a glance whether the night
+                # was above or below the people in the list under it.
+                badge=(_pill(raid_parse, extra=" parse-badge")
+                       if raid_parse is not None else None)),
     ))
 
     return f"""<!DOCTYPE html>
@@ -432,6 +464,11 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
       Heroic raid fights only &mdash; dungeons and other difficulties in the same log are
       excluded. Overall parse is the mean of a raider&rsquo;s rankings across the kills they
       were in; bosses they sat are not counted against them.
+    </p>
+    <p class="note footnote">
+      Every figure above excludes the world boss. A world boss is one encounter with a full
+      raid on it and it is not part of the tier, so counting it would flatter every column
+      and mean nothing.
     </p>
   </section>
 
