@@ -91,12 +91,28 @@ def player_key(name, server=None):
 
 
 def player_keys(players):
-    """Accepts dicts ({"name":..., "server":...}) or bare name strings, so callers are
-    not forced to invent a shape before the response format is known."""
+    """Accepts dicts ({"name":..., "server":...}), bare name strings, or keys this module
+    already produced, so callers are not forced to invent a shape before the response
+    format is known.
+
+    THE ALREADY-A-KEY CASE IS NOT DEFENSIVE PADDING. First-kill participants are written to
+    DynamoDB in key form, and the derived roster is built by reading them back through here
+    -- so a key goes through player_key twice. That is only harmless while the key has no
+    server: `raiderio.normalize` turns punctuation into a space, so re-keying
+    "thaydan@proudmoore" yields "thaydan proudmoore", which matches no live raider at all.
+
+    That is exactly what happened. Every recorded first kill carried a server, the roster
+    derived from them shared not one name with the report it was classifying, signal A read
+    0% overlap and said OTHER while signal B said PROG, and the disagreement made the night
+    UNKNOWN -- so the 2026-09-02 recap posted nothing about a raid that had happened.
+    """
     out = set()
     for p in players or ():
         if isinstance(p, dict):
             key = player_key(p.get("name"), p.get("server"))
+        elif "@" in str(p):
+            name, _, server = str(p).partition("@")
+            key = player_key(name, server)
         else:
             key = player_key(p)
         if key:

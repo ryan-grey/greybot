@@ -6,6 +6,10 @@ __pycache__/
 # Test dependency (PyNaCl for signature tests). Created by scripts/deploy.sh.
 .venv/
 
+# The assembled Lambda package. Built by scripts/build-lambda.sh, consumed by CDK.
+# Contains a vendored linux/aarch64 PyNaCl, so it is a build artifact, not source.
+build/
+
 # Local reference: Discord identifiers for the dev stage.
 # Public IDs only today, but this is the file a token would end up pasted into
 # on a tired evening. Ignored so that cannot become a commit.
