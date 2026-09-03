@@ -485,16 +485,26 @@ def save_derived_roster(scope, slug, players, sample, provisional, now_iso):
     authority -- it is the record of what the authority said, which is what makes "why did
     it call that report B team" answerable a week later from the console alone. It is also
     what a later tier seeds from, so a rollover does not have to replay the evidence.
+
+    EVERY attribute goes through ExpressionAttributeNames, including the three that do not
+    need to. `sample` is a DynamoDB reserved word, so the unaliased version of this call
+    raised ValidationException on every recap -- and because the caller swallows the failure
+    to keep a roster problem away from the announcement, it did so silently for as long as
+    it existed. Aliasing the whole expression rather than the one known-bad name means the
+    next attribute added here cannot reintroduce that.
     """
-    expr = ["sample = :n", "provisional = :p", "derivedAt = :t"]
+    expr = ["#sample = :n", "#provisional = :p", "#derivedAt = :t"]
+    attr = {"#sample": "sample", "#provisional": "provisional", "#derivedAt": "derivedAt"}
     vals = {":n": _n(int(sample or 0)), ":p": {"BOOL": bool(provisional)},
             ":t": _s(now_iso)}
     names = sorted({str(x) for x in (players or ()) if str(x).strip()})
     if names:
-        expr.append("derived = :d")
+        expr.append("#derived = :d")
+        attr["#derived"] = "derived"
         vals[":d"] = {"SS": names}
     ddb.update_item(TableName=TABLE, Key={"pk": _s(scope.wow), "sk": _s(roster_sk(slug))},
                     UpdateExpression="SET " + ", ".join(expr),
+                    ExpressionAttributeNames=attr,
                     ExpressionAttributeValues=vals)
 
 

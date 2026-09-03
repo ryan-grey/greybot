@@ -8,6 +8,8 @@ differs from what the hand-rolled deploy built, the hand-rolled value wins and
 carries a comment saying so — the point of this phase is that nothing moved.
 """
 
+from pathlib import Path
+
 from aws_cdk import (
     Aws,
     CfnOutput,
@@ -24,6 +26,28 @@ from aws_cdk import (
 from constructs import Construct
 
 from .config import StageConfig
+
+PACKAGE_DIR = Path(__file__).resolve().parents[2] / "build" / "lambda"
+
+
+def _assert_package() -> str:
+    """The build/lambda directory, or a synth that stops rather than a bot that 401s.
+
+    Resolved from this file rather than from the process's working directory, so it means
+    the same thing whether cdk is run from cdk/ or from the repo root.
+
+    The `nacl` check is the one that matters. Every other way this package can be wrong is
+    loud -- a missing handler.py fails the first invocation -- but a missing PyNaCl fails
+    only inside `interactions.verify`, which is required to fail CLOSED, so the bot keeps
+    polling and announcing perfectly while every slash command answers 401. Synth is the
+    last place that can still notice.
+    """
+    if not (PACKAGE_DIR / "nacl").is_dir():
+        raise SystemExit(
+            f"{PACKAGE_DIR} is missing or has no vendored PyNaCl.\n"
+            "Run scripts/build-lambda.sh before cdk deploy — deploying src/ directly "
+            "ships a function that answers every Discord slash command with a 401.")
+    return str(PACKAGE_DIR)
 
 
 class GreybotStack(Stack):
@@ -179,7 +203,13 @@ class GreybotStack(Stack):
             runtime=lambda_.Runtime.PYTHON_3_12,
             architecture=lambda_.Architecture.ARM_64,
             handler=cfg.handler,
-            code=lambda_.Code.from_asset("../src"),
+            # build/lambda, NOT src/. src/ is the source; the package is the source plus
+            # the vendored linux/aarch64 PyNaCl that Ed25519 verification needs and the
+            # runtime does not carry. Shipping src/ directly is what silently 401'd every
+            # slash command from the CDK cutover onward -- see scripts/build-lambda.sh,
+            # which is what produces this directory and refuses to produce an incomplete
+            # one. Run it before `cdk deploy`; _assert_package below is the backstop.
+            code=lambda_.Code.from_asset(_assert_package()),
             memory_size=cfg.memory_mb,
             timeout=Duration.seconds(cfg.timeout_seconds),
             role=self.role,

@@ -63,6 +63,18 @@ def _conditional_failure():
                                   "Message": "The conditional request failed"}}, "Op")
 
 
+# DynamoDB's reserved word list is 573 entries long; this is the subset a bot about raid
+# rosters and kill counts can plausibly reach for, which is the only part that can catch a
+# mistake in THIS codebase. Add to it when a new attribute name is added, not before.
+RESERVED_WORDS = frozenset("""
+    count counter current data date default first from group hash health hour index items
+    key keys language last max member min minute month name names number order percent
+    period position range raw role sample second self sequence server set sets size
+    snapshot source space start state status system time timestamp total type update user
+    value values view year zone
+""".split())
+
+
 class FakeDynamo:
     """In-memory table that evaluates the exact conditions store.py sends."""
 
@@ -129,8 +141,20 @@ class FakeDynamo:
             else:
                 item.pop(attr, None)             # DynamoDB drops an emptied set
         elif UpdateExpression.startswith("SET"):
+            attrs = ExpressionAttributeNames or {}
             for assign in UpdateExpression[4:].split(", "):
                 field, placeholder = [p.strip() for p in assign.split("=")]
+                if field.startswith("#"):
+                    field = attrs[field]
+                elif field.lower() in RESERVED_WORDS:
+                    # The fake used to accept this and store the attribute anyway, so
+                    # store.save_derived_roster's unaliased `sample = :n` passed here and
+                    # raised ValidationException against the real table on every recap.
+                    raise ClientError(
+                        {"Error": {"Code": "ValidationException",
+                                   "Message": "Invalid UpdateExpression: Attribute name "
+                                              f"is a reserved keyword; reserved keyword: "
+                                              f"{field}"}}, "UpdateItem")
                 item[field] = vals[placeholder]
         return {}
 
@@ -1763,6 +1787,34 @@ def test_roster_state():
     derived = team.derive_roster([sorted(v["players"]) for v in recorded.values()], 50)
     check("the roster survives a round trip through DynamoDB",
           derived["roster"] == team.derive_roster(FIRST_KILLS, 50)["roster"])
+
+    # The same round trip WITH SERVERS, which is the only shape production ever writes --
+    # handler.record_roster keys on name and server both. The check above passed
+    # throughout the bug because its fixture names carry no server, so re-keying them was
+    # a no-op; re-keying "a01@proudmoore" is not, and the roster it produced overlapped
+    # the live raiders by exactly zero, which is what silenced the 2026-09-02 recap.
+    FAKE_DDB.items.clear()
+    cross_realm = [[{"name": n, "server": "Proudmoore"} for n in kill]
+                   for kill in FIRST_KILLS]
+    live = team.player_keys(cross_realm[0])
+    for i, kill in enumerate(cross_realm):
+        store.record_first_kill(pk, slug, raiderio.normalize(ABYSS[i]),
+                                team.player_keys(kill),
+                                1_700_000_000_000 + i, f"REPORT{i}", "now")
+    read_back = store.first_kills(pk, slug, {raiderio.normalize(n) for n in ABYSS[:4]})
+    with_server = team.derive_roster([sorted(v["players"]) for v in read_back.values()],
+                                     50)["roster"]
+    check("a stored key is not re-keyed on the way back out",
+          all("@" in k for k in with_server), sorted(with_server)[:3])
+    check("...so the derived roster still matches the raiders it came from",
+          with_server == {k for k in live if not k.startswith("fill")},
+          sorted(with_server - live))
+
+    FAKE_DDB.items.clear()
+    for i, name in enumerate(ABYSS[:4]):
+        store.record_first_kill(pk, slug, raiderio.normalize(name),
+                                {team.player_key(p) for p in FIRST_KILLS[i]},
+                                1_700_000_000_000 + i, f"REPORT{i}", "now")
 
     check("no participants means no record written",
           store.record_first_kill(pk, slug, "nobody", set(), 1, "R", "now") is False)
