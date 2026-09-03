@@ -51,6 +51,7 @@ import interactions
 import notify
 import raiderio
 import recap as recap_mod
+import kill_card
 import recap_page
 import keys
 import store
@@ -398,6 +399,39 @@ def record_roster(token, cfg, scope, slug, boss_key, kill, now_iso):
         return False
 
 
+def kill_card_url(cfg, slug, boss_key, boss_name, headline, lines, art_url):
+    """Draw the first-kill card and publish it, or return None and let the embed do it.
+
+    Published to the same bucket as the recap page, under cards/, because it needs a URL
+    Discord can fetch and that bucket already has one. The key is derived from the tier and
+    the boss rather than from the time, so re-announcing the same kill overwrites its own
+    card instead of littering.
+
+    Returns None on ANY failure -- no Pillow, no art, a refused PutObject. The caller falls
+    back to the ordinary embed, because a plainer announcement is a far better outcome than
+    a missing one, and this is decoration.
+    """
+    # ONE try around the whole thing, and it is not defensive padding. The boss is already
+    # CLAIMED by the time this runs -- the conditional write that grants permission to
+    # announce happened earlier -- so an exception raised here does not merely skip the
+    # picture, it loses the announcement permanently and leaves the boss marked as posted.
+    # That is exactly what a name collision in this function did on its first live run.
+    # Decoration is never allowed to reach back and cost the thing it decorates.
+    try:
+        if not cfg.get("recap_page_url") or not cfg.get("recap_page_bucket"):
+            return None
+        png = kill_card.render(boss_name, headline, lines, art_url=art_url)
+        if not png:
+            return None
+        key = f"cards/{slug}/{raiderio.slugify(boss_key or boss_name)}.png"
+        publish_bytes(cfg, key, png, "image/png")
+        return f"{cfg['recap_page_url']}/{key}"
+    except Exception as exc:                                       # noqa: BLE001
+        log("kill_card_failed", slug=slug, boss=boss_name, error=repr(exc),
+            note="announcing with the plain embed instead")
+        return None
+
+
 def _remember_post(scope, sent, kind, now_iso):
     """Record a posted message so its later deletion can be noticed.
 
@@ -446,6 +480,15 @@ def announce_kill(cfg, scope, slug, raid_label, kill, state, profile, thumb=None
     rank = raiderio.realm_rank(profile, slug, "heroic")
     killed_at = _at(kill["killedAtMs"])
 
+    # The card duplicates the embed's wording on purpose: one of the two is what actually
+    # renders, and they must not be able to say different things.
+    is_world = raiderio.is_world_boss(profile, slug)
+    body = (["World boss — killed on Heroic"] if is_world else
+            ([f"They are now {count} of {total or '?'} in Heroic {raid_label}"]
+             + ([f"Ranked server #{rank}"] if rank else [])))
+    card = kill_card_url(cfg, slug, key, kill["name"],
+                         f"{cfg['guild_name']} just killed", body, thumb)
+
     payload = discord.kill_embed(
         cfg["guild_name"], kill["name"], count, total or "?", raid_label, rank,
         report_url=report_url(kill.get("reportCode")), iso_ts=_iso(killed_at),
@@ -453,7 +496,7 @@ def announce_kill(cfg, scope, slug, raid_label, kill, state, profile, thumb=None
         guild_label=raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
         guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
                                        cfg["guild_name"]),
-        world_boss=raiderio.is_world_boss(profile, slug))
+        world_boss=is_world, card_url=card)
     try:
         sent = discord.post_to(destination(cfg), payload)
     except discord.DiscordError as exc:
@@ -1372,17 +1415,25 @@ def publish_recap_page(cfg, night_key, page_html):
     after the fact -- so the only thing a longer TTL would buy is a slower fix for a bug in
     the renderer, and the only thing a shorter one buys is requests to S3.
     """
+    publish_bytes(cfg, f"{night_key}/index.html", page_html.encode("utf-8"),
+                  "text/html; charset=utf-8")
+
+
+def publish_bytes(cfg, key, body, content_type, cache="public, max-age=3600"):
+    """One PutObject, shared by the recap page and the kill cards.
+
+    No ACL and no public-read: the bucket is private and CloudFront reads it through OAC,
+    exactly as the main site does. An object here is readable BECAUSE the distribution can
+    read the bucket, never because the object is public.
+    """
     global _s3                                                 # noqa: PLW0603
     bucket = cfg.get("recap_page_bucket")
     if not bucket:
         raise RuntimeError("recap/page_bucket is not set")
     if _s3 is None:
         _s3 = boto3.client("s3")
-    _s3.put_object(
-        Bucket=bucket, Key=f"{night_key}/index.html",
-        Body=page_html.encode("utf-8"),
-        ContentType="text/html; charset=utf-8",
-        CacheControl="public, max-age=3600")
+    _s3.put_object(Bucket=bucket, Key=key, Body=body,
+                   ContentType=content_type, CacheControl=cache)
 
 
 # ---------------------------------------------------------------- the weekly recap
