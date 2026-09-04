@@ -208,8 +208,13 @@ def _author(guild_label, guild_url, icon_url=None):
 
 def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
                report_url=None, iso_ts=None, thumbnail_url=None,
-               guild_label=None, guild_url=None, world_boss=False, card_url=None):
+               guild_label=None, guild_url=None, world_boss=False, card_url=None,
+               difficulty="Heroic"):
     """The three lines from the spec, as a card.
+
+    `difficulty` is the word on the card -- "Heroic" for the guild install, "Normal" for a
+    team that announces its Normal firsts. `guild_name` is whoever is being credited: the
+    guild, or a raid team's own name.
 
     The rank line is omitted entirely when the rank is unknown rather than rendered as
     "Ranked server #0". Raider.IO writes 0 for "not ranked yet", and a guild that has not
@@ -221,16 +226,16 @@ def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
     the progress fraction is not.
     """
     if world_boss:
-        lines = [f"**World boss** &mdash; killed on **Heroic**".replace("&mdash;", "—")]
+        lines = [f"**World boss** — killed on **{difficulty}**"]
     else:
-        lines = [f"They are now **{killed}** of **{total}** in Heroic {raid_name}"]
+        lines = [f"They are now **{killed}** of **{total}** in {difficulty} {raid_name}"]
     if realm_rank and not world_boss:
         lines.append(f"Ranked server **#{realm_rank}**")
     embed = {
         "title": f"{guild_name} just killed {boss_name}",
         "description": "\n".join(lines),
         "color": BRAND_ACCENT,
-        "footer": {"text": ("World boss" if world_boss else f"Heroic {raid_name}")},
+        "footer": {"text": ("World boss" if world_boss else f"{difficulty} {raid_name}")},
     }
     if report_url:
         embed["url"] = report_url
@@ -253,24 +258,34 @@ def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
     return {"embeds": [embed], "allowed_mentions": {"parse": []}}
 
 
+NORMAL_SILVER = 0xC6D0DE
+
+
 def aotc_payload(guild_name, raid_name, when_text, role_id, iso_ts=None,
                  thumbnail_url=None, guild_label=None, guild_url=None, repo_url=None,
-                 card_url=None):
-    """The AOTC card, and the only message in the bot that pings anyone.
+                 card_url=None, difficulty="Heroic"):
+    """The tier-clear card, and the only message in the bot that pings anyone.
+
+    On Heroic that is AOTC. On Normal it is "cleared Normal", in silver rather than gold:
+    the same card, the same ping, one rung down. The wording and the colour are the only
+    two things that differ, so they are decided here and nowhere else.
 
     This is also the only card carrying a credit line. A kill card goes out several times
     a tier into a channel shared with the raid team, and a developer plug on every one of
-    them is noise in someone else's room. AOTC fires once per tier and is celebratory,
+    them is noise in someone else's room. A clear fires once per tier and is celebratory,
     which is the one moment where a small "built by" reads as charm rather than adverts.
     """
+    heroic = str(difficulty).lower() == "heroic"
     description = "Congratulations to the team!"
     if repo_url:
         description += f"\n\n[greyBot]({repo_url})"
     embed = {
-        "title": f"{guild_name} just got AOTC on {when_text}",
+        "title": (f"{guild_name} just got AOTC on {when_text}" if heroic else
+                  f"{guild_name} just cleared {difficulty} {raid_name} on {when_text}"),
         "description": description,
-        "color": AOTC_GOLD,
-        "footer": {"text": f"Ahead of the Curve — Heroic {raid_name}"},
+        "color": AOTC_GOLD if heroic else NORMAL_SILVER,
+        "footer": {"text": (f"Ahead of the Curve — Heroic {raid_name}" if heroic else
+                            f"{difficulty} {raid_name} cleared")},
     }
     if iso_ts:
         embed["timestamp"] = iso_ts
@@ -359,7 +374,8 @@ def _tied(rows, key):
 
 
 def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso_ts=None,
-                thumbnail_url=None, guild_label=None, guild_url=None, recap_url=None):
+                thumbnail_url=None, guild_label=None, guild_url=None, recap_url=None,
+                difficulty="Heroic"):
     """The morning-after card. One embed, no ping, same visual language as a kill card.
 
     Every section is optional and silently absent when it could not be read. A recap that
@@ -392,7 +408,7 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
                        f" & {len(world)} world bosses"
 
     if killed:
-        line = (f"{guild_name} killed **{killed}** Heroic "
+        line = (f"{guild_name} killed **{killed}** {difficulty} "
                 f"{'boss' if killed == 1 else 'bosses'}{world_clause}")
         if firsts:
             line += ", including first kills on " + _join(firsts)
@@ -421,7 +437,7 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
         "description": "\n".join(lines),
         "color": BRAND_ACCENT,
         "fields": [],
-        "footer": {"text": f"Heroic {raid_name}"
+        "footer": {"text": f"{difficulty} {raid_name}"
                            + (f" · {summary['raiders']} raiders"
                               if summary.get("raiders") else "")},
     }

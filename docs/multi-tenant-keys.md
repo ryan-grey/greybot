@@ -85,6 +85,39 @@ a `TENANT#<scrambled discord guild id>` partition.
 layout gets exercised end to end before it touches the 11 rows that stop a boss
 kill being announced twice in a live channel.
 
+## Raid teams (added 2026-09-04)
+
+A raid TEAM inside a guild is a third kind of install, and it breaks the "shared
+upstream" rule on purpose.
+
+```
+TENANT#<discord_guild_id>#<team-slug>          what this team's install did
+WOW#<region>#<realm>#<name>#<team-slug>        the team's facts, shared with nobody
+```
+
+Why the facts partition is NOT shared with the guild: the team's first kills are
+not the guild's first kills, and the team's first-kill rosters (`KILL#`) must not
+be read by the guild install's recap when it derives the prog roster. Sharing
+`WOW#` would do exactly that. The WCL budget argument for sharing does not apply
+either -- the team's source is a different query (`reports(userID:)`), so there is
+no duplicate fetch to save.
+
+Under `TENANT#…#<team>`, the announced set is per difficulty:
+
+| sk | what |
+|---|---|
+| `ANNOUNCED#<slug>` | Heroic dedupe set + AOTC flag (the historical row shape) |
+| `ANNOUNCED#<slug>#normal` | Normal dedupe set + "Normal cleared" flag |
+
+Both rows also carry their own `baseline`, because a Normal seed of 3 is not a
+Heroic baseline of 3. `store.load_tier` prefers the row's baseline and falls back
+to the shared `TIER#` row's, so the guild's pre-existing rows read as before.
+
+The team's `CONFIG` row adds `teamSlug`, `teamName`, `wclUserId`, `raidDays` and
+`difficulties`. It is written by `scripts/register-team.py`, never by `/setup`.
+The slug is validated to `[a-z0-9-]` so it can no more forge a `#` boundary than a
+tenant id can.
+
 ## What Phase 2 does NOT do
 
 No upstream caching layer yet — that is Phase 3, and it is what makes the shared

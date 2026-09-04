@@ -128,6 +128,15 @@ query($guildID: Int!, $start: Float!, $limit: Int!, $difficulty: Int!, $page: In
 """ % RATE
 
 
+# The same two queries for a USER's reports rather than a guild's. A raid team that logs
+# under a personal account -- Meer's Raid uploads through one raider's Warcraft Logs
+# login, unattached to the guild -- is invisible to reports(guildID:) and reachable
+# only this way. Separate documents rather than nullable arguments on the guild ones, so
+# the guild query the announcer has run since day one is byte-for-byte unchanged.
+USER_REPORTS_Q = REPORTS_Q.replace("$guildID: Int!", "$userID: Int!").replace(
+    "guildID: $guildID", "userID: $userID")
+
+
 def rate_limit(data):
     """Pull rateLimitData out of any response that carried it. Never raises -- a missing
     block means 'unknown', and unknown must not take down an announcement."""
@@ -152,8 +161,13 @@ def find_guild(token, name, realm_slug, region):
 
 
 def heroic_kills_since(token, guild_id, since_ms, limit=12, difficulty=HEROIC,
-                       max_pages=1):
-    """Every Heroic boss KILL in the guild's reports since `since_ms`.
+                       max_pages=1, user_id=None):
+    """Every boss KILL at `difficulty` in the guild's reports since `since_ms`.
+
+    Named for the Heroic default it has always had; `difficulty` picks Normal for an
+    install that announces both. `user_id` swaps the source from the guild's reports to
+    one Warcraft Logs user's -- `guild_id` is then ignored, and the report's start time
+    rides along as `reportStartMs` so the caller can keep only the team's raid nights.
 
     Returns a flat, chronologically ascending list of kills so the caller can announce a
     raid night in the order it actually happened rather than in whatever order the reports
@@ -171,10 +185,12 @@ def heroic_kills_since(token, guild_id, since_ms, limit=12, difficulty=HEROIC,
     """
     kills, rate, page = [], None, 1
     reports = []
+    doc = USER_REPORTS_Q if user_id else REPORTS_Q
+    who = ({"userID": int(user_id)} if user_id else {"guildID": int(guild_id)})
     while page <= max(1, int(max_pages)):
-        data = query(token, REPORTS_Q, {"guildID": int(guild_id), "start": float(since_ms),
-                                        "limit": int(limit), "difficulty": int(difficulty),
-                                        "page": page})
+        data = query(token, doc, {**who, "start": float(since_ms),
+                                  "limit": int(limit), "difficulty": int(difficulty),
+                                  "page": page})
         rate = rate_limit(data) or rate
         batch = (((data.get("reportData") or {}).get("reports") or {}).get("data")) or []
         reports.extend(batch)
@@ -199,6 +215,7 @@ def heroic_kills_since(token, guild_id, since_ms, limit=12, difficulty=HEROIC,
                 "zoneID": zone.get("id"),
                 "zoneName": zone.get("name") or "",
                 "reportCode": rep.get("code"),
+                "reportStartMs": int(base),
                 # fight times are offsets from the report start; see the module docstring
                 "killedAtMs": int(base + (f.get("endTime") or f.get("startTime") or 0)),
             })
@@ -316,11 +333,18 @@ def _report(data):
     return ((data.get("reportData") or {}).get("report")) or {}
 
 
-def reports_in_window(token, guild_id, start_ms, end_ms, limit=10):
-    """Reports the guild filed in one raid night's window. Deliberately cheap: no fights,
-    so this costs a fraction of what the announcer's paged query does."""
-    data = query(token, NIGHT_REPORTS_Q, {"guildID": int(guild_id), "start": float(start_ms),
-                                          "end": float(end_ms), "limit": int(limit)})
+USER_NIGHT_REPORTS_Q = NIGHT_REPORTS_Q.replace("$guildID: Int!", "$userID: Int!").replace(
+    "guildID: $guildID", "userID: $userID")
+
+
+def reports_in_window(token, guild_id, start_ms, end_ms, limit=10, user_id=None):
+    """Reports the guild -- or, with `user_id`, one user -- filed in one raid night's
+    window. Deliberately cheap: no fights, so this costs a fraction of what the
+    announcer's paged query does."""
+    doc = USER_NIGHT_REPORTS_Q if user_id else NIGHT_REPORTS_Q
+    who = ({"userID": int(user_id)} if user_id else {"guildID": int(guild_id)})
+    data = query(token, doc, {**who, "start": float(start_ms),
+                              "end": float(end_ms), "limit": int(limit)})
     reports = (((data.get("reportData") or {}).get("reports") or {}).get("data")) or []
     return reports, rate_limit(data)
 
@@ -366,6 +390,9 @@ def deaths_pages(token, code, fight_ids, span_ms, max_pages=6, is_truncated=None
             break                       # no forward progress; stop rather than loop
         start = float(nxt) + 1
     return pages, rate, guard
+
+
+DIFFICULTY_IDS = {"normal": NORMAL, "heroic": HEROIC, "mythic": MYTHIC}
 
 
 def kill_participants(token, code, encounter_id, difficulty=HEROIC):

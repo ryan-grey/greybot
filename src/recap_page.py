@@ -396,7 +396,8 @@ def columns(rows, region=None):
 
 
 def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
-           raiders=None, canonical=None, region=None, world_bosses=None):
+           raiders=None, canonical=None, region=None, world_bosses=None,
+           difficulty="Heroic"):
     """One night's recap page as a complete HTML document."""
     dps, heals, taken, deaths, parses = columns(rows or [], region)
     killed = "".join(f"<span>{_esc(b)}</span>" for b in boss_labels or ())
@@ -415,7 +416,7 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
     title = f"{guild_name} — {night_text}"
     canonical_tag = (f'\n<link rel="canonical" href="{_esc(canonical)}">'
                      if canonical else "")
-    subtitle = f"Heroic {_esc(raid_name)}"
+    subtitle = f"{_esc(difficulty)} {_esc(raid_name)}"
     if raiders:
         subtitle += f" &middot; {int(raiders)} raiders"
 
@@ -446,7 +447,7 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_esc(title)} &mdash; recap</title>
-<meta name="description" content="{_esc(f'{guild_name} raid recap, {night_text}. Heroic {raid_name}.')}">
+<meta name="description" content="{_esc(f'{guild_name} raid recap, {night_text}. {difficulty} {raid_name}.')}">
 <meta name="robots" content="noindex">{canonical_tag}
 <style>{STYLE}</style>
 </head>
@@ -467,7 +468,7 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
 {cols}
     </div>
     <p class="note">
-      Heroic raid fights only &mdash; dungeons and other difficulties in the same log are
+      {_esc(difficulty)} raid fights only &mdash; dungeons and other difficulties in the same log are
       excluded. Overall parse is the mean of a raider&rsquo;s rankings across the kills they
       were in; bosses they sat are not counted against them.
     </p>

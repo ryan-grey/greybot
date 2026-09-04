@@ -1685,6 +1685,258 @@ def test_end_to_end():
         "AOTC" in p["embeds"][0]["title"] for p in posts))
 
 
+def test_team_install():
+    """A second raid team in the same Discord: Meer's Raid.
+
+    Its own channel, its own first kills on Normal AND Heroic, its own clear cards, fed
+    by one raider's personal Warcraft Logs uploads on the team's raid days only -- and
+    the guild install carries on exactly as before, never seeing a team query.
+    """
+    print("\nA raid team as its own install")
+    import copy
+    from datetime import datetime, timedelta, timezone
+    import handler
+    config._cache.clear()
+
+    # --- keys -------------------------------------------------------------
+    t = keys.team_pk(TEST_TENANT, "meers-raid")
+    check("a team key extends the server's tenant key",
+          t == f"TENANT#{TEST_TENANT}#meers-raid", t)
+    for bad in ("Meer's", "meers raid", "", "a#b", "x" * 33):
+        try:
+            keys.team_pk(TEST_TENANT, bad)
+            check(f"rejects team slug {bad!r}", False, "was accepted")
+        except ValueError:
+            check(f"rejects team slug {bad!r}", True)
+    guild_scope = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
+    team_scope = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT,
+                                  team="meers-raid")
+    check("a team shares NOTHING with the guild install: not the facts partition",
+          team_scope.wow != guild_scope.wow, team_scope.wow)
+    check("...and not the tenant partition", team_scope.tenant != guild_scope.tenant)
+    check("Heroic's announced row is unchanged",
+          keys.announced_sk("abyss") == "ANNOUNCED#abyss")
+    check("Normal gets its own announced row",
+          keys.announced_sk("abyss", keys.NORMAL) == "ANNOUNCED#abyss#normal")
+    check("guild Heroic cards keep their bare path", handler.card_prefix() == "")
+    check("a team's Normal cards get their own directory",
+          handler.card_prefix("meers-raid", "normal") == "meers-raid/normal/")
+
+    # --- config -----------------------------------------------------------
+    FAKE_DDB.items.clear()
+    handler._guild_id["value"] = None
+    G, T = f"TENANT#{TEST_TENANT}", t
+    TEAM_CHANNEL, TEAM_ROLE = "555000000000000009", "222222222222222222"
+    store.put_config(G, "us", "Proudmoore", "Scrambled", "", "now")
+    store.register_tenant(G)
+    store.put_config(T, "us", "Proudmoore", "Scrambled", TEAM_CHANNEL, "now",
+                     prog_role_id=TEAM_ROLE, configured_by="register-team",
+                     team={"slug": "meers-raid", "name": "Meer's Raid",
+                           "wcl_user_id": 40245, "raid_days": "",
+                           "difficulties": "normal,heroic"})
+    store.register_tenant(T)
+    row = store.get_config(T)
+    check("the team's config round-trips", row["team_slug"] == "meers-raid"
+          and row["wcl_user_id"] == "40245" and row["team_name"] == "Meer's Raid", row)
+    check("...and the guild's row has no team", store.get_config(G)["team_slug"] == "")
+
+    ssm = config.load()
+    # Prod holds a bot token; the offline fixture does not. Channel posting needs one.
+    ssm["bot_token"] = "bot-tok"
+    pairs = {s.tenant: (s, c) for s, c in handler.tenant_configs(ssm)}
+    check("both installs are polled", set(pairs) == {G, T}, sorted(pairs))
+    tscope, tcfg = pairs[T]
+    gscope, gcfg = pairs[G]
+    check("the team's scope is team-scoped", tscope.team == "meers-raid" and
+          tscope.wow.endswith("#meers-raid"), tscope)
+    check("the team announces Normal then Heroic",
+          handler.difficulties(tcfg) == ["normal", "heroic"])
+    check("the guild announces Heroic only, as ever",
+          handler.difficulties(gcfg) == ["heroic"])
+    check("the team's clear card pings ITS role, not the operator's",
+          tcfg["role_id"] == TEAM_ROLE and gcfg["role_id"] == "111111111111111111")
+    check("the team posts to its channel with the bot token",
+          handler.destination(tcfg) == {"bot_token": "bot-tok", "channel": TEAM_CHANNEL})
+    try:
+        handler.destination(dict(tcfg, bot_token=""))
+        check("a channel install with no bot token REFUSES rather than using the webhook",
+              False, "fell through to the webhook")
+    except handler.discord.DiscordError:
+        check("a channel install with no bot token REFUSES rather than using the webhook",
+              True)
+    check("the team credits its own name", handler.display_name(tcfg) == "Meer's Raid"
+          and handler.display_name(gcfg) == "Scrambled")
+
+    # --- the raid-day filter ---------------------------------------------
+    now = datetime.now(timezone.utc)
+    ms = lambda days_ago: int((now - timedelta(days=days_ago)).timestamp() * 1000)
+    day_name = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    raid_day = day_name[handler._local(handler._at(ms(0.5))).weekday()]
+    off_day = day_name[handler._local(handler._at(ms(1.5))).weekday()]
+    check("the fixture's two nights fall on different weekdays", raid_day != off_day)
+    tcfg["raid_days"] = raid_day
+    store.put_config(T, "us", "Proudmoore", "Scrambled", TEAM_CHANNEL, "now",
+                     prog_role_id=TEAM_ROLE,
+                     team={"slug": "meers-raid", "name": "Meer's Raid",
+                           "wcl_user_id": 40245, "raid_days": raid_day,
+                           "difficulties": "normal,heroic"})
+
+    def kill(name, days_ago, report="rEpOrT"):
+        return {"encounterID": 3000 + (hash(name) % 900), "name": name, "zoneID": 44,
+                "zoneName": "The Venomous Abyss", "reportCode": report,
+                "reportStartMs": ms(days_ago), "killedAtMs": ms(days_ago) + 60000}
+
+    on = handler.on_raid_days([kill("a", 0.5), kill("b", 1.5)], tcfg)
+    check("a kill from a report filed off the raid day is dropped",
+          [k["name"] for k in on] == ["a"], on)
+    check("no raid days means no filter",
+          len(handler.on_raid_days([kill("a", 0.5), kill("b", 1.5)], gcfg)) == 2)
+
+    # --- the two sources -------------------------------------------------
+    # Every seven days lands on the same weekday, so history on 7.5 and 14.5 days ago is
+    # on the raid day, and the Saturday-shaped kill on 1.5 days ago is not.
+    profile = copy.deepcopy(PROFILE)
+    calls = []
+    sources = {("guild", 4): [], ("user", 3): [], ("user", 4): []}
+
+    def fake_kills(token, gid, since_ms, limit=12, difficulty=4, max_pages=1,
+                   user_id=None):
+        calls.append({"user_id": user_id, "difficulty": difficulty})
+        src = sources[("user" if user_id else "guild", difficulty)]
+        return (sorted([k for k in src if k["killedAtMs"] >= since_ms],
+                       key=lambda k: k["killedAtMs"]),
+                {"limit": 3600, "spent": 10.0, "resetsIn": 60, "fraction": 0.003})
+
+    posts = []
+    real_post_to, real_participants = handler.discord.post_to, handler.wcl.kill_participants
+    handler.wcl.get_token = lambda *a, **kw: "tok"
+    handler.wcl.find_guild = lambda *a, **kw: ({"id": 777, "name": "Scrambled"}, None)
+    handler.wcl.query = lambda token, doc, variables=None: {
+        "rateLimitData": {"limitPerHour": 3600, "pointsSpentThisHour": 10.0,
+                          "pointsResetIn": 60}}
+    handler.wcl.heroic_kills_since = fake_kills
+    handler.wcl.reports_in_window = lambda *a, **kw: ([{"code": "x"}], None)
+    handler.wcl.kill_participants = lambda *a, **kw: ([{"name": "Meerclar",
+                                                        "server": "Proudmoore"}], None)
+    handler.raiderio.guild_profile = lambda *a, **kw: profile
+    handler.raiderio.static_raids = lambda exp: {11: RAIDS, 10: PREV_RAIDS}.get(exp, [])
+    handler.discord.post_to = lambda dest, payload, **kw: posts.append((dest, payload))
+
+    # Run one: bootstrap. The team's Normal history holds three kills on raid days and
+    # one on the off day; its Heroic history is empty.
+    sources[("guild", 4)] = [kill(ABYSS[0], 7.5), kill(ABYSS[1], 7.5)]
+    sources[("user", 3)] = [kill(ABYSS[0], 14.5), kill(ABYSS[1], 14.5), kill(ABYSS[2], 7.5),
+                            kill(ABYSS[3], 1.5)]
+    handler.handler({}, None)
+    check("the first run posts nothing for either install", posts == [], len(posts))
+    check("both installs bootstrapped",
+          store.is_bootstrapped(gscope) and store.is_bootstrapped(tscope))
+    check("the guild's queries never carry a user id",
+          all(c["user_id"] is None for c in calls if c["difficulty"] == 4
+              and c is calls[0]) and calls[0]["user_id"] is None, calls[:2])
+    check("the team's queries ask for its uploader at both difficulties",
+          {(c["user_id"], c["difficulty"]) for c in calls if c["user_id"]}
+          == {(40245, 3), (40245, 4)}, calls)
+
+    tn = store.load_tier(tscope, "the-venomous-abyss", keys.NORMAL)
+    th = store.load_tier(tscope, "the-venomous-abyss", keys.HEROIC)
+    gh = store.load_tier(gscope, "the-venomous-abyss")
+    check("the team's Normal seed is its raid-day history, NOT Raider.IO's 8/8",
+          len(tn["announced"]) == 3 and tn["baseline"] == 3 and not tn["aotcAnnounced"],
+          tn)
+    check("...the off-day kill was not seeded",
+          raiderio.normalize(ABYSS[3]) not in tn["announced"])
+    check("the team's Heroic seed is empty, not the guild's 2/8",
+          th["announced"] == set() and th["baseline"] == 0, th)
+    check("the guild's Heroic seed is untouched by the team",
+          len(gh["announced"]) == 2 and gh["baseline"] == 2, gh)
+    check("the team's cleared world boss is pre-set, so no clear card fires for it",
+          store.load_tier(tscope, "the-tidebound-grotto", keys.NORMAL)["announced"]
+          == set())
+
+    # Run two: the team kills its fourth Normal boss on a raid night.
+    posts.clear()
+    sources[("user", 3)].append(kill(ABYSS[3], 0.5))
+    handler.handler({}, None)
+    check("the team's new Normal first kill is announced once", len(posts) == 1,
+          len(posts))
+    dest, payload = posts[0] if posts else ({}, {"embeds": [{}]})
+    embed = payload["embeds"][0]
+    check("...to the team's channel", dest.get("channel") == TEAM_CHANNEL, dest)
+    check("...credited to the team", embed.get("title") ==
+          f"Meer's Raid just killed {ABYSS[3]}", embed.get("title"))
+    check("...as a Normal kill, counted from the team's own claims",
+          "**4** of **8** in Normal The Venomous Abyss" in embed.get("description", ""),
+          embed.get("description"))
+    check("...with no realm rank, which is the guild's and not the team's",
+          "Ranked server" not in embed.get("description", ""))
+
+    posts.clear()
+    handler.handler({}, None)
+    check("polling again announces nothing", posts == [], len(posts))
+
+    # The guild kills the same boss on Heroic: the guild's card, the guild's channel,
+    # and the team's Heroic row does not move.
+    posts.clear()
+    sources[("guild", 4)].append(kill(ABYSS[3], 0.4))
+    handler.handler({}, None)
+    check("the guild's Heroic kill goes to the guild's destination only",
+          len(posts) == 1 and "webhook" in posts[0][0], [d for d, _ in posts])
+    check("...and still reads as Scrambled on Heroic",
+          posts and posts[0][1]["embeds"][0]["title"].startswith("Scrambled just killed")
+          and "in Heroic" in posts[0][1]["embeds"][0]["description"])
+    check("the team's Heroic row is still empty",
+          store.load_tier(tscope, "the-venomous-abyss", keys.HEROIC)["announced"] == set())
+
+    # The team's first Heroic kill: a Heroic card, in the team's channel, 1 of 8.
+    posts.clear()
+    sources[("user", 4)].append(kill(ABYSS[0], 0.3))
+    handler.handler({}, None)
+    check("the team's first Heroic kill is its own event", len(posts) == 1 and
+          posts[0][0].get("channel") == TEAM_CHANNEL and
+          "**1** of **8** in Heroic" in posts[0][1]["embeds"][0]["description"],
+          [p[1]["embeds"][0].get("description") for p in posts])
+
+    # The team finishes Normal: four more bosses, then the silver clear card.
+    posts.clear()
+    sources[("user", 3)].extend(kill(n, 0.2) for n in ABYSS[4:])
+    handler.handler({}, None)
+    kills_posted = [p for d, p in posts if "just killed" in p["embeds"][0].get("title", "")]
+    clears = [p for d, p in posts if "just cleared" in p["embeds"][0].get("title", "")]
+    check("the remaining four Normal bosses each get a card", len(kills_posted) == 4,
+          len(kills_posted))
+    check("then ONE Normal-clear card", len(clears) == 1, len(clears))
+    clear = clears[0] if clears else {"embeds": [{}]}
+    check("...titled as a Normal clear",
+          "just cleared Normal The Venomous Abyss on" in clear["embeds"][0].get("title", ""),
+          clear["embeds"][0].get("title"))
+    check("...in silver, not AOTC gold",
+          clear["embeds"][0].get("color") == handler.discord.NORMAL_SILVER)
+    check("...pinging the team's role", clear.get("content") == f"<@&{TEAM_ROLE}>"
+          and clear["allowed_mentions"]["roles"] == [TEAM_ROLE], clear.get("content"))
+    check("no AOTC was fired by a Normal clear",
+          not any("AOTC" in p["embeds"][0].get("title", "") for _, p in posts))
+
+    posts.clear()
+    sources[("user", 3)].append(kill(ABYSS[7], 0.1))
+    handler.handler({}, None)
+    check("re-killing the last Normal boss announces nothing and no second clear",
+          posts == [], len(posts))
+
+    # A Saturday-shaped night: the same uploader, the off day. Nothing.
+    posts.clear()
+    sources[("user", 4)].append(kill(ABYSS[1], 1.5))
+    handler.handler({}, None)
+    check("an off-day kill from the same uploader is not the team's", posts == [],
+          len(posts))
+
+    handler.discord.post_to = real_post_to
+    handler.wcl.kill_participants = real_participants
+    ssm.pop("bot_token", None)
+    FAKE_DDB.items.clear()
+    handler._guild_id["value"] = None
+
+
 # ------------------------------------------------- prog team identification
 #
 # Twenty A-team raiders, sixteen B-team raiders, and four people who genuinely raid on
@@ -2957,6 +3209,60 @@ def test_recap_end_to_end():
           res.get("posted") is False, res)
     check("...and UNKNOWN posts NOTHING", posts == [], f"{len(posts)} posts")
 
+    # --- the same night, recapped for a TEAM install -------------------------
+    # The very report that was UNKNOWN for the guild is the team's by construction: it
+    # came from the team's uploader on the team's raid day. No classifier, one card, in
+    # the team's channel, under the team's name and the night's difficulty.
+    FAKE_DDB.items.clear()
+    day_name = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    night_day = day_name[handler._local(handler._at(reports[0]["startTime"])).weekday()]
+    T = keys.team_pk(TEST_TENANT, "meers-raid")
+    store.put_config(T, "us", "Proudmoore", "Scrambled", "555000000000000009", "now",
+                     prog_role_id="222222222222222222",
+                     team={"slug": "meers-raid", "name": "Meer's Raid",
+                           "wcl_user_id": 40245, "raid_days": night_day,
+                           "difficulties": "normal,heroic"})
+    store.register_tenant(T)
+    tscope = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT,
+                              team="meers-raid")
+    store.mark_bootstrapped(tscope, "now", 4)
+    store.seed_tier(tscope, "the-venomous-abyss", set(), 0, "The Venomous Abyss", "now")
+    cfg["bot_token"] = "bot-tok"
+    cfg["recap_enabled"] = True
+    asked = {}
+
+    def team_reports(token, gid, start, end, limit=10, user_id=None):
+        asked["user_id"] = user_id
+        return reports, None
+
+    channel_posts = []
+    real_post_to = handler.discord.post_to
+    handler.wcl.reports_in_window = team_reports
+    handler.discord.post_to = lambda dest, payload, **kw: channel_posts.append((dest, payload))
+    posts.clear()
+    res = handler.handler({"mode": "recap"}, None)
+    handler.discord.post_to = real_post_to
+    cfg["recap_enabled"] = False
+    cfg.pop("bot_token", None)
+    store.unregister_tenant(T)
+
+    check("the team's recap reads its uploader's reports", asked.get("user_id") == 40245,
+          asked)
+    team_cards = [(d, p) for d, p in channel_posts if d.get("channel") == "555000000000000009"]
+    check("the team's night posts exactly one card, to the team's channel",
+          len(team_cards) == 1, [d for d, _ in channel_posts])
+    if team_cards:
+        embed = team_cards[0][1]["embeds"][0]
+        check("...under the team's name", embed["title"].startswith("Meer's Raid — "),
+              embed["title"])
+        check("...at the difficulty the night was spent on",
+              embed["footer"]["text"].startswith("Heroic The Venomous Abyss"),
+              embed["footer"])
+        check("...pinging nobody", "content" not in team_cards[0][1])
+    check("the team's night is claimed under the TEAM's tenant",
+          not store.claim_recap(tscope, res.get("night") or "") if res.get("night")
+          else False, res)
+
 
 def main():
     print("greyBot self-test")
@@ -2972,6 +3278,7 @@ def main():
                test_source_blind,
                test_iam_grant_covers_config,
                test_recap_parsers, test_end_to_end,
+               test_team_install,
                test_recap_end_to_end):
         fn()
     print()

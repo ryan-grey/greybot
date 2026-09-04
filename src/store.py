@@ -79,7 +79,8 @@ def _n(v):
 # whether a given row is a shared fact about the WoW guild or a record of what
 # one install did. Ask `scope.wow` or `scope.tenant` here, once, against the table
 # in `docs/multi-tenant-keys.md`.
-from keys import (Scope, wow_pk, tenant_pk, tier_sk, announced_sk,  # noqa: F401
+import keys                                                   # noqa: E402
+from keys import (Scope, wow_pk, tenant_pk, tier_sk, announced_sk,  # noqa: F401,E402
                   ART_PK, CONFIG_SK, REGISTRY_PK, TENANTS_SK)
 
 
@@ -88,14 +89,18 @@ def _tier_key(scope, slug):
     return {"pk": _s(scope.wow), "sk": _s(tier_sk(slug))}
 
 
-def _ann_key(scope, slug):
-    """PER-TENANT. The announced set and the AOTC flag — what THIS install posted.
+def _ann_key(scope, slug, difficulty=keys.HEROIC):
+    """PER-TENANT. The announced set and the clear flag — what THIS install posted.
 
     Every claim and release below points here rather than at the tier row. That
     is the correctness half of Phase 2: two Discord servers tracking one WoW
     guild post to two channels, so they must not share a dedupe set.
+
+    One row per difficulty. Heroic keeps its historical key; Normal sits beside it,
+    so an install that announces both claims a boss twice -- once per difficulty --
+    and never confuses the two.
     """
-    return {"pk": _s(scope.tenant), "sk": _s(announced_sk(slug))}
+    return {"pk": _s(scope.tenant), "sk": _s(announced_sk(slug, difficulty))}
 
 
 def _bootstrap_key(scope):
@@ -131,8 +136,8 @@ def mark_bootstrapped(scope, now_iso, tiers, note=""):
         raise
 
 
-def load_tier(scope, slug):
-    """Current state for one tier, assembled from both partitions.
+def load_tier(scope, slug, difficulty=keys.HEROIC):
+    """Current state for one tier at one difficulty, assembled from both partitions.
 
     Two reads, because the row was split: the shared tier row carries the
     baseline and raid name, and this install's announced row carries what IT has
@@ -143,26 +148,36 @@ def load_tier(scope, slug):
     and treating that as 'already seeded' would silently skip seeding for this
     install and let its first poll announce a tier's worth of old kills.
     """
-    ann = ddb.get_item(TableName=TABLE, Key=_ann_key(scope, slug),
+    ann = ddb.get_item(TableName=TABLE, Key=_ann_key(scope, slug, difficulty),
                        ConsistentRead=True).get("Item")
     if not ann:
         return None
     tier = ddb.get_item(TableName=TABLE, Key=_tier_key(scope, slug),
                         ConsistentRead=True).get("Item") or {}
+    # The baseline is read from the announced row when it carries one and from the
+    # shared tier row otherwise. Rows seeded before difficulties existed have it only on
+    # the tier row; a Normal row's baseline is not a Heroic row's, so anything seeded
+    # since carries its own.
+    baseline = ann.get("baseline") or tier.get("baseline") or {}
     return {
         # per-tenant
         "announced": set((ann.get("announced") or {}).get("SS") or []),
         "aotcAnnounced": bool((ann.get("aotcAnnounced") or {}).get("BOOL") or False),
         "seededAt": (ann.get("seededAt") or {}).get("S") or "",
         "seedSize": int((ann.get("seedSize") or {}).get("N") or 0),
+        "baseline": int(baseline.get("N") or 0),
         # shared
-        "baseline": int((tier.get("baseline") or {}).get("N") or 0),
         "raidName": (tier.get("raidName") or {}).get("S") or "",
     }
 
 
-def seed_tier(scope, slug, already_killed, baseline, raid_name, now_iso, aotc_already=False):
+def seed_tier(scope, slug, already_killed, baseline, raid_name, now_iso, aotc_already=False,
+              difficulty=keys.HEROIC):
     """Record what was ALREADY dead the first time this tier is seen, announcing nothing.
+
+    `difficulty` picks which announced row is seeded. The shared tier row is written the
+    same way regardless, and only if absent: its baseline is the Heroic one, and a Normal
+    seed arriving first must not plant a Normal count there for Heroic to read back.
 
     Without this, the first run after a mid-tier deploy posts a kill announcement for
     every boss the guild killed weeks ago, which is both wrong and unrecoverable. The
@@ -200,8 +215,11 @@ def seed_tier(scope, slug, already_killed, baseline, raid_name, now_iso, aotc_al
     # This install's announced row. THIS is the seed guard -- conditional, so two
     # invocations racing the first run cannot both seed, and a second tenant on an
     # already-tracked guild still seeds for itself.
-    item = {**_ann_key(scope, slug),
+    item = {**_ann_key(scope, slug, difficulty),
             "seedSize": _n(len(names)),
+            "baseline": _n(max(int(baseline or 0), len(names))),
+            # On a Normal row this flag means "the Normal clear was announced". Same
+            # attribute, same conditional claim, one code path for both.
             "aotcAnnounced": {"BOOL": bool(aotc_already)},
             "seededAt": _s(now_iso)}
     if names:                      # DynamoDB has no empty string set
@@ -216,12 +234,12 @@ def seed_tier(scope, slug, already_killed, baseline, raid_name, now_iso, aotc_al
         raise
 
 
-def claim_boss(scope, slug, boss_key):
+def claim_boss(scope, slug, boss_key, difficulty=keys.HEROIC):
     """Atomically claim the right to announce one boss. True means announce; False means
     someone already did."""
     try:
         ddb.update_item(
-            TableName=TABLE, Key=_ann_key(scope, slug),
+            TableName=TABLE, Key=_ann_key(scope, slug, difficulty),
             UpdateExpression="ADD announced :b",
             ConditionExpression=("attribute_exists(pk) AND "
                                  "(attribute_not_exists(announced) OR NOT contains(announced, :k))"),
@@ -233,22 +251,23 @@ def claim_boss(scope, slug, boss_key):
         raise
 
 
-def release_boss(scope, slug, boss_key):
+def release_boss(scope, slug, boss_key, difficulty=keys.HEROIC):
     """Undo a claim whose announcement never made it to Discord, so the next poll retries.
     DELETE on a set, which is UpdateItem -- the role has no DeleteItem and does not need
     one."""
-    ddb.update_item(TableName=TABLE, Key=_ann_key(scope, slug),
+    ddb.update_item(TableName=TABLE, Key=_ann_key(scope, slug, difficulty),
                     UpdateExpression="DELETE announced :b",
                     ExpressionAttributeValues={":b": {"SS": [boss_key]}})
 
 
-def claim_aotc(scope, slug):
-    """Claim the one-and-only AOTC announcement for this tier. The guard is the whole
-    point: the final boss gets re-killed every week for the rest of the tier, and every
-    one of those re-kills satisfies 'heroic kills == total bosses'."""
+def claim_aotc(scope, slug, difficulty=keys.HEROIC):
+    """Claim the one-and-only clear announcement for this tier at this difficulty -- AOTC
+    on Heroic, "Normal cleared" on Normal. The guard is the whole point: the final boss
+    gets re-killed every week for the rest of the tier, and every one of those re-kills
+    satisfies 'kills == total bosses'."""
     try:
         ddb.update_item(
-            TableName=TABLE, Key=_ann_key(scope, slug),
+            TableName=TABLE, Key=_ann_key(scope, slug, difficulty),
             UpdateExpression="SET aotcAnnounced = :t",
             ConditionExpression=("attribute_exists(pk) AND "
                                  "(attribute_not_exists(aotcAnnounced) OR aotcAnnounced = :f)"),
@@ -260,8 +279,8 @@ def claim_aotc(scope, slug):
         raise
 
 
-def release_aotc(scope, slug):
-    ddb.update_item(TableName=TABLE, Key=_ann_key(scope, slug),
+def release_aotc(scope, slug, difficulty=keys.HEROIC):
+    ddb.update_item(TableName=TABLE, Key=_ann_key(scope, slug, difficulty),
                     UpdateExpression="SET aotcAnnounced = :f",
                     ExpressionAttributeValues={":f": {"BOOL": False}})
 
@@ -722,19 +741,30 @@ def get_config(tenant):
     item = res.get("Item")
     if not item:
         return None
+    def text(attr):
+        return (item.get(attr) or {}).get("S") or ""
+
     return {
-        "guild_region": (item.get("guildRegion") or {}).get("S") or "",
-        "guild_realm": (item.get("guildRealm") or {}).get("S") or "",
-        "guild_name": (item.get("guildName") or {}).get("S") or "",
-        "channel_id": (item.get("channelId") or {}).get("S") or "",
-        "prog_role_id": (item.get("progRoleId") or {}).get("S") or "",
-        "configuredAt": (item.get("configuredAt") or {}).get("S") or "",
-        "configuredBy": (item.get("configuredBy") or {}).get("S") or "",
+        "guild_region": text("guildRegion"),
+        "guild_realm": text("guildRealm"),
+        "guild_name": text("guildName"),
+        "channel_id": text("channelId"),
+        "prog_role_id": text("progRoleId"),
+        "configuredAt": text("configuredAt"),
+        "configuredBy": text("configuredBy"),
+        # A raid-team install. Empty on a server-wide install, and every one of these
+        # is read through a default further up, so an older CONFIG row without them
+        # behaves exactly as it did before they existed.
+        "team_slug": text("teamSlug"),
+        "team_name": text("teamName"),
+        "wcl_user_id": text("wclUserId"),
+        "raid_days": text("raidDays"),
+        "difficulties": text("difficulties"),
     }
 
 
 def put_config(tenant, region, realm, name, channel_id, now_iso,
-               prog_role_id="", configured_by=""):
+               prog_role_id="", configured_by="", team=None):
     """Write or replace this install's configuration.
 
     Overwrite rather than conditional-create: re-running /setup to correct a
@@ -745,19 +775,44 @@ def put_config(tenant, region, realm, name, channel_id, now_iso,
     ANNOUNCED# rows in place. They are keyed by tier slug, not by guild, so the
     new guild's tiers get their own rows and seed normally; deleting the old ones
     would only risk re-announcing kills if the server ever pointed back.
+
+    `team` describes a raid-team install: {"slug", "name", "wcl_user_id",
+    "raid_days", "difficulties"}. Only the operator's registration script sets it.
     """
-    ddb.put_item(TableName=TABLE, Item={
+    item = {
         "pk": _s(tenant), "sk": _s(CONFIG_SK),
         "guildRegion": _s(region.lower()), "guildRealm": _s(realm.lower()),
         "guildName": _s(name), "channelId": _s(channel_id),
         "progRoleId": _s(prog_role_id or ""),
-        "configuredAt": _s(now_iso), "configuredBy": _s(configured_by or "")})
+        "configuredAt": _s(now_iso), "configuredBy": _s(configured_by or "")}
+    if team:
+        item.update({
+            "teamSlug": _s(keys.team_slug(team["slug"])),
+            "teamName": _s(team.get("name") or team["slug"]),
+            "wclUserId": _s(str(team.get("wcl_user_id") or "")),
+            "raidDays": _s(team.get("raid_days") or ""),
+            "difficulties": _s(team.get("difficulties") or keys.HEROIC)})
+    ddb.put_item(TableName=TABLE, Item=item)
 
 
 def scope_for(tenant, cfg):
-    """Build the Scope for an install from its CONFIG row."""
-    return Scope(wow_pk(cfg["guild_region"], cfg["guild_realm"], cfg["guild_name"]),
-                 tenant)
+    """Build the Scope for an install from its CONFIG row.
+
+    A team install gets team-scoped partitions on BOTH sides. Its tenant key already
+    carries the slug; its facts partition must too, or the team's first-kill rosters
+    would be written over the guild's and feed the prog team's derived roster.
+    """
+    team = cfg.get("team_slug") or None
+    return Scope.build(cfg["guild_region"], cfg["guild_realm"], cfg["guild_name"],
+                       _tenant_id(tenant), team=team)
+
+
+def _tenant_id(tenant):
+    """The Discord guild id inside a `TENANT#<id>` or `TENANT#<id>#<team>` key."""
+    parts = str(tenant).split("#")
+    if len(parts) < 2 or parts[0] != "TENANT":
+        raise ValueError(f"not a tenant key: {tenant!r}")
+    return parts[1]
 
 
 # --- the tenant registry --------------------------------------------------

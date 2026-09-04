@@ -236,10 +236,10 @@ def is_world_boss(profile, slug):
     return total == 1
 
 
-def progress_for(profile, slug):
-    """(heroic_bosses_killed, total_bosses) for a raid, or (None, None) if absent."""
+def progress_for(profile, slug, difficulty="heroic"):
+    """(<difficulty>_bosses_killed, total_bosses) for a raid, or (None, None) if absent."""
     entry = (profile.get("raid_progression") or {}).get(slug) or {}
-    killed, total = entry.get("heroic_bosses_killed"), entry.get("total_bosses")
+    killed, total = entry.get(f"{difficulty}_bosses_killed"), entry.get("total_bosses")
     if killed is None or total is None:
         return None, None
     return int(killed), int(total)
