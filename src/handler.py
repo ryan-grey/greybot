@@ -2182,6 +2182,13 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     # an occasional guest.
     roster = tier.get("roster") or set()
     seeded, roster_info = tier.get("seeded"), tier.get("rosterInfo") or {"source": "none"}
+    if is_team(cfg):
+        # No pug filter for a team. The roster intersection exists to keep the OTHER
+        # team's players off the prog team's board, and a team install's source is the
+        # team itself -- everyone in its log raided with it that night. A twelve-person
+        # team with a rotating bench would otherwise lose its top damage to a rule about
+        # somebody else's raid, which is exactly what happened on the first dry run.
+        roster = set()
     excluded = recap_mod.restrict_to_roster(sources, roster)
 
     combined = recap_mod.raid_scope(
