@@ -41,7 +41,7 @@ FN=ryangrey-greybot
 PARAMS=(
   "/greybot/recap/enabled|String|false|Post the morning-after raid recap at all."
   "/greybot/recap/show_worst_parse|String|false|Include the worst parse. Off by default: parse-shaming starts arguments."
-  "/greybot/recap/schedule|String|cron(0 10 ? * WED,FRI *)|Recorded cron for the recap. EventBridge Scheduler is what actually runs it."
+  "/greybot/recap/schedule|String|cron(30 5 ? * WED,FRI *)|Recorded cron for the recap. EventBridge Scheduler is what actually runs it."
   "/greybot/team/roster_min_first_kill_pct|String|50|A player joins the prog roster at this share of the tier's first kills."
   "/greybot/team/prog_overlap_high|String|70|Roster overlap at or above this reads as the prog team."
   "/greybot/team/prog_overlap_low|String|35|Roster overlap at or below this reads as the other team."
