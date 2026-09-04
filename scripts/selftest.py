@@ -3245,6 +3245,27 @@ def test_recap_end_to_end():
           "The Lost Explorers" in embed["description"], embed["description"])
     fields = {f["name"] for f in embed.get("fields", [])}
     check("top damage is on the card", "Top damage" in fields, fields)
+    # DPS in front of damage done, one value: "78K/145M". The fixture's table carries a
+    # totalTime, so every damage row has both halves; healing keeps the bare total.
+    dmg = [f["value"] for f in embed.get("fields", []) if f["name"] == "Top damage"]
+    check("damage reads DPS/damage done",
+          dmg and all(re.search(r"\*\*\d+[KMB]/\d+[KMB]\*\*", line)
+                      for line in dmg[0].split("\n")), dmg)
+    dry = handler.handler({"mode": "recap", "dry": True}, None)
+    top = dry["summary"]["damage"][0]
+    check("DPS is the total over the scoped table's totalTime",
+          abs(top["perSecond"] - top["total"]
+              / (FIXTURE["damageScoped"]["data"]["totalTime"] / 1000)) < 1e-6, top)
+    page_rows = dry["recapPageRows"]
+    check("the page rows carry the same DPS",
+          abs(page_rows[0]["dps"] - top["perSecond"]) < 1e-6, page_rows[0].get("dps"))
+    html = dry["recapPageHtml"]
+    check("the page's damage column is titled DPS / Damage and shows both",
+          "DPS / Damage" in html and re.search(r'<span class="val">\d+[KMB]/\d+[KMB]</span>',
+                                               html), None)
+    check("a damage table with no duration falls back to the bare total",
+          handler.discord._dps_and_total({"total": 145_000_000, "perSecond": None})
+          == "145M")
     check("most deaths is on the card", "Most deaths" in fields, fields)
     check("worst parse is OFF by default", "Worst parse" not in fields, fields)
 

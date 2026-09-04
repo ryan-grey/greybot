@@ -376,12 +376,20 @@ def columns(rows, region=None):
              who was in no kill has no parse to average and is absent rather than last --
              absent means "no evidence", which is true; last would be a claim.
     """
-    def ranked(field):
-        return [(_who(r, region), _short(r[field]))
+    def ranked(field, per=None):
+        # `per` names a per-second field to print in front of the total, "78K/145M".
+        # One cell, because DPS and damage done rank the same people and two columns
+        # would say so twice; ordered by the total, which is what the card ranks on.
+        def cell(r):
+            rate = r.get(per) if per else None
+            if isinstance(rate, (int, float)) and rate > 0:
+                return f"{_short(rate)}/{_short(r[field])}"
+            return _short(r[field])
+        return [(_who(r, region), cell(r))
                 for r in sorted((r for r in rows if r.get(field) is not None),
                                 key=lambda r: (-r[field], r["name"]))]
 
-    dps = ranked("damage")
+    dps = ranked("damage", per="dps")
     heals = ranked("healing")
     taken = ranked("damageTaken")
 
@@ -424,7 +432,7 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
     # Deaths gets a skull rather than a role, because dying is not a role.
     raid_parse = average_parse(rows or [])
     cols = "\n".join((
-        _column("Damage", dps, "No damage table could be read.",
+        _column("DPS / Damage", dps, "No damage table could be read.",
                 icon=role_icon("dps")),
         _column("Healing", heals, "No healing table could be read.",
                 icon=role_icon("healer")),
@@ -469,7 +477,8 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
     </div>
     <p class="note">
       {_esc(difficulty)} raid fights only &mdash; dungeons and other difficulties in the same log are
-      excluded. Overall parse is the mean of a raider&rsquo;s rankings across the kills they
+      excluded. DPS is damage done over the night&rsquo;s total fight time, as Warcraft Logs
+      computes it for all fights. Overall parse is the mean of a raider&rsquo;s rankings across the kills they
       were in; bosses they sat are not counted against them.
     </p>
     <p class="note footnote">

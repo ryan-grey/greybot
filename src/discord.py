@@ -360,6 +360,14 @@ def _short(n):
     return str(int(round(n)))
 
 
+def _dps_and_total(row):
+    """"78K/145M" -- per-second in front of the total, or the total alone."""
+    per = row.get("perSecond")
+    if isinstance(per, (int, float)) and per > 0:
+        return f"{_short(per)}/{_short(row['total'])}"
+    return _short(row["total"])
+
+
 def _tied(rows, key):
     """Everyone level at the top, not just whoever sorted first.
 
@@ -444,10 +452,16 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
 
     # Five categories, three to a row. Damage / heals / damage taken is one row and reads
     # as the night's output; deaths and parse is the next and reads as how it went.
+    # Damage reads "78K/145M": DPS first, damage done second, one value in one column.
+    # Two numbers because they answer different questions -- how hard someone hit, and
+    # how much of the night they were hitting -- and splitting them into two columns would
+    # rank the same people twice. Where the table carried no duration, the total stands
+    # alone rather than beside a per-second figure that cannot be computed.
     for label, key in (("Top damage", "damage"), ("Top heals", "healing"),
                        ("Damage taken", "damageTaken")):
         embed["fields"] += _field(label, [
-            (r["name"], r.get("class"), _short(r["total"]), r.get("role"))
+            (r["name"], r.get("class"), _dps_and_total(r) if key == "damage"
+             else _short(r["total"]), r.get("role"))
             for r in (summary.get(key) or [])[:TOP_N]])
 
     embed["fields"] += _field("Most deaths", [
