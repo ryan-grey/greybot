@@ -1238,8 +1238,120 @@ def run_health_check(cfg, scope, now, now_iso, forced=False):
     return result
 
 
+def backfill(spec, cfg, now_iso):
+    """Post the cards a team's SEEDED first kills would have got, had the bot been
+    watching. One card per boss, oldest first, each dated by the real kill.
+
+        {"admin": "backfill", "team": "meers-raid", "difficulty": "normal",
+         "slugs": ["the-tidebound-grotto", "the-venomous-abyss"], "dry": true}
+
+    Reads the same history the bootstrap seeded from and posts ONLY bosses already in
+    the announced set -- a boss the seed does not know about is not history, it is a
+    kill the next poll should announce properly. Nothing here claims or releases: the
+    announced set is exactly as it was before, so a backfill can never suppress a real
+    first kill or let one through twice.
+
+    The drawn card carries the kill's date and time as a line of its own. A live card
+    does not need it -- the post IS the moment -- but a card posted weeks after the kill
+    would otherwise read as if the boss died today.
+    """
+    team_slug = spec.get("team")
+    pairs = [(s, c) for s, c in tenant_configs(cfg) if s.team == team_slug]
+    if not pairs:
+        raise RuntimeError(f"no registered team install with slug {team_slug!r}")
+    scope, tcfg = pairs[0]
+    difficulty = str(spec.get("difficulty") or keys.HEROIC).lower()
+    if difficulty not in difficulties(tcfg):
+        raise RuntimeError(f"{team_slug} does not announce {difficulty}")
+    label = difficulty.title()
+    slugs = spec.get("slugs") or ([spec["slug"]] if spec.get("slug") else [])
+    if not slugs:
+        raise RuntimeError("backfill needs 'slug' or 'slugs'")
+
+    token = wcl.get_token(tcfg["wcl_client_id"], tcfg["wcl_client_secret"])
+    gid, _rate = guild_id(token, tcfg)
+    profile = raiderio.guild_profile(tcfg["guild_region"], tcfg["guild_realm"],
+                                     tcfg["guild_name"])
+    index, _exp = raiderio.build_index(profile, EXPANSION_HINT)
+    grouped, rate = history_by_slug(token, gid, tcfg, profile, index,
+                                    SEED_LOOKBACK_DAYS, SEED_REPORT_LIMIT,
+                                    max_pages=SEED_MAX_PAGES, difficulty=difficulty)
+
+    # Earliest kill per boss, per tier, restricted to what the seed already holds.
+    planned = []
+    for slug in slugs:
+        state = store.load_tier(scope, slug, difficulty)
+        if not state:
+            log("backfill_tier_unseeded", slug=slug, difficulty=difficulty)
+            continue
+        firsts = {}
+        for k in grouped.get(slug, []):
+            key = boss_key(k["name"])
+            prior = raiderio.alias_match(state["announced"], key)
+            if not prior:
+                continue
+            if prior not in firsts or k["killedAtMs"] < firsts[prior]["killedAtMs"]:
+                firsts[prior] = k
+        meta = index.raids.get(slug) if index else None
+        for key, k in firsts.items():
+            planned.append({"slug": slug, "key": key, "kill": k, "meta": meta})
+    planned.sort(key=lambda p: p["kill"]["killedAtMs"])
+
+    who = display_name(tcfg)
+    results, posted = [], 0
+    ordinal = {}
+    for p in planned:
+        slug, key, kill, meta = p["slug"], p["key"], p["kill"], p["meta"]
+        ordinal[slug] = ordinal.get(slug, 0) + 1
+        _r, total, rank = team_progress(tcfg, profile, slug, difficulty)
+        raid_label = kill.get("zoneName") or (meta or {}).get("name") or slug
+        killed_at = _at(kill["killedAtMs"])
+        when_text = _when_text(killed_at)
+        is_world = raiderio.is_world_boss(profile, slug)
+        thumb = boss_art(tcfg, kill["name"], now_iso, fallback=raiderio.icon_url(meta))
+        body = ([f"World boss — killed on {label}"] if is_world else
+                [f"They are now {ordinal[slug]} of {total or '?'} in {label} {raid_label}"])
+        body.append(when_text)
+        card = None if spec.get("dry") else kill_card_url(
+            tcfg, slug, key, kill["name"], f"{who} just killed", body, thumb,
+            team=scope.team, difficulty=difficulty)
+        payload = discord.kill_embed(
+            who, kill["name"], ordinal[slug], total or "?", raid_label, rank,
+            report_url=report_url(kill.get("reportCode")), iso_ts=_iso(killed_at),
+            thumbnail_url=thumb,
+            guild_label=raiderio.guild_display(profile, tcfg["guild_name"],
+                                               tcfg["guild_realm"]),
+            guild_url=raiderio.profile_url(profile, tcfg["guild_region"],
+                                           tcfg["guild_realm"], tcfg["guild_name"]),
+            world_boss=is_world, card_url=card, difficulty=label)
+        if not card:
+            # No drawn card (dry run, or the renderer declined): the embed must carry the
+            # date itself, or the reader has only Discord's small footer timestamp.
+            payload["embeds"][0]["description"] += f"\n{when_text}"
+        info = {"boss": kill["name"], "slug": slug, "count": ordinal[slug], "total": total,
+                "killedAt": _iso(killed_at), "localTime": when_text,
+                "report": kill.get("reportCode"), "card": bool(card)}
+        if spec.get("dry"):
+            results.append({**info, "payload": payload})
+            continue
+        sent = discord.post_to(destination(tcfg), payload)
+        _remember_post(scope, sent, "kill", now_iso)
+        posted += 1
+        log("backfill_posted", team=scope.team, difficulty=difficulty, **info)
+        results.append(info)
+
+    log("backfill_done", team=scope.team, difficulty=difficulty, planned=len(planned),
+        posted=posted, dry=bool(spec.get("dry")), points=rate,
+        note="announced sets untouched — nothing was claimed or released")
+    return {"ok": True, "team": scope.team, "difficulty": difficulty,
+            "planned": len(planned), "posted": posted, "dry": bool(spec.get("dry")),
+            "cards": results}
+
+
 def handle_admin(event, cfg, scope, now, now_iso):
     action = event.get("admin")
+    if action == "backfill":
+        return backfill(event, cfg, now_iso)
     if action == "health":
         # The manual path, and the only one that mails while everything is fine -- which
         # is how the SNS grant and the SES forwarder get proved end to end without waiting
