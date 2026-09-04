@@ -55,6 +55,7 @@ FONT_DIR = _font_dir()
 NAVY = (14, 27, 44)
 ACCENT = (92, 168, 240)
 GOLD = (232, 180, 74)          # AOTC only, and the reason `accent` is a parameter
+SILVER = (198, 208, 222)       # a Normal clear: a milestone, not the milestone
 INK = (238, 243, 250)
 MUTED = (150, 168, 190)
 

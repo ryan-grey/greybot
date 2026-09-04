@@ -491,7 +491,7 @@ def parses(sources, eligible_names, difficulty=HEROIC):
 
 
 def summarise(scope, sources, show_worst_parse=False, encounters=None,
-              dead=None):
+              dead=None, difficulty=HEROIC):
     """Everything the card needs, with each section independently omittable.
 
     A section that could not be read is absent from the result rather than present and
@@ -526,7 +526,7 @@ def summarise(scope, sources, show_worst_parse=False, encounters=None,
     out["healing"] = top_healing(sources)
     out["damageTaken"] = top_damage_taken(sources)
     out["deaths"] = death_counts(sources)
-    out["parses"] = parses(sources, eligible_names)
+    out["parses"] = parses(sources, eligible_names, difficulty)
     if not show_worst_parse and out["parses"]:
         # Dropped here rather than at render time, so a card that is not supposed to carry
         # a worst parse never has one in the object at all.

@@ -52,6 +52,49 @@ def tenant_pk(discord_guild_id):
     return f"TENANT#{raw}"
 
 
+import re
+
+_TEAM_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+
+
+def team_slug(raw):
+    """A raid team's slug, validated to the same standard as a tenant id.
+
+    Lowercase letters, digits and hyphens only, so a slug can never carry a `#` and forge
+    a key boundary. Set by the operator's registration script, never by a request.
+    """
+    slug = str(raw or "").strip().lower()
+    if not _TEAM_SLUG.match(slug):
+        raise ValueError(f"team slug must match [a-z0-9-], got {raw!r}")
+    return slug
+
+
+def team_pk(discord_guild_id, slug):
+    """Partition for a RAID TEAM's install inside a Discord server.
+
+    Scrambled runs more than one raid team in one Discord, and each wants its own
+    channel and its own first kills. A team is therefore its own install: its own
+    announced sets, its own bootstrap, its own recap claims -- everything the tenant
+    partition holds -- under a key that extends the server's tenant key rather than
+    replacing it. `TENANT#<guild>#<team>` sorts beside `TENANT#<guild>` in the registry
+    and can never be confused with a bare server, whose id is all digits.
+    """
+    return f"{tenant_pk(discord_guild_id)}#{team_slug(slug)}"
+
+
+def team_wow_pk(region, realm, name, slug):
+    """Partition for a raid TEAM's facts, kept apart from the guild's.
+
+    The shared `WOW#` partition holds facts every install agrees on: which bosses the
+    guild has killed, who was there. A team's first kills are not the guild's first
+    kills -- Meer's Raid killing a boss on Normal weeks after the prog team cleared it on
+    Heroic is a first for the team and nothing for the guild -- and a team's first-kill
+    rosters must never feed the prog team's derived roster. So a team gets its own copy
+    of the whole facts partition, and shares nothing with the guild install.
+    """
+    return f"{wow_pk(region, realm, name)}#{team_slug(slug)}"
+
+
 def tenant_from_interaction(body):
     """The tenant an interaction came from, taken off the VERIFIED payload.
 
@@ -99,9 +142,25 @@ SOURCE_SK = "SOURCE"
 
 # Under TENANT#
 
-def announced_sk(slug):
-    """Where the dedupe set lives. One row per tier per install."""
-    return f"ANNOUNCED#{slug}"
+HEROIC = "heroic"
+NORMAL = "normal"
+DIFFICULTIES = (NORMAL, HEROIC)
+
+
+def announced_sk(slug, difficulty=HEROIC):
+    """Where the dedupe set lives. One row per tier per difficulty per install.
+
+    Heroic keeps the bare `ANNOUNCED#<slug>` it has always had, so every row already in
+    the table stays exactly where it is. Any other difficulty gets its own row under a
+    suffix: a boss's first Normal kill and its first Heroic kill are two different
+    events, claimed separately, and one set holding both would make the second one
+    silent.
+    """
+    if difficulty == HEROIC:
+        return f"ANNOUNCED#{slug}"
+    if difficulty not in DIFFICULTIES:
+        raise ValueError(f"unknown difficulty {difficulty!r}")
+    return f"ANNOUNCED#{slug}#{difficulty}"
 
 
 def recap_sk(night_key):
@@ -121,18 +180,26 @@ class Scope:
     is a decision the reader can check against the table in the design doc.
     """
 
-    __slots__ = ("wow", "tenant")
+    __slots__ = ("wow", "tenant", "team")
 
-    def __init__(self, wow, tenant):
+    def __init__(self, wow, tenant, team=None):
         self.wow = wow
         self.tenant = tenant
+        # The team slug, or None for an install that tracks the whole guild. Carried on
+        # the Scope so log lines and card keys can say which install acted without every
+        # caller re-deriving it from the partition string.
+        self.team = team
 
     @classmethod
-    def build(cls, region, realm, name, discord_guild_id):
+    def build(cls, region, realm, name, discord_guild_id, team=None):
+        if team:
+            slug = team_slug(team)
+            return cls(team_wow_pk(region, realm, name, slug),
+                       team_pk(discord_guild_id, slug), slug)
         return cls(wow_pk(region, realm, name), tenant_pk(discord_guild_id))
 
     def __repr__(self):
-        return f"Scope(wow={self.wow!r}, tenant={self.tenant!r})"
+        return f"Scope(wow={self.wow!r}, tenant={self.tenant!r}, team={self.team!r})"
 
     def __eq__(self, other):
         return (isinstance(other, Scope)

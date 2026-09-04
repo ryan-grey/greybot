@@ -522,6 +522,62 @@ A raid that runs past midnight is still one night. The exactly-once key is the l
 the report **started**, so a Tuesday raid ending at 12:40am is claimed as Tuesday and
 cannot be re-posted as Wednesday.
 
+## A second raid team in the same server: Meer's Raid
+
+Scrambled runs more than one raid team, and the second one wanted the same bot in its
+own channel. **Meer's Raid** posts to `#meerbots`, announces first kills on **Normal and
+Heroic**, and gets a silver *"cleared Normal"* card and a gold AOTC card, both pinging
+**Raiders**. Live since 2026-09-04.
+
+A team is its **own install**, registered by `scripts/register-team.py` rather than by
+`/setup`. Its tenant key extends the server's — `TENANT#<server>#meers-raid` — and, unlike
+a second Discord server tracking the same guild, it shares *nothing* with the guild
+install: not the dedupe sets, not the first-kill rosters, not the counts. The team's first
+kill of a boss is not the guild's, and the team's roster must never feed the prog team's
+derived one, so its facts live under `WOW#…#scrambled#meers-raid`.
+
+Three things about a team install are different, and all three come from its CONFIG row:
+
+**The source is a person, not the guild.** Meer's Raid logs under one raider's Warcraft
+Logs account, unattached to the guild, so `reports(guildID:)` never sees a single one of
+its nights. The team's reports come from `reports(userID:)` instead — and only the ones
+filed on the team's **raid days** (Tuesday and Thursday), because the same person also
+logs the Saturday raid. The day is judged by the report's start in Eastern time, so a
+night that runs past midnight is still Thursday's.
+
+**Two difficulties, two announced sets.** Heroic keeps the `ANNOUNCED#<tier>` row it has
+always had; Normal sits beside it as `ANNOUNCED#<tier>#normal`. A boss is claimed once per
+difficulty, and each difficulty has its own tier-clear card — AOTC on Heroic, "cleared
+Normal" on Normal — under the same conditional claim.
+
+**Raider.IO describes the guild, not the team.** The guild's 8/8 Normal is not Meer's
+Raid's, so a team is **seeded from its own log history only**, its "n of X" is its own
+seed plus its own claims, and the card carries **no realm rank**. The one cost of
+history-only seeding is that a kill older than the log lookback could be announced again
+as a first; the alternative — seeding from the guild's count — would silence a whole
+tier's worth of the team's genuine firsts.
+
+The recap runs for the team on the same Wednesday and Friday schedule, from the same
+source and the same raid-day filter, at whichever difficulty the night was mostly spent
+on. There is no team classification to do: every report from the team's uploader on the
+team's night *is* the team's. Its page lives under `/meers-raid/<night>/`, because two
+teams raid the same Tuesday. Discord health probes are skipped for a team; the guild
+install already probes the same bot in the same server, and a second probe would mail
+every transition twice.
+
+```sh
+AWS_PROFILE=infra scripts/register-team.py --table ryangrey-greybot \
+    --guild us/proudmoore/Scrambled --discord-guild <server id> \
+    --team meers-raid --name "Meer's Raid" --channel <#meerbots id> \
+    --wcl-user <Warcraft Logs user id> --raid-days tue,thu \
+    --difficulties normal,heroic --role <Raiders role id> --apply
+```
+
+The next poll bootstraps the team and announces nothing, exactly as the first run did for
+the guild. Re-running the script overwrites the CONFIG row and touches nothing else.
+
+---
+
 ## The role mention
 
 A webhook message renders `<@&123>` as a role pill whether or not the ping fires, so a
@@ -791,6 +847,7 @@ assets/              greyBot-avatar.png — the canonical icon, 1024x1024
 scripts/selftest.py  the gate; no AWS, no boto3, no network
 scripts/fixtures/report-recap.json  a REAL Warcraft Logs response, trimmed
 scripts/introspect-wcl.py  ask the API what its schema is, before writing a query
+scripts/register-team.py   register a raid team as its own install (Meer's Raid)
 scripts/deploy.sh    package + ship the Lambda, then verify admin-owned wiring
 scripts/set-webhook-identity.py   name + avatar on the announcing webhook
 infra/iam-setup.sh   one-time admin setup (1 of 2): table, execution + scheduler roles
