@@ -1334,10 +1334,16 @@ def backfill(spec, cfg, now_iso):
         if spec.get("dry"):
             results.append({**info, "payload": payload})
             continue
-        sent = discord.post_to(destination(tcfg), payload)
-        _remember_post(scope, sent, "kill", now_iso)
-        posted += 1
-        log("backfill_posted", team=scope.team, difficulty=difficulty, **info)
+        if spec.get("post", True):
+            sent = discord.post_to(destination(tcfg), payload)
+            _remember_post(scope, sent, "kill", now_iso)
+            posted += 1
+            log("backfill_posted", team=scope.team, difficulty=difficulty, **info)
+        # The first-kill roster, exactly as a live announcement records it. A seeded boss
+        # has no KILL# row, so the recap reads it as long dead and cannot say the night's
+        # kill was a first, and the team's derived roster starts from nothing. "post":
+        # false runs only this part, for a team whose cards already went out.
+        record_roster(token, tcfg, scope, slug, key, kill, now_iso, difficulty=difficulty)
         results.append(info)
 
     log("backfill_done", team=scope.team, difficulty=difficulty, planned=len(planned),
@@ -1466,7 +1472,13 @@ def handler(event, context):
     # exception escaping here would stop every OTHER tenant being polled too --
     # one server's revoked channel must not silence the rest.
     results, failed = [], []
+    # A manual invocation may name one team, so a hand-run recap or preview lands in
+    # that team's channel alone rather than in every install's. The schedules send no
+    # such field and fan out to everyone.
+    only = (event or {}).get("team") if isinstance(event, dict) else None
     for tenant_scope, tenant_cfg in tenant_configs(cfg):
+        if only and tenant_scope.team != only:
+            continue
         try:
             results.append(poll_one(event, tenant_cfg, tenant_scope, now, now_iso, started))
         except Exception as exc:                                   # noqa: BLE001
