@@ -399,8 +399,8 @@ def record_roster(token, cfg, scope, slug, boss_key, kill, now_iso):
         return False
 
 
-def kill_card_url(cfg, slug, boss_key, boss_name, headline, lines, art_url):
-    """Draw the first-kill card and publish it, or return None and let the embed do it.
+def kill_card_url(cfg, slug, boss_key, boss_name, headline, lines, art_url, accent=None):
+    """Draw an announcement card and publish it, or return None and let the embed do it.
 
     Published to the same bucket as the recap page, under cards/, because it needs a URL
     Discord can fetch and that bucket already has one. The key is derived from the tier and
@@ -420,7 +420,8 @@ def kill_card_url(cfg, slug, boss_key, boss_name, headline, lines, art_url):
     try:
         if not cfg.get("recap_page_url") or not cfg.get("recap_page_bucket"):
             return None
-        png = kill_card.render(boss_name, headline, lines, art_url=art_url)
+        png = kill_card.render(boss_name, headline, lines, art_url=art_url,
+                               accent=accent or kill_card.ACCENT)
         if not png:
             return None
         key = f"cards/{slug}/{raiderio.slugify(boss_key or boss_name)}.png"
@@ -522,12 +523,23 @@ def announce_aotc(cfg, scope, slug, raid_label, state, when, thumb=None, profile
     if not store.claim_aotc(scope, slug):
         log("skip_aotc_already", slug=slug)
         return False
+    when_text = _when_text(when)
+
+    # Gold, and otherwise the same drawing as a first kill -- one tier's worth of cards
+    # that read as one product, with the colour carrying the difference. Keyed on "aotc"
+    # rather than on a boss, so a re-announce overwrites its own card like the kills do.
+    card = kill_card_url(cfg, slug, "aotc", "Ahead of the Curve",
+                         f"{cfg['guild_name']} just got",
+                         [f"Heroic {raid_label}", when_text], thumb,
+                         accent=kill_card.GOLD)
+
     payload = discord.aotc_payload(
-        cfg["guild_name"], raid_label, _when_text(when), cfg["role_id"],
+        cfg["guild_name"], raid_label, when_text, cfg["role_id"],
         iso_ts=_iso(when), thumbnail_url=thumb, repo_url=REPO_URL,
         guild_label=raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
         guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
-                                       cfg["guild_name"]))
+                                       cfg["guild_name"]),
+        card_url=card)
     try:
         discord.post_to(destination(cfg), payload)
     except discord.DiscordError as exc:
@@ -536,7 +548,7 @@ def announce_aotc(cfg, scope, slug, raid_label, state, when, thumb=None, profile
         return False
     state["aotcAnnounced"] = True
     log("announced_aotc", slug=slug, raid=raid_label, when=_iso(when),
-        rolePinged=bool(cfg["role_id"]))
+        rolePinged=bool(cfg["role_id"]), card=bool(card))
     return True
 
 
@@ -1353,11 +1365,13 @@ def poll_one(event, cfg, scope, now, now_iso, started):
                                                   "baseline": 0, "aotcAnnounced": False}
 
         last_announced_ms = None
+        last_announced = None
         for kill in bundle["kills"]:
             if announce_kill(cfg, scope, slug, raid_label, kill, state, profile, thumb,
                              now_iso, token=token):
                 announced += 1
                 last_announced_ms = kill["killedAtMs"]
+                last_announced = kill
 
         r_killed, total = raiderio.progress_for(profile, slug)
         count = store.progress_count(state, r_killed, total)
@@ -1366,7 +1380,16 @@ def poll_one(event, cfg, scope, now, now_iso, started):
             # in the window would date AOTC by a re-kill on a later farm night, in the case
             # where Raider.IO only caught up after the real clear.
             when_ms = last_announced_ms or bundle["kills"][-1]["killedAtMs"]
-            announce_aotc(cfg, scope, slug, raid_label, state, _at(when_ms))
+            # The portrait of the boss that finished the tier, NOT the raid icon `thumb`
+            # the kills use as a fallback. Raider.IO's icon CDN tops out at 56px, and the
+            # card's art panel is 300 -- an icon there is the blurred square the whole
+            # drawn-card exercise existed to get rid of. Cached in DynamoDB from the kill
+            # that just announced, so this costs no Blizzard call. None is a fine answer:
+            # the card lays out without an art panel rather than with a bad one.
+            finisher = last_announced or bundle["kills"][-1]
+            art = boss_art(cfg, finisher["name"], now_iso)
+            announce_aotc(cfg, scope, slug, raid_label, state, _at(when_ms),
+                          thumb=art, profile=profile)
 
         store.touch(scope, slug, now_iso, raid_name=raid_label)
         # Leave the display values behind for /progress. Written for the tier of the most

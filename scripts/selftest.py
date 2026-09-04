@@ -1216,6 +1216,28 @@ def test_discord_payloads():
           discord.aotc_payload("S", "R", "w", "1")["embeds"][0]["description"]
           == "Congratulations to the team!")
 
+    # The drawn AOTC card. The image carries the words, the embed keeps only what a PNG
+    # cannot do: the ping, the author link and the clickable credit.
+    carded = discord.aotc_payload("Scrambled", "R", "when", "1",
+                                  thumbnail_url="https://art/x.jpg",
+                                  repo_url="https://github.com/ryan-grey/greybot",
+                                  card_url="https://raids/cards/r/aotc.png")["embeds"][0]
+    check("a drawn AOTC card becomes the embed image",
+          carded.get("image") == {"url": "https://raids/cards/r/aotc.png"})
+    check("...and the embed stops repeating the card's words",
+          "title" not in carded and "thumbnail" not in carded, sorted(carded))
+    check("...but the credit link survives, because a PNG cannot be clicked",
+          carded.get("description") == "[greyBot](https://github.com/ryan-grey/greybot)")
+    check("...and the footer still names the achievement",
+          carded["footer"]["text"] == "Ahead of the Curve — Heroic R")
+    check("a card with no repo URL has no empty description either",
+          "description" not in discord.aotc_payload("S", "R", "w", "1",
+                                                    card_url="https://x/aotc.png")
+          ["embeds"][0])
+    check("the ping is untouched by the card",
+          discord.aotc_payload("S", "R", "w", "1", card_url="https://x")["content"]
+          == "<@&1>")
+
 
 def test_wcl_parsing():
     print("\nWarcraft Logs parsing")
@@ -1805,6 +1827,20 @@ def test_kill_card_image():
 
     png = kill_card.render("Boss", "Guild just killed", ["line"], art_url=None)
     check("a card with no art at all is still a card", bool(png))
+
+    # AOTC is the same drawing in gold. Same size, same layout, one colour different --
+    # so the two can never drift apart, and the gold is checked on the pixels themselves.
+    from PIL import Image as _Image
+    import io as _io
+    gold = kill_card.render("Ahead of the Curve", "Scrambled just got",
+                            ["Heroic The Venomous Abyss", "when"], accent=kill_card.GOLD)
+    img = _Image.open(_io.BytesIO(gold)).convert("RGB")
+    check("an AOTC card is the same size as a kill card",
+          img.size == (kill_card.WIDTH, kill_card.HEIGHT), img.size)
+    check("...and its headline is actually painted gold",
+          kill_card.GOLD in set(img.getdata()) and kill_card.ACCENT not in set(img.getdata()))
+    check("the accent is a parameter, and the default is still the kill-card blue",
+          kill_card.ACCENT in set(_Image.open(_io.BytesIO(png)).convert("RGB").getdata()))
 
     # The boss is already CLAIMED when the card is drawn, so a bug in here loses the
     # announcement outright rather than just the picture. It happened once, live.

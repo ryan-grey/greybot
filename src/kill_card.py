@@ -51,9 +51,10 @@ def _font_dir():
 
 FONT_DIR = _font_dir()
 
-# Brand, matching discord.BRAND_NAVY and BRAND_ACCENT.
+# Brand, matching discord.BRAND_NAVY, BRAND_ACCENT and AOTC_GOLD.
 NAVY = (14, 27, 44)
 ACCENT = (92, 168, 240)
+GOLD = (232, 180, 74)          # AOTC only, and the reason `accent` is a parameter
 INK = (238, 243, 250)
 MUTED = (150, 168, 190)
 
@@ -95,12 +96,16 @@ def _fit(text, path, draw, limit, size, floor):
     return (text + "…") if text else "", font
 
 
-def render(boss_name, headline, lines, art_url=None):
+def render(boss_name, headline, lines, art_url=None, accent=ACCENT):
     """The card as PNG bytes, or None if anything at all went wrong.
 
     `lines` is the body text already composed by the caller -- this module decides how a
     card looks and nothing about what it says, so the wording lives in one place with the
     embed's.
+
+    `accent` colours the headline word and the hairline beside the art, and is the ONLY
+    thing that separates a kill card from an AOTC one. Two renderers would be two places
+    for the layout to drift; the gold is a parameter precisely so it cannot.
     """
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -128,7 +133,7 @@ def render(boss_name, headline, lines, art_url=None):
                 card.paste(art, (0, 0))
                 # A hairline in the accent, so the art reads as part of the card rather
                 # than as a picture someone dropped on top of it.
-                draw.rectangle([ART, 0, ART + 2, HEIGHT], fill=ACCENT)
+                draw.rectangle([ART, 0, ART + 2, HEIGHT], fill=accent)
                 text_left = ART + 34
             except Exception:                                  # noqa: BLE001
                 # No art is a layout, not a failure: the text simply starts at the margin.
@@ -141,7 +146,7 @@ def render(boss_name, headline, lines, art_url=None):
 
         y += 44
         text, font = _fit(boss_name, bold, draw, limit, 54, 32)
-        draw.text((text_left, y), text, font=font, fill=ACCENT)
+        draw.text((text_left, y), text, font=font, fill=accent)
 
         y += 78
         for line in lines or ():
