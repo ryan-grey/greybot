@@ -1930,6 +1930,21 @@ def test_team_install():
     check("an off-day kill from the same uploader is not the team's", posts == [],
           len(posts))
 
+    # --- aiming a manual run at one team ----------------------------------
+    polled = []
+    real_poll = handler.poll_one
+    handler.poll_one = lambda ev, c, s, n, ni, st: polled.append(s.team) or {"ok": True}
+    try:
+        handler.handler({"team": "meers-raid"}, None)
+        check("an event naming a team polls that team alone", polled == ["meers-raid"],
+              polled)
+        polled.clear()
+        handler.handler({}, None)
+        check("...and a scheduled event still fans out to everyone",
+              sorted(polled, key=str) == [None, "meers-raid"], polled)
+    finally:
+        handler.poll_one = real_poll
+
     # --- backfilling the seeded firsts ------------------------------------
     # The three Normal bosses the bootstrap seeded get their cards after the fact, oldest
     # first, dated by the real kill, and the announced set does not move.
@@ -1962,9 +1977,16 @@ def test_team_install():
     check("...reading 1 through 8 of 8 in Normal",
           ["**%d** of **8** in Normal" % i in posts[i - 1][1]["embeds"][0]["description"]
            for i in range(1, 9)] == [True] * 8)
-    after = {k: v for k, v in FAKE_DDB.items.items() if k[1] != "POSTS"}
-    check("...and touches no announced state",
-          after == {k: v for k, v in before.items() if k[1] != "POSTS"})
+    skip = lambda items: {k: v for k, v in items.items()
+                          if k[1] != "POSTS" and not k[1].startswith("KILL#")}
+    check("...and touches no announced state", skip(FAKE_DDB.items) == skip(before))
+    check("...but records each first kill's roster, as a live announcement would",
+          store.get_first_kill(tscope, "the-venomous-abyss", raiderio.normalize(ABYSS[2]))
+          ["players"] == {"meerclar@proudmoore"})
+    posts.clear()
+    handler.handler({"admin": "backfill", "team": "meers-raid", "difficulty": "normal",
+                     "slugs": ["the-venomous-abyss"], "post": False}, None)
+    check("post:false records rosters and posts nothing", posts == [], len(posts))
 
     handler.discord.post_to = real_post_to
     handler.wcl.kill_participants = real_participants
