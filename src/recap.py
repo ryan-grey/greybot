@@ -671,7 +671,8 @@ def raider_rows(sources, eligible_names, difficulty=HEROIC):
     def row(key, name, server="", klass=""):
         rec = rows.setdefault(key, {"key": key, "name": name, "server": server or "",
                                     "class": klass or "",
-                                    "damage": None, "dps": None, "healing": None,
+                                    "damage": None, "dps": None,
+                                    "healing": None, "hps": None,
                                     "damageTaken": None, "deaths": None,
                                     "parse": None, "parseBoss": None,
                                     "parseAvg": None, "parseCount": 0,
@@ -697,6 +698,8 @@ def raider_rows(sources, eligible_names, difficulty=HEROIC):
             rec[field] = r["total"]
             if field == "damage":
                 rec["dps"] = r.get("perSecond")
+            elif field == "healing":
+                rec["hps"] = r.get("perSecond")
     for r in death_counts(sources):
         row(r["key"], r["name"], r.get("server"))["deaths"] = r["deaths"]
 

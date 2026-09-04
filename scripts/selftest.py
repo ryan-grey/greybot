@@ -3266,6 +3266,22 @@ def test_recap_end_to_end():
     check("a damage table with no duration falls back to the bare total",
           handler.discord._dps_and_total({"total": 145_000_000, "perSecond": None})
           == "145M")
+    # Healing gets the same treatment, "61K/261M". The recap fixture carries no healing
+    # table, so this goes through the renderers with a synthetic row.
+    heal_row = {"name": "Marloak", "class": "Druid", "role": "healer",
+                "total": 261_000_000, "perSecond": 61_000.0}
+    heal_embed = handler.discord.recap_embed(
+        "Scrambled", "The Venomous Abyss", "Thursday", {"healing": [heal_row], "bosses": []})
+    heal_field = [f["value"] for f in heal_embed["embeds"][0]["fields"]
+                  if f["name"] == "Top heals"]
+    check("healing reads HPS/healing done on the card",
+          heal_field and "**61K/261M**" in heal_field[0], heal_field)
+    _d, page_heals, _t, _de, _p = handler.recap_page.columns(
+        [{"name": "Marloak", "server": "", "class": "Druid", "healing": 261_000_000,
+          "hps": 61_000.0}])
+    check("...and on the page", page_heals and page_heals[0][1] == "61K/261M", page_heals)
+    check("...under an HPS / Healing header",
+          "HPS / Healing" in html)
     check("most deaths is on the card", "Most deaths" in fields, fields)
     check("worst parse is OFF by default", "Worst parse" not in fields, fields)
 

@@ -390,7 +390,7 @@ def columns(rows, region=None):
                                 key=lambda r: (-r[field], r["name"]))]
 
     dps = ranked("damage", per="dps")
-    heals = ranked("healing")
+    heals = ranked("healing", per="hps")
     taken = ranked("damageTaken")
 
     deaths = [(_who(r, region), str(r["deaths"]))
@@ -434,7 +434,7 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
     cols = "\n".join((
         _column("DPS / Damage", dps, "No damage table could be read.",
                 icon=role_icon("dps")),
-        _column("Healing", heals, "No healing table could be read.",
+        _column("HPS / Healing", heals, "No healing table could be read.",
                 icon=role_icon("healer")),
         _column("Damage taken", taken, "No damage-taken table could be read.",
                 icon=role_icon("tank")),
@@ -477,8 +477,8 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
     </div>
     <p class="note">
       {_esc(difficulty)} raid fights only &mdash; dungeons and other difficulties in the same log are
-      excluded. DPS is damage done over the night&rsquo;s total fight time, as Warcraft Logs
-      computes it for all fights. Overall parse is the mean of a raider&rsquo;s rankings across the kills they
+      excluded. DPS and HPS are damage and healing done over the night&rsquo;s total fight
+      time, as Warcraft Logs computes them for all fights. Overall parse is the mean of a raider&rsquo;s rankings across the kills they
       were in; bosses they sat are not counted against them.
     </p>
     <p class="note footnote">
