@@ -1930,6 +1930,42 @@ def test_team_install():
     check("an off-day kill from the same uploader is not the team's", posts == [],
           len(posts))
 
+    # --- backfilling the seeded firsts ------------------------------------
+    # The three Normal bosses the bootstrap seeded get their cards after the fact, oldest
+    # first, dated by the real kill, and the announced set does not move.
+    posts.clear()
+    before = copy.deepcopy(FAKE_DDB.items)
+    res = handler.handler({"admin": "backfill", "team": "meers-raid",
+                           "difficulty": "normal", "slugs": ["the-venomous-abyss"],
+                           "dry": True}, None)
+    check("a dry backfill posts nothing", posts == [], len(posts))
+    # By now the team's announced set holds all eight; the off-day kill of ABYSS[3] is
+    # not its first, the on-day one half a day ago is.
+    check("...and plans a card per announced first kill, oldest first",
+          [c["boss"] for c in res["cards"]] == list(ABYSS),
+          [c["boss"] for c in res.get("cards", [])])
+    check("...numbered by their place in the tier",
+          [c["count"] for c in res["cards"]] == list(range(1, 9)))
+    check("...dating the off-day boss by its RAID-DAY kill, not the Saturday one",
+          res["cards"][3]["killedAt"] == handler._iso(handler._at(ms(0.5) + 60000)),
+          res["cards"][3]["killedAt"])
+    check("...each carrying the kill's own date on the card",
+          all(c["localTime"] in c["payload"]["embeds"][0]["description"]
+              for c in res["cards"]))
+    check("...and dated by the kill, not by now",
+          res["cards"][0]["payload"]["embeds"][0]["timestamp"] == res["cards"][0]["killedAt"])
+    res = handler.handler({"admin": "backfill", "team": "meers-raid",
+                           "difficulty": "normal", "slugs": ["the-venomous-abyss"]}, None)
+    check("a live backfill posts the eight cards to the team's channel",
+          len(posts) == 8 and all(d.get("channel") == TEAM_CHANNEL for d, _ in posts),
+          [d for d, _ in posts])
+    check("...reading 1 through 8 of 8 in Normal",
+          ["**%d** of **8** in Normal" % i in posts[i - 1][1]["embeds"][0]["description"]
+           for i in range(1, 9)] == [True] * 8)
+    after = {k: v for k, v in FAKE_DDB.items.items() if k[1] != "POSTS"}
+    check("...and touches no announced state",
+          after == {k: v for k, v in before.items() if k[1] != "POSTS"})
+
     handler.discord.post_to = real_post_to
     handler.wcl.kill_participants = real_participants
     ssm.pop("bot_token", None)
