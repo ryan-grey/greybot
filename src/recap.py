@@ -305,7 +305,16 @@ def totals(sources, blob_key, limit=None):
     out = {}
     for src in sources or ():
         actors, elig = src.get("actors") or {}, src.get("eligible") or set()
-        for e in _entries(src.get(blob_key), "data", "entries"):
+        blob = src.get(blob_key)
+        # The table's own duration: the summed length of the fights it was scoped to, in
+        # milliseconds. It is what Warcraft Logs divides by for the per-second column on
+        # its "all fights" view, so the figure here matches the one on the site. Summed
+        # per player across the night's reports, so a log restarted at the break divides
+        # the whole night's damage by the whole night's time.
+        data = (blob or {}).get("data") if isinstance(blob, dict) else None
+        span = (data or {}).get("totalTime") if isinstance(data, dict) else None
+        span = int(span) if isinstance(span, (int, float)) and span > 0 else 0
+        for e in _entries(blob, "data", "entries"):
             aid, total = e.get("id"), e.get("total")
             if aid is None or not isinstance(total, (int, float)):
                 continue
@@ -318,11 +327,17 @@ def totals(sources, blob_key, limit=None):
             key, a = found
             rec = out.setdefault(key, {"key": key, "name": a["name"],
                                        "server": a.get("server") or "",
-                                       "class": a.get("class") or "", "total": 0})
+                                       "class": a.get("class") or "", "total": 0,
+                                       "timeMs": 0})
             rec["total"] += int(total)
+            rec["timeMs"] += span
     roles = _roles_by_key(sources)
     for key, rec in out.items():
         rec["role"] = roles.get(key)
+        # None, not 0, when the table carried no duration: a per-second figure that
+        # cannot be computed is omitted by the renderers, never printed as 0.
+        rec["perSecond"] = (rec["total"] / (rec["timeMs"] / 1000.0)
+                            if rec["timeMs"] > 0 else None)
     rows = sorted(out.values(), key=lambda r: (-r["total"], r["name"]))
     return rows[:limit]
 
@@ -656,7 +671,7 @@ def raider_rows(sources, eligible_names, difficulty=HEROIC):
     def row(key, name, server="", klass=""):
         rec = rows.setdefault(key, {"key": key, "name": name, "server": server or "",
                                     "class": klass or "",
-                                    "damage": None, "healing": None,
+                                    "damage": None, "dps": None, "healing": None,
                                     "damageTaken": None, "deaths": None,
                                     "parse": None, "parseBoss": None,
                                     "parseAvg": None, "parseCount": 0,
@@ -678,7 +693,10 @@ def raider_rows(sources, eligible_names, difficulty=HEROIC):
     for blob, field in (("damage", "damage"), ("healing", "healing"),
                         ("damageTaken", "damageTaken")):
         for r in totals(sources, blob):
-            row(r["key"], r["name"], r.get("server"), r.get("class"))[field] = r["total"]
+            rec = row(r["key"], r["name"], r.get("server"), r.get("class"))
+            rec[field] = r["total"]
+            if field == "damage":
+                rec["dps"] = r.get("perSecond")
     for r in death_counts(sources):
         row(r["key"], r["name"], r.get("server"))["deaths"] = r["deaths"]
 
