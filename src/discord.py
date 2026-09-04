@@ -254,7 +254,8 @@ def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
 
 
 def aotc_payload(guild_name, raid_name, when_text, role_id, iso_ts=None,
-                 thumbnail_url=None, guild_label=None, guild_url=None, repo_url=None):
+                 thumbnail_url=None, guild_label=None, guild_url=None, repo_url=None,
+                 card_url=None):
     """The AOTC card, and the only message in the bot that pings anyone.
 
     This is also the only card carrying a credit line. A kill card goes out several times
@@ -273,7 +274,19 @@ def aotc_payload(guild_name, raid_name, when_text, role_id, iso_ts=None,
     }
     if iso_ts:
         embed["timestamp"] = iso_ts
-    if thumbnail_url:
+    if card_url:
+        # The card says the guild, the achievement, the raid and the date, so the embed
+        # stops saying all four a second time. What it keeps is the credit link: a PNG
+        # cannot be clicked, and unlike a kill card the title here carries no URL to
+        # survive as one, so the line goes in the description or nowhere.
+        embed["image"] = {"url": card_url}
+        embed.pop("thumbnail", None)
+        embed.pop("title", None)
+        if repo_url:
+            embed["description"] = f"[greyBot]({repo_url})"
+        else:
+            embed.pop("description", None)
+    elif thumbnail_url:
         embed["thumbnail"] = {"url": thumbnail_url}
     author = _author(guild_label, guild_url)
     if author:
