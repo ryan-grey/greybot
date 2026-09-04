@@ -3306,6 +3306,12 @@ def test_recap_end_to_end():
                               team="meers-raid")
     store.mark_bootstrapped(tscope, "now", 4)
     store.seed_tier(tscope, "the-venomous-abyss", set(), 0, "The Venomous Abyss", "now")
+    # A "usable" derived roster of one stranger. On the guild install that would drop
+    # every real raider from the board as a pug; on a team it must change nothing.
+    for i, boss in enumerate(ABYSS[:3]):
+        store.claim_boss(tscope, "the-venomous-abyss", raiderio.normalize(boss))
+        store.record_first_kill(tscope, "the-venomous-abyss", raiderio.normalize(boss),
+                                {"stranger@proudmoore"}, 1, f"R{i}", "now")
     cfg["bot_token"] = "bot-tok"
     cfg["recap_enabled"] = True
     asked = {}
@@ -3338,6 +3344,11 @@ def test_recap_end_to_end():
               embed["footer"]["text"].startswith("Heroic The Venomous Abyss"),
               embed["footer"])
         check("...pinging nobody", "content" not in team_cards[0][1])
+        dmg = [f["value"] for f in embed["fields"] if f["name"] == "Top damage"]
+        check("...with the team's real raiders on the board, roster or no roster",
+              dmg and "Nightbarrow" in dmg[0], dmg)
+        check("...and nobody excluded as a pug",
+              "18 raiders" in embed["footer"]["text"], embed["footer"])
     check("the team's night is claimed under the TEAM's tenant",
           not store.claim_recap(tscope, res.get("night") or "") if res.get("night")
           else False, res)
