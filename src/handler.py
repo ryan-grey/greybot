@@ -2221,7 +2221,8 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         summary.get("bossLabels") or summary.get("bosses"), rows, sources_meta,
         raiders=summary.get("raiders"), canonical=page_url,
         region=cfg.get("guild_region"),
-        world_bosses=summary.get("worldBosses"), difficulty=diff_label)
+        world_bosses=summary.get("worldBosses"), difficulty=diff_label,
+        raiders_heading="Raiders" if is_team(cfg) else "Prog Raiders")
 
     # Published BEFORE the card is posted, and the link is dropped if the put fails. A card
     # in the channel saying "full recap here" that 404s is worse than a card with no
