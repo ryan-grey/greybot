@@ -405,8 +405,13 @@ def columns(rows, region=None):
 
 def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
            raiders=None, canonical=None, region=None, world_bosses=None,
-           difficulty="Heroic"):
-    """One night's recap page as a complete HTML document."""
+           difficulty="Heroic", raiders_heading="Prog Raiders"):
+    """One night's recap page as a complete HTML document.
+
+    `raiders_heading` names the people in the columns. The guild install says "Prog
+    Raiders", which is the Discord role the prog team carries; a team install passes its
+    own word, because its columns are not the prog team.
+    """
     dps, heals, taken, deaths, parses = columns(rows or [], region)
     killed = "".join(f"<span>{_esc(b)}</span>" for b in boss_labels or ())
     # World bosses sit in the same chip row but marked, because they are not part of the
@@ -471,7 +476,7 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
   {killed_block}
 
   <section>
-    <h2>Prog Raiders</h2>
+    <h2>{_esc(raiders_heading)}</h2>
     <div class="cols">
 {cols}
     </div>
