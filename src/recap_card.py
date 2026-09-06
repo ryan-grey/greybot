@@ -282,7 +282,10 @@ def _column(canvas, x, y, w, title, icon, rows, empty):
         canvas.text(nx, gy - 2, _ellipsis(canvas, name, name_font, limit), name_font,
                     _rgb(colour) if colour else INK)
         if sub:
-            canvas.text(nx, gy + 17, _ellipsis(canvas, str(sub), sub_font, limit + vw),
+            # Same bound as the name: on the page the sub-line lives inside `.who`, which
+            # stops where `.val` starts, so a long boss name ends in an ellipsis rather
+            # than running under the pill.
+            canvas.text(nx, gy + 17, _ellipsis(canvas, str(sub), sub_font, limit),
                         sub_font, MUTED)
 
 
