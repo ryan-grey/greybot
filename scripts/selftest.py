@@ -3342,6 +3342,47 @@ def test_recap_end_to_end():
     check("a summary that is not a dict returns None, never raises",
           recap_card.render(object()) is None)
 
+    # A full raid cannot lose bosses when the first chip row fills. Observe the
+    # rendered text and rectangles, including the boundary above the leaderboards.
+    labels = ["1/8 Nek'zali the Soulcoiler", "2/8 Entombed Sentinels",
+              "3/8 The Lost Explorers", "4/8 Vashnik the Malignant", "5/8 Sszorak",
+              "6/8 Another Encounter", "7/8 The Coiled Altar", "8/8 Final Encounter"]
+    real_text, real_rect = recap_card._Canvas.text, recap_card._Canvas.rect
+    drawn, chip_boxes = [], []
+    def record_text(self, x, y, text, font, fill, spacing=0):
+        drawn.append((text, x, y))
+        return real_text(self, x, y, text, font, fill, spacing)
+    def record_rect(self, x0, y0, x1, y1, fill=None, outline=None, radius=0):
+        if fill == recap_card.CHIP_ACCENT_BG and radius == 11:
+            chip_boxes.append((x0, y0, x1, y1))
+        return real_rect(self, x0, y0, x1, y1, fill, outline, radius)
+    recap_card._Canvas.text, recap_card._Canvas.rect = record_text, record_rect
+    try:
+        for team, count in [("Saturday Raid", 5), ("Meer's Raid", 8), ("Scrambled", 8)]:
+            drawn.clear()
+            chip_boxes.clear()
+            wrapped = recap_card.render(dict(dry_summary, bossLabels=labels[:count]),
+                                        team, "Saturday", "The Venomous Abyss", "Normal")
+            positions = [(t, y) for t, x, y in drawn if t in labels]
+            grid_y = next(y for t, x, y in drawn if t == "DPS / DAMAGE")
+            check(f"{team}: every boss is drawn in order across multiple rows",
+                  wrapped and [t for t, y in positions] == labels[:count]
+                  and len({y for t, y in positions}) > 1, positions)
+            check(f"{team}: chips stay inside the card and above the grid",
+                  len(chip_boxes) == count and all(
+                      x0 >= recap_card.PAD and x1 <= recap_card.WIDTH_CSS - recap_card.PAD
+                      and y1 < grid_y for x0, y0, x1, y1 in chip_boxes), chip_boxes)
+        drawn.clear()
+        chip_boxes.clear()
+        oversized = recap_card.render({"bossLabels": ["Very long boss name " * 30, "Last boss"]})
+        check("an oversized label fits without hiding the following boss",
+              oversized and any(t == "Last boss" for t, x, y in drawn)
+              and len(chip_boxes) == 2 and all(
+                  x1 <= recap_card.WIDTH_CSS - recap_card.PAD
+                  for x0, y0, x1, y1 in chip_boxes), chip_boxes)
+    finally:
+        recap_card._Canvas.text, recap_card._Canvas.rect = real_text, real_rect
+
     with_card = handler.discord.recap_embed(
         "Scrambled", "The Venomous Abyss", "Thursday", dry_summary,
         recap_url="https://r/x/", card_url="https://r/cards/recap/x.png")["embeds"][0]

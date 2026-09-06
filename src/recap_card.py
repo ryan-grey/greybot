@@ -341,7 +341,21 @@ def render(summary, guild_name=None, night_text=None, raid_name=None, difficulty
 
         # The page's header, measured before the canvas exists so the height is exact.
         chips = list(summary.get("bossLabels") or summary.get("bosses") or [])
-        head_h = 24 + 18 + 34 + 24 + (30 if chips else 24) + 8
+        measure_image = Image.new("RGB", (1, 1))
+        measure = _Canvas(measure_image, ImageDraw.Draw(measure_image), {})
+        chip_font = measure.font("semibold", 12)
+        chip_rows = [[]]
+        cx = PAD
+        for label in chips:
+            label = _ellipsis(measure, label, chip_font, WIDTH_CSS - 2 * PAD - 20)
+            cw = measure.width(label, chip_font) + 20
+            if chip_rows[-1] and cx + cw > WIDTH_CSS - PAD:
+                chip_rows.append([])
+                cx = PAD
+            chip_rows[-1].append((cx, cw, label))
+            cx += cw + 8
+        chip_height = 30 * len(chip_rows) if chips else 24
+        head_h = 24 + 18 + 34 + 24 + chip_height + 8
         height = TOPBAR + head_h + ROWS * col_h + (ROWS - 1) * COL_GAP + PAD
 
         image = Image.new("RGB", (WIDTH_CSS * SCALE, int(height * SCALE)), BG)
@@ -370,16 +384,13 @@ def render(summary, guild_name=None, night_text=None, raid_name=None, difficulty
         canvas.text(PAD, y, sub, lede_font, MUTED)
         y += 24
         if chips:
-            cx = PAD
             chip_font = canvas.font("semibold", 12)
-            for label in chips:
-                cw = canvas.width(label, chip_font) + 20
-                if cx + cw > WIDTH_CSS - PAD:
-                    break
-                canvas.rect(cx, y + 4, cx + cw, y + 26, fill=CHIP_ACCENT_BG, radius=11)
-                canvas.text(cx + 10, y + 7, label, chip_font, ACCENT)
-                cx += cw + 8
-            y += 30
+            for row in chip_rows:
+                for cx, cw, label in row:
+                    canvas.rect(cx, y + 4, cx + cw, y + 26,
+                                fill=CHIP_ACCENT_BG, radius=11)
+                    canvas.text(cx + 10, y + 7, label, chip_font, ACCENT)
+                y += 30
         else:
             canvas.text(PAD, y, "No kills — a full night on progression.", lede_font,
                         MUTED)
