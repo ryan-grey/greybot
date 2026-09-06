@@ -201,7 +201,7 @@ h2 {
 }
 section { margin-top:48px; }
 .killed { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
-.killed span {
+.killed > span {
   font-size:13px; font-weight:500; color:var(--accent);
   background:var(--chip-accent-bg); padding:4px 12px; border-radius:999px;
 }
@@ -210,6 +210,12 @@ section { margin-top:48px; }
   border:1px solid rgba(212,167,44,0.45);
 }
 @media (prefers-color-scheme: dark) { .killed .wb { color:#d29922; } }
+/* A boss still standing: same chip, no accent — pulled, not killed. */
+.killed .standing {
+  color:var(--muted); background:var(--chip); border:1px solid var(--line);
+}
+.killed .n { color:var(--muted); font-weight:400; }
+.killed .standing .n { color:var(--ink); }
 
 /* Six ranked columns: three across, six on a wide screen */
 .cols { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:20px; }
@@ -439,9 +445,45 @@ def columns(rows, region=None, ilvl_scale=None):
     return dps, heals, taken, deaths, parses, ilvls
 
 
+def _chips(boss_labels, pulls):
+    """The chip row: every boss that died, then every boss still standing.
+
+    A killed boss keeps its accent chip and gains its wipe count when there was one --
+    "5/8 Sszorak · 3 wipes" -- because a first kill after nine wipes and a one-pull farm
+    kill are different nights and the chip is the only place the page says so. A boss
+    that was pulled and did not die gets the plain chip with its pulls and closest
+    attempt: "7/8 The Coiled Altar · 2 pulls · best 74.0%". That is the whole of it; the
+    header carries no other numbers.
+
+    `pulls` rows are matched to kills by LABEL, which is the same string recap.summarise
+    put in `boss_labels`, so this module never has to normalise a boss name itself.
+    """
+    by_label = {p.get("label") or p.get("name"): p for p in pulls or ()}
+    out = []
+    for b in boss_labels or ():
+        p = by_label.get(b) or {}
+        wipes = int(p.get("wipes") or 0)
+        note = (f' <span class="n">&middot; {wipes} {"wipe" if wipes == 1 else "wipes"}'
+                f'</span>' if wipes else "")
+        out.append(f"<span>{_esc(b)}{note}</span>")
+    for p in pulls or ():
+        if p.get("killed"):
+            continue
+        n = int(p.get("pulls") or 0)
+        note = f'{n} {"pull" if n == 1 else "pulls"}'
+        best = p.get("best")
+        # fightPercentage is REMAINING health, so a low number is a close attempt.
+        if isinstance(best, (int, float)) and best > 0:
+            note += f" &middot; best {best:.1f}%"
+        out.append(f'<span class="standing">{_esc(p.get("label") or p.get("name"))} '
+                   f'<span class="n">&middot; {note}</span></span>')
+    return "".join(out)
+
+
 def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
            raiders=None, canonical=None, region=None, world_bosses=None,
-           difficulty="Heroic", raiders_heading="Prog Raiders", ilvl_scale=None):
+           difficulty="Heroic", raiders_heading="Prog Raiders", ilvl_scale=None,
+           pulls=None):
     """One night's recap page as a complete HTML document.
 
     `raiders_heading` names the people in the columns. The guild install says "Prog
@@ -450,9 +492,12 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
 
     `ilvl_scale` is the zone's item level bracket range from Warcraft Logs, and it is what
     colours the item level column; None prints the numbers plain.
+
+    `pulls` is recap.summarise's per-boss tally and feeds the chip row -- wipes on the
+    kills, pulls and best attempt on whatever is still standing.
     """
     dps, heals, taken, deaths, parses, ilvls = columns(rows or [], region, ilvl_scale)
-    killed = "".join(f"<span>{_esc(b)}</span>" for b in boss_labels or ())
+    killed = _chips(boss_labels, pulls)
     # World bosses sit in the same chip row but marked, because they are not part of the
     # tier's count -- a reader glancing at four chips should not come away thinking the
     # guild is 5/8.

@@ -215,6 +215,40 @@ def unkilled(scope):
     return sorted(rows, key=lambda r: (-r["pulls"], r["name"]))
 
 
+def pull_counts(scope):
+    """Every boss pulled tonight: pulls, wipes, whether it died, and the closest wipe.
+
+    One row per boss, killed or not, because the page's chip row shows both: a killed
+    boss wears its wipe count ("5/8 Sszorak · 3 wipes"), a standing one its pulls and
+    best attempt ("7/8 The Coiled Altar · 2 pulls · best 74.0%"). `unkilled` and
+    `prog_encounter` each answer a narrower question from the same fights; this is the
+    whole tally, in the order the bosses were first pulled.
+
+    `best` is the lowest REMAINING health across the wipes, None where no percentage came
+    back, and None for a kill -- a killed boss's best attempt is the kill, which is not
+    a percentage worth printing.
+    """
+    tally = {}
+    for f in sorted(scope["fights"], key=lambda f: f.get("startTime") or 0):
+        key = raiderio.normalize(f.get("name"))
+        if not key:
+            continue
+        rec = tally.setdefault(key, {"name": f.get("name"), "pulls": 0, "wipes": 0,
+                                     "killed": False, "best": None})
+        rec["pulls"] += 1
+        if f.get("kill"):
+            rec["killed"] = True
+            continue
+        rec["wipes"] += 1
+        pct = f.get("fightPercentage")
+        if isinstance(pct, (int, float)) and (rec["best"] is None or pct < rec["best"]):
+            rec["best"] = float(pct)
+    for rec in tally.values():
+        if rec["killed"]:
+            rec["best"] = None
+    return list(tally.values())
+
+
 def first_kills(bosses, dead):
     """Of tonight's kills, the ones that had not died before -- the actual progression.
 
@@ -631,6 +665,13 @@ def summarise(scope, sources, show_worst_parse=False, encounters=None,
     order, tier_total = boss_order(encounters)
     out["unkilled"] = [dict(r, label=boss_label(r["name"], order, tier_total))
                        for r in unkilled(scope)]
+    # The whole tally for the page's chip row, labelled the same way as the kills so the
+    # page can match a chip to its count by label. Tier order first, unnumbered last.
+    pulls = [dict(r, label=boss_label(r["name"], order, tier_total))
+             for r in pull_counts(scope)]
+    pulls.sort(key=lambda r: (order.get(raiderio.normalize(r["name"])) is None,
+                              order.get(raiderio.normalize(r["name"])) or 0, r["name"]))
+    out["pulls"] = pulls
     out["damage"] = top_damage(sources)
     out["healing"] = top_healing(sources)
     out["damageTaken"] = top_damage_taken(sources)

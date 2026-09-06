@@ -332,6 +332,11 @@ text in a PNG cannot be selected, searched or read by a screen reader — so the
 fields remain as the fallback and are used whenever the image cannot be drawn or published.
 Both are rendered from the same `summary` keys, so they cannot disagree.
 
+**The page's chip row is the whole story of the pulls.** A killed boss wears its wipe count
+("5/8 Sszorak · 3 wipes"); a boss pulled and left standing gets a plain chip with its pulls
+and closest attempt ("7/8 The Coiled Altar · 2 pulls · best 74.0%", where the percentage is
+health remaining). `recap.pull_counts` is the tally; nothing else goes up there.
+
 **Item level is coloured on the parse bands.** Warcraft Logs ranks each raid zone across an
 item level bracket range (`worldData.zone.brackets`: The Venomous Abyss is 272–344 in steps
 of 3), read live per recap so it rolls over with the tier. An item level's position in that

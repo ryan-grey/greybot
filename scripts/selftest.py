@@ -3461,6 +3461,44 @@ def test_recap_end_to_end():
     check("...with the range explained in the note", "272&ndash;344" in page)
     check("the six columns go six across on a wide screen",
           "repeat(6, minmax(0, 1fr))" in page)
+
+    # The chip row: wipes on the kills, pulls and best attempt on what is still standing.
+    tally = {p["name"]: p
+             for p in recap.pull_counts(recap.raid_scope(FIXTURE["fights"], wcl.HEROIC))}
+    fx_fights = [f for f in FIXTURE["fights"] if f["difficulty"] == wcl.HEROIC
+                 and f.get("encounterID")]
+    check("pull_counts tallies every boss pulled, killed or not",
+          set(tally) == {f["name"] for f in fx_fights}, set(tally))
+    for name, p in tally.items():
+        mine = [f for f in fx_fights if f["name"] == name]
+        check(f"...{name}: pulls, wipes and killed agree with the fights",
+              p["pulls"] == len(mine) and p["wipes"] == sum(1 for f in mine if not f["kill"])
+              and p["killed"] == any(f["kill"] for f in mine), p)
+    check("a killed boss carries no best percentage",
+          all(p["best"] is None for p in tally.values() if p["killed"]))
+    check("summarise labels the tally the same way as the kills",
+          all(p["label"] for p in dry_summary["pulls"])
+          and {p["label"] for p in dry_summary["pulls"] if p["killed"]}
+          == set(dry_summary["bossLabels"]), dry_summary["pulls"])
+    chips = handler.recap_page._chips(
+        ["1/8 Nek'zali the Soulcoiler", "3/8 The Lost Explorers"],
+        [{"label": "1/8 Nek'zali the Soulcoiler", "killed": True, "pulls": 1, "wipes": 0},
+         {"label": "3/8 The Lost Explorers", "killed": True, "pulls": 10, "wipes": 9},
+         {"label": "7/8 The Coiled Altar", "killed": False, "pulls": 2, "wipes": 2,
+          "best": 74.04},
+         {"label": "8/8 Ula'tek", "killed": False, "pulls": 1, "wipes": 1, "best": None}])
+    check("a one-pull kill is a bare chip", "<span>1/8 Nek&#x27;zali the Soulcoiler</span>"
+          in chips, chips)
+    check("a kill after wipes says how many",
+          "3/8 The Lost Explorers <span class=\"n\">&middot; 9 wipes</span>" in chips, chips)
+    check("a standing boss gets the plain chip with pulls and best attempt",
+          '<span class="standing">7/8 The Coiled Altar <span class="n">&middot; 2 pulls '
+          '&middot; best 74.0%</span></span>' in chips, chips)
+    check("...and no best when none was read",
+          '<span class="standing">8/8 Ula&#x27;tek <span class="n">&middot; 1 pull</span>'
+          '</span>' in chips, chips)
+    check("the dry-run page carries the chip row from the real tally",
+          "wipes</span>" in html or 'class="standing"' in html)
     coloured = dict(dry_summary, ilvlScale=scale, ilvlAverage=304.0)
     png2 = recap_card.render(coloured, "Scrambled", "Thursday", "The Venomous Abyss",
                              "Heroic", 18)
