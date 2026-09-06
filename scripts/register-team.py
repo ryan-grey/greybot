@@ -60,8 +60,15 @@ def main():
     ap.add_argument("--team", required=True, help="slug, e.g. meers-raid")
     ap.add_argument("--name", required=True, help="display name, e.g. \"Meer's Raid\"")
     ap.add_argument("--channel", required=True, help="Discord channel id to post in")
-    ap.add_argument("--wcl-user", required=True, type=int,
-                    help="Warcraft Logs user id whose uploads are the team's logs")
+    # Optional since 2026-09-06. Warcraft Logs' reports(userID:) returns a user's PERSONAL
+    # uploads only -- a report filed to the guild is invisible to it, however it was
+    # uploaded. The Saturday raid is logged to the guild by swibeto, so a --wcl-user of
+    # 519077 found nothing and the team seeded empty. Leave it out and the team reads the
+    # GUILD's reports, with --raid-days doing all of the telling-apart.
+    ap.add_argument("--wcl-user", type=int, default=None,
+                    help="Warcraft Logs user id whose PERSONAL uploads are the team's logs; "
+                         "omit for a team whose logs are filed to the guild (then "
+                         "--raid-days is what separates it from the other teams)")
     ap.add_argument("--raid-days", default="",
                     help="comma-separated weekdays (tue,thu); empty means every day")
     ap.add_argument("--difficulties", default="heroic",
@@ -82,6 +89,12 @@ def main():
             raise SystemExit(f"unknown difficulty {d!r}; choose from {keys.DIFFICULTIES}")
     if not diffs:
         raise SystemExit("--difficulties must name at least one difficulty")
+    if args.wcl_user is None and not args.raid_days.strip():
+        # A guild-sourced team with no raid-day filter IS the guild: every report the
+        # guild files would be the team's, and every guild first kill would be announced
+        # twice, once per install.
+        raise SystemExit("a team without --wcl-user reads the guild's reports and must "
+                         "name its --raid-days, or it is indistinguishable from the guild")
     for label, value in (("--channel", args.channel), ("--role", args.role)):
         if value and not str(value).isdigit():
             raise SystemExit(f"{label} must be a numeric Discord snowflake")
@@ -93,11 +106,14 @@ def main():
         "channelId": {"S": str(args.channel)}, "progRoleId": {"S": str(args.role or "")},
         "configuredAt": {"S": now_iso}, "configuredBy": {"S": "register-team"},
         "teamSlug": {"S": slug}, "teamName": {"S": args.name},
-        "wclUserId": {"S": str(args.wcl_user)},
         "raidDays": {"S": ",".join(x.strip().lower() for x in args.raid_days.split(",")
                                    if x.strip())},
         "difficulties": {"S": ",".join(diffs)},
     }
+    if args.wcl_user is not None:
+        # Absent rather than "0" or "": handler.tenant_configs merges every truthy value
+        # and the handler treats any wcl_user_id as "filter by uploader".
+        item["wclUserId"] = {"S": str(args.wcl_user)}
 
     scope = keys.Scope.build(region, realm, name, args.discord_guild, team=slug)
     print(f"tenant   {tenant}")

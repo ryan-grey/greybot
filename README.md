@@ -597,6 +597,30 @@ teams raid the same Tuesday. Discord health probes are skipped for a team; the g
 install already probes the same bot in the same server, and a second probe would mail
 every transition twice.
 
+### The third team: Saturday Raid
+
+**Saturday Raid** posts to `#satbot` (channel `1546012918825492510`), announces Normal and
+Heroic first kills, and its clear cards ping **Saturday Raiders**. Registered 2026-09-06 as
+`TENANT#946663011991556117#saturday-raid`.
+
+**How it is told apart from the other two.** Four weeks of reports settled it: the prog
+team's nights are guild uploads by Zatrekaz or Elder on Tuesday and Thursday; Meer's Raid
+is Meerclar's personal uploads on Tuesday and Thursday; the Saturday raid is a **guild**
+upload by swibeto, titled "Saturday Raid" or "Saturday Alt Raid", starting about 8:55 PM
+Eastern and running to 12:20–12:35 AM. It is the **first guild-sourced team**: Warcraft
+Logs' `reports(userID:)` returns a user's personal uploads only, so swibeto's id found
+nothing (the team seeded empty on its first bootstrap and was reset), and the team reads
+the guild's reports instead with `raidDays=sat` doing all of the telling-apart. That is
+safe because nobody else in the guild files a Saturday report: Meerclar's Saturday uploads
+are personal and never appear under the guild. A guild-sourced team without raid days is
+refused by `register-team.py`, because it would be the guild announced twice.
+
+**Its recap fires at 11:30 PM Eastern on Saturday itself**, not the morning after, from its
+own schedule `ryangrey-greybot-recap-saturday-raid` (`cron(30 23 ? * SAT *)`) whose input
+names the team — `{"mode":"recap","team":"saturday-raid"}` — so the guild and Meer's Raid
+do not run at that hour. The shared Wednesday/Friday schedule still runs for it and finds
+nothing, by the raid-day filter. Its page lives under `/saturday-raid/<night>/`.
+
 ```sh
 AWS_PROFILE=infra scripts/register-team.py --table ryangrey-greybot \
     --guild us/proudmoore/Scrambled --discord-guild <server id> \
