@@ -34,6 +34,10 @@ import team
 
 HEROIC = 4
 
+# How many names each category on the card carries. Matches discord.TOP_N; the card
+# shows three and the page shows everyone.
+TOP_N = 3
+
 # The Deaths table stops at this many entries with no flag, no error and no indication in
 # the payload that anything was left out. Reading a page of exactly this size as "all the
 # deaths" is the bug; see death_counts.
@@ -496,13 +500,78 @@ def parses(sources, eligible_names, difficulty=HEROIC):
 
     Returns None when there is nothing to report, which is the ordinary state of a wipe
     night: rankings only exist for kills.
+
+    `top` is the card's "Best parses" list: the three best parses of the night, ONE PER
+    PERSON. A raider who out-parsed the raid on every boss has one entry -- their best --
+    rather than the whole list, because three lines naming the same person is a fact
+    about one raider, not a leaderboard. `best` is `top[0]` and is kept for the logs.
     """
     rows = parse_rows(sources, eligible_names, difficulty)
     if not rows:
         return None
-    return {"best": max(rows, key=lambda r: r["percent"]),
+    ranked = sorted(rows, key=lambda r: (-r["percent"], r["name"]))
+    top, seen = [], set()
+    for r in ranked:
+        if r["key"] in seen:
+            continue
+        seen.add(r["key"])
+        top.append(dict(r))
+        if len(top) == TOP_N:
+            break
+    return {"best": ranked[0], "top": top,
             "worst": min(rows, key=lambda r: r["percent"]),
             "sample": len(rows)}
+
+
+def item_levels(sources, limit=None):
+    """Highest equipped item level of the night, one row per raider.
+
+    Read from playerDetails, which the card already fetches for roles, so it costs no
+    extra points. Each entry carries `minItemLevel` and `maxItemLevel` across the fights
+    the table was scoped to -- and those are the night's tier fights, WIPES INCLUDED, so a
+    raider who upgraded a piece between pulls is credited with what they finished on. The
+    max is used: the question is "who is the best geared", and the answer is what somebody
+    can wear, not the trinket they swapped for one boss.
+
+    Same shape as `totals` so the renderers treat it as one more category: player-keyed,
+    merged across a split night's reports, eligibility enforced. An entry with no numeric
+    item level is skipped, never counted as 0.
+    """
+    out = {}
+    for src in sources or ():
+        actors, elig = src.get("actors") or {}, src.get("eligible") or set()
+        node = (src.get("playerDetails") or {}).get("data") or {}
+        node = node.get("playerDetails") if isinstance(node, dict) else None
+        for bucket in ROLES:
+            for p in (node or {}).get(bucket) or ():
+                if not isinstance(p, dict) or p.get("id") is None:
+                    continue
+                aid = int(p["id"])
+                if aid not in elig:
+                    continue
+                ilvl = p.get("maxItemLevel")
+                if not isinstance(ilvl, (int, float)) or ilvl <= 0:
+                    continue
+                found = _person(actors, aid)
+                if not found:
+                    continue
+                key, a = found
+                rec = out.setdefault(key, {"key": key, "name": a["name"],
+                                           "server": a.get("server") or "",
+                                           "class": a.get("class") or p.get("type") or "",
+                                           "ilvl": 0})
+                rec["ilvl"] = max(rec["ilvl"], int(ilvl))
+    roles = _roles_by_key(sources)
+    for key, rec in out.items():
+        rec["role"] = roles.get(key)
+    rows = sorted(out.values(), key=lambda r: (-r["ilvl"], r["name"]))
+    return rows[:limit]
+
+
+def top_item_levels(sources, limit=3):
+    """The best-geared three, for the card. Ties are broken by name, the same as every
+    other category here -- a fourth person on the same number is the page's job."""
+    return item_levels(sources, limit)
 
 
 def summarise(scope, sources, show_worst_parse=False, encounters=None,
@@ -541,6 +610,10 @@ def summarise(scope, sources, show_worst_parse=False, encounters=None,
     out["healing"] = top_healing(sources)
     out["damageTaken"] = top_damage_taken(sources)
     out["deaths"] = death_counts(sources)
+    # Item level comes from playerDetails over the same fight list as everything else,
+    # kills and wipes alike -- unlike parses, which only exist for kills, so a wipe night
+    # still has a best-geared list.
+    out["itemLevel"] = top_item_levels(sources)
     out["parses"] = parses(sources, eligible_names, difficulty)
     if not show_worst_parse and out["parses"]:
         # Dropped here rather than at render time, so a card that is not supposed to carry
@@ -554,12 +627,13 @@ def summarise(scope, sources, show_worst_parse=False, encounters=None,
     if out["prog"]:
         out["prog"]["label"] = boss_label(out["prog"].get("name"), order, total)
     for value in (out["parses"] or {}).values():
-        # `parses` also carries `sample`, which is an int rather than a parse row.
-        if isinstance(value, dict):
-            value["bossLabel"] = boss_label(value.get("boss"), order, total)
+        # `parses` also carries `sample`, which is an int, and `top`, which is a list.
+        for pr in (value if isinstance(value, list) else [value]):
+            if isinstance(pr, dict):
+                pr["bossLabel"] = boss_label(pr.get("boss"), order, total)
 
     out["missing"] = [k for k in ("damage", "healing", "damageTaken", "deaths",
-                                  "parses") if not out.get(k)]
+                                  "itemLevel", "parses") if not out.get(k)]
     return out
 
 
@@ -674,6 +748,7 @@ def raider_rows(sources, eligible_names, difficulty=HEROIC):
                                     "damage": None, "dps": None,
                                     "healing": None, "hps": None,
                                     "damageTaken": None, "deaths": None,
+                                    "ilvl": None,
                                     "parse": None, "parseBoss": None,
                                     "parseAvg": None, "parseCount": 0,
                                     "parseRole": None, "role": None, "_parses": []})
@@ -702,6 +777,8 @@ def raider_rows(sources, eligible_names, difficulty=HEROIC):
                 rec["hps"] = r.get("perSecond")
     for r in death_counts(sources):
         row(r["key"], r["name"], r.get("server"))["deaths"] = r["deaths"]
+    for r in item_levels(sources):
+        row(r["key"], r["name"], r.get("server"), r.get("class"))["ilvl"] = r["ilvl"]
 
     for p in parse_rows(sources, eligible_names, difficulty):
         # Rankings carry a real server and the damage tables do not, so a rankings row can

@@ -2819,11 +2819,12 @@ def test_source_blind():
 
 
 def _src(report="R1", actors=None, elig=None, fids=None,
-         damage=None, deaths=(), rankings=None):
+         damage=None, deaths=(), rankings=None, playerDetails=None):
     """One report's worth of blobs, in the shape recap.py aggregates over."""
     return {"report": report, "actors": actors, "eligible": set(elig or ()),
             "fightIDs": list(fids or ()), "damage": damage,
-            "deaths": list(deaths), "rankings": rankings}
+            "deaths": list(deaths), "rankings": rankings,
+            "playerDetails": playerDetails}
 
 
 def test_recap_parsers():
@@ -2943,6 +2944,50 @@ def test_recap_parsers():
                                   "The Lost Explorers"}, par["best"]["boss"])
     check("rankPercent is used, not bracketPercent", par["best"]["percent"] == 81.0,
           par["best"]["percent"])
+    # The card's "Best parses": three, ranked, one per person, led by the best.
+    top = par["top"]
+    check("the top three parses are ranked best first",
+          [r["percent"] for r in top] == sorted((r["percent"] for r in top), reverse=True)
+          and top[0]["percent"] == par["best"]["percent"], top)
+    check("...at most three of them", 1 <= len(top) <= 3, len(top))
+    check("...and one entry per person", len({r["key"] for r in top}) == len(top), top)
+
+    # Item level, read from playerDetails across the SAME fights -- wipes included -- so
+    # it is on the card even on a night that killed nothing.
+    some = sorted(elig)[:4]
+    details = {"data": {"playerDetails": {
+        "tanks": [{"id": some[0], "maxItemLevel": 311, "minItemLevel": 308}],
+        "healers": [{"id": some[1], "maxItemLevel": 301}],
+        "dps": [{"id": some[2], "maxItemLevel": 315},
+                {"id": some[3], "maxItemLevel": "n/a"},
+                {"id": 999999, "maxItemLevel": 400}]}}}
+    ilvls = recap.item_levels([src(playerDetails=details)])
+    check("item level ranks the best geared first",
+          [r["ilvl"] for r in ilvls] == [315, 311, 301], ilvls)
+    check("...carries the role from playerDetails",
+          [r["role"] for r in ilvls] == ["dps", "tank", "healer"], ilvls)
+    check("...skips an entry with no numeric item level rather than counting 0",
+          all(r["ilvl"] > 0 for r in ilvls) and len(ilvls) == 3, ilvls)
+    check("...and ignores someone who was not in the raid",
+          not any(r["ilvl"] == 400 for r in ilvls), ilvls)
+    twice = recap.item_levels([src(playerDetails=details),
+                               src(report="R2", playerDetails={"data": {"playerDetails": {
+                                   "tanks": [{"id": some[0], "maxItemLevel": 318}]}}})])
+    check("a split night keeps the higher item level per person",
+          twice[0]["ilvl"] == 318 and len(twice) == 3, twice)
+    check("the card caps item level at three",
+          len(recap.top_item_levels([src(playerDetails=details)])) == 3)
+    with_ilvl = recap.summarise(scope, [src(damage=FIXTURE["damageScoped"],
+                                            playerDetails=details)])
+    check("summarise carries the item level section",
+          [r["ilvl"] for r in with_ilvl["itemLevel"]] == [315, 311, 301],
+          with_ilvl.get("itemLevel"))
+    check("...and it is not listed as missing", "itemLevel" not in with_ilvl["missing"])
+    page_ilvl = {r["name"]: r["ilvl"] for r in recap.raider_rows(
+        [src(damage=FIXTURE["damageScoped"], playerDetails=details)], None)}
+    check("the page rows carry item level, None where unknown",
+          sorted(v for v in page_ilvl.values() if v) == [301, 311, 315]
+          and None in page_ilvl.values(), page_ilvl)
 
     # Difficulty alone is not enough. The report's Heroic kills span two raids, so a card
     # labelled with one of them must not credit a parse earned in the other.
@@ -3071,8 +3116,17 @@ def test_recap_end_to_end():
     handler.wcl.query = lambda token, doc, variables=None: {"rateLimitData": rate}
     handler.wcl.reports_in_window = lambda *a, **kw: (reports, None)
     handler.wcl.report_detail = lambda token, code: (detail, None)
+    # The fixture carries no playerDetails, so a synthetic one gives every raider an
+    # item level -- the shape is the live one: buckets of {id, maxItemLevel}.
+    raider_ids = sorted(recap.raid_scope(FIXTURE["fights"], wcl.HEROIC)["raiderIDs"])
+    fake_details = {"data": {"playerDetails": {
+        "tanks": [{"id": i, "maxItemLevel": 300 + n} for n, i in enumerate(raider_ids[:2])],
+        "healers": [{"id": i, "maxItemLevel": 290 + n}
+                    for n, i in enumerate(raider_ids[2:6])],
+        "dps": [{"id": i, "maxItemLevel": 280 + n} for n, i in enumerate(raider_ids[6:])]}}}
     handler.wcl.report_tables = lambda token, code, fids: (
-        {"damage": FIXTURE["damageScoped"], "rankings": FIXTURE["rankings"]}, None)
+        {"damage": FIXTURE["damageScoped"], "rankings": FIXTURE["rankings"],
+         "playerDetails": fake_details}, None)
     handler.wcl.deaths_pages = lambda *a, **kw: (FIXTURE["deathPages"], None, 2)
     handler.raiderio.guild_profile = lambda *a, **kw: profile
     handler.raiderio.static_raids = lambda exp: {11: RAIDS, 10: PREV_RAIDS}.get(exp, [])
@@ -3237,10 +3291,86 @@ def test_recap_end_to_end():
 
     # A parse is about a person. A tier position next to their name reads as part of
     # their score, so the parse fields carry the bare boss name.
-    parse_field = [f for f in embed.get("fields", []) if f["name"] == "Best parse"]
-    check("the best parse names its boss WITHOUT a tier number",
+    parse_field = [f for f in embed.get("fields", []) if f["name"] == "Best parses"]
+    check("the best parses name their boss WITHOUT a tier number",
           parse_field and "/8 " not in parse_field[0]["value"],
           parse_field[0]["value"] if parse_field else None)
+    check("...one ranked line per parse, number in bold, boss after it",
+          parse_field and all(re.search(r"`\d\.` .+ — \*\*\d+\*\* · .+", line)
+                              for line in parse_field[0]["value"].split("\n")),
+          parse_field[0]["value"] if parse_field else None)
+    ilvl_field = [f for f in embed.get("fields", []) if f["name"] == "Item level"]
+    check("item level is a card category",
+          ilvl_field and re.search(r"— \*\*\d{3}\*\*", ilvl_field[0]["value"]),
+          ilvl_field[0]["value"] if ilvl_field else None)
+    # The fixture has no healing or damage-taken table, so those two cells are absent
+    # here; the ones present must still come in grid order.
+    grid = ["Top damage", "Top heals", "Damage taken", "Most deaths", "Best parses",
+            "Item level"]
+    names = [f["name"] for f in embed["fields"] if f["name"] in grid]
+    check("the grid cells come in order: damage, heals, taken, deaths, parses, ilvl",
+          names == [g for g in grid if g in names] and {"Most deaths", "Best parses",
+                                                        "Item level"} <= set(names), names)
+
+    # The grid, DRAWN. Same summary, same six cells; the fields above are its fallback.
+    import recap_card
+    from PIL import Image as _Image
+    import io as _io
+    dry_summary = handler.handler({"mode": "recap", "dry": True}, None)["summary"]
+    png = recap_card.render(dry_summary, "Scrambled", "Thursday", "The Venomous Abyss",
+                            "Heroic", 18)
+    check("the recap grid draws from the real summary", png and png[:4] == b"\x89PNG")
+    img = _Image.open(_io.BytesIO(png)).convert("RGB")
+    check("...at the grid's size", img.size == (recap_card.WIDTH, recap_card.HEIGHT),
+          img.size)
+    check("...with the accent on it", recap_card.ACCENT in set(img.getdata()))
+    check("an empty summary is still a grid, of empty cells",
+          recap_card.render({}) and recap_card.render({})[:4] == b"\x89PNG")
+    titles = [c[0] for c in recap_card._cells(dry_summary)]
+    check("the drawn cells are the embed's six, in the embed's order", titles == grid,
+          titles)
+    check("a summary that is not a dict returns None, never raises",
+          recap_card.render(object()) is None)
+
+    with_card = handler.discord.recap_embed(
+        "Scrambled", "The Venomous Abyss", "Thursday", dry_summary,
+        recap_url="https://r/x/", card_url="https://r/cards/recap/x.png")["embeds"][0]
+    check("with a drawn card the embed shows the image",
+          with_card.get("image", {}).get("url") == "https://r/cards/recap/x.png", with_card)
+    check("...drops the six fields rather than showing the names twice",
+          not any(f["name"] in grid for f in with_card.get("fields", [])),
+          [f["name"] for f in with_card.get("fields", [])])
+    check("...and keeps the full-recap link",
+          any("https://r/x/" in f.get("value", "") for f in with_card.get("fields", [])))
+    check("without a card the fields are the grid, as before",
+          any(f["name"] == "Most deaths" for f in embed["fields"]) and "image" not in embed)
+
+    puts = []
+    real_publish = handler.publish_bytes
+    handler.publish_bytes = lambda cfg, key, body, ct, **kw: puts.append((key, ct, len(body)))
+    try:
+        bucket = {"recap_page_url": "https://r", "recap_page_bucket": "b"}
+        url = handler.recap_card_url(bucket, "meers-raid/2026-09-04", dry_summary,
+                                     "Meer's Raid", "Thursday", "The Venomous Abyss",
+                                     "Heroic")
+        check("the card is published beside the team's page",
+              url == "https://r/cards/recap/meers-raid/2026-09-04.png"
+              and puts and puts[0][0] == "cards/recap/meers-raid/2026-09-04.png"
+              and puts[0][1] == "image/png", (url, puts))
+        puts.clear()
+        check("a dry run draws the card but publishes nothing",
+              handler.recap_card_url(bucket, "2026-09-04", dry_summary, "Scrambled",
+                                     "Thursday", "The Venomous Abyss", "Heroic",
+                                     dry=True) is None and puts == [], puts)
+        check("no bucket means no card, not an error",
+              handler.recap_card_url({}, "2026-09-04", dry_summary, "S", "T", "V", "H")
+              is None)
+        handler.publish_bytes = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("s3"))
+        check("a refused put returns None and the fields carry the recap",
+              handler.recap_card_url(bucket, "2026-09-04", dry_summary, "S", "T", "V", "H")
+              is None)
+    finally:
+        handler.publish_bytes = real_publish
     check("the progression boss is the one with the most wipes",
           "The Lost Explorers" in embed["description"], embed["description"])
     fields = {f["name"] for f in embed.get("fields", [])}

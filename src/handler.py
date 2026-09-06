@@ -52,6 +52,7 @@ import notify
 import raiderio
 import recap as recap_mod
 import kill_card
+import recap_card
 import recap_page
 import keys
 import store
@@ -559,6 +560,41 @@ def kill_card_url(cfg, slug, boss_key, boss_name, headline, lines, art_url, acce
     except Exception as exc:                                       # noqa: BLE001
         log("kill_card_failed", slug=slug, boss=boss_name, error=repr(exc),
             note="announcing with the plain embed instead")
+        return None
+
+
+def recap_card_url(cfg, page_path, summary, guild_name, night_text, raid_name, difficulty,
+                   dry=False):
+    """Draw the recap grid and publish it, or return None and let the fields do it.
+
+    Keyed beside the page it belongs to -- cards/recap/<team>/<night>.png -- so a retry
+    of the same night overwrites its own image and a team's Tuesday never lands on the
+    guild's. A dry run draws the card but publishes nothing, so a preview run in Lambda
+    proves the fonts and Pillow are there without leaving an object behind.
+
+    Same rule as the kill card: one try around everything, and any failure is a log line
+    and the plain embed. The night is already claimed by the time this runs.
+    """
+    try:
+        if not cfg.get("recap_page_url") or not cfg.get("recap_page_bucket"):
+            return None
+        png = recap_card.render(summary, guild_name=guild_name, night_text=night_text,
+                                raid_name=raid_name, difficulty=difficulty,
+                                raiders=summary.get("raiders"))
+        if not png:
+            log("recap_card_not_drawn", night=page_path,
+                note="posting with the field grid instead")
+            return None
+        if dry:
+            log("recap_card_drawn", night=page_path, bytes=len(png), published=False,
+                note="dry run — drawn, not published")
+            return None
+        key = f"cards/recap/{page_path}.png"
+        publish_bytes(cfg, key, png, "image/png")
+        return f"{cfg['recap_page_url']}/{key}"
+    except Exception as exc:                                       # noqa: BLE001
+        log("recap_card_failed", night=page_path, error=repr(exc),
+            note="posting with the field grid instead")
         return None
 
 
@@ -2237,6 +2273,10 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
                 note="the card will be posted without a recap link")
             page_url = None
 
+    # The drawn grid, published beside the page. None -- no bucket, no Pillow, a refused
+    # put, a dry run -- means the embed carries the six fields itself.
+    card_url = recap_card_url(cfg, page_path, summary, who, night_text, tier["label"],
+                              diff_label, dry=dry)
     payload = discord.recap_embed(
         who, tier["label"], night_text, summary,
         report_url=report_url(earliest["meta"]["code"]), iso_ts=_iso(_at(earliest["base"])),
@@ -2244,7 +2284,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         guild_label=raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
         guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
                                        cfg["guild_name"]),
-        recap_url=page_url, difficulty=diff_label)
+        recap_url=page_url, difficulty=diff_label, card_url=card_url)
     if dry:
         log("recap_dry_run", night=night_key, slug=tier["slug"], difficulty=diff_name,
             bosses=summary.get("bosses"), prog=(summary.get("prog") or {}).get("name"),
@@ -2268,6 +2308,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     _remember_post(scope, sent, "recap", now_iso)
 
     log("recap_posted", night=night_key, manual=bool(manual), team=scope.team,
+        card=bool(card_url),
         slug=tier["slug"], raid=tier["label"], difficulty=diff_name,
         reports=[c["meta"]["code"] for c in chosen], skipped=skipped,
         bosses=summary.get("bosses"), prog=(summary.get("prog") or {}).get("name"),

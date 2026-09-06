@@ -318,8 +318,19 @@ point, and no amount of retrying will help.
 
 ## The morning-after recap, and the two-teams problem
 
-The morning after raid night a second card goes up in `#bots`: top three damage, most
-deaths, best parse, pull count on the progression boss, and what died. One embed, no ping.
+The morning after raid night a second card goes up in `#bots`: a two-by-three grid of top
+damage, top heals, damage taken, most deaths, best parses (top three, one per person) and
+item level (top three, read across kills and wipes), plus the pull count on the progression
+boss and what died. One embed, no ping.
+
+**The grid is a drawn PNG** (`src/recap_card.py`), published beside the recap page at
+`cards/recap/<team>/<night>.png`. Embed fields were the first version and they only work on
+a desktop client: Discord lays inline fields three to a row there and ONE per row on a
+phone, so six leaderboards became a screen and a half of stacked lists. An image scales
+instead of re-flowing, so the same grid reaches both. It costs what the kill card costs —
+text in a PNG cannot be selected, searched or read by a screen reader — so the six embed
+fields remain as the fallback and are used whenever the image cannot be drawn or published.
+Both are rendered from the same `summary` keys, so they cannot disagree.
 It runs on a second EventBridge schedule pointed at the **same** Lambda with
 `{"mode": "recap"}` — one function, two schedules, not a parallel stack.
 
@@ -839,6 +850,7 @@ src/raiderio.py      Raider.IO: profile, static raid data, slug resolution
 src/store.py         DynamoDB: the announce-once claim, the prog roster
 src/team.py          which of the guild's two raid teams filed a report
 src/recap.py         reading the untyped table/rankings blobs
+src/recap_card.py    the recap's six-cell grid, drawn as a PNG
 src/discord.py       webhook payloads and retries
 src/health.py        can the bot still speak in the server — kick, ban, timeout, webhook
 src/notify.py        publish one alert to the ryangrey-dev-alerts topic

@@ -64,9 +64,14 @@ def _column(rows):
     """
     if not rows:
         return None
-    return "\n".join(
-        f"{ROLE_EMOJI.get(role, ROLE_BLANK)} `{i}.` {name} — **{value}**"
-        for i, (name, _klass, value, role) in enumerate(rows, 1))
+    lines = []
+    for i, row in enumerate(rows, 1):
+        # An optional fifth element is a note after the number -- the boss a parse was
+        # earned on -- outside the bold, so the number stays the thing the eye lands on.
+        name, _klass, value, role = row[:4]
+        note = f" · {row[4]}" if len(row) > 4 and row[4] else ""
+        lines.append(f"{ROLE_EMOJI.get(role, ROLE_BLANK)} `{i}.` {name} — **{value}**{note}")
+    return "\n".join(lines)
 
 
 def _field(label, rows):
@@ -384,13 +389,18 @@ def _tied(rows, key):
 
 def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso_ts=None,
                 thumbnail_url=None, guild_label=None, guild_url=None, recap_url=None,
-                difficulty="Heroic"):
+                difficulty="Heroic", card_url=None):
     """The morning-after card. One embed, no ping, same visual language as a kill card.
 
     Every section is optional and silently absent when it could not be read. A recap that
     lost its rankings blob is a card without a parse line, not a card that says "parse
     unavailable" -- an apology for missing data is worse than not mentioning it, and worse
     than the alternative of failing the whole post.
+
+    `card_url` is the drawn grid (recap_card.render, published to the page bucket). When
+    it is present the six leaderboard fields are NOT added -- the image carries them, and
+    the same names twice on one card reads as a bug. When it is None, for any reason at
+    all, the fields are the card, exactly as they were before the image existed.
     """
     lines = []
     # THE COUNT FIRST, THEN THE PROGRESSION. Listing every kill answered neither question
@@ -451,8 +461,9 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
                               if summary.get("raiders") else "")},
     }
 
-    # Five categories, three to a row. Damage / heals / damage taken is one row and reads
-    # as the night's output; deaths and parse is the next and reads as how it went.
+    # Six categories, three to a row, so the card is a full two-by-three grid. Damage /
+    # heals / damage taken is the first row and reads as the night's output; deaths, best
+    # parses and item level is the second and reads as how it went and who brought what.
     # Damage reads "78K/145M" and healing "61K/261M": per-second first, total second, one
     # value in one column. Two numbers because they answer different questions -- how hard
     # someone hit or healed, and how much of the night they were doing it -- and splitting
@@ -471,19 +482,37 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
         (r["name"], r.get("class"), str(r["deaths"]), r.get("role"))
         for r in (summary.get("deaths") or [])[:TOP_N]])
 
-    # The parse column is coloured by the PARSE, not by the class -- it is the one number
-    # on the card where the colour is the reader's shorthand for the value.
+    # Best parses: the night's three best, one per person, each with the boss it was
+    # earned on. The boss is the bare name, never the tier position -- a parse is about a
+    # person, and "3/8" next to their name reads as part of their score.
     parses = summary.get("parses") or {}
-    for key, label in (("best", "Best parse"), ("worst", "Worst parse")):
-        pr = parses.get(key)
-        if not pr:
-            continue
-        pct = int(round(pr["percent"]))
+    top = parses.get("top") or ([parses["best"]] if parses.get("best") else [])
+    embed["fields"] += _field("Best parses", [
+        (pr["name"], pr.get("class"), str(int(round(pr["percent"]))), pr.get("role"),
+         pr.get("boss"))
+        for pr in top[:TOP_N]])
+
+    # Item level: who brought the most gear. Read across kills AND wipes, so unlike the
+    # parses it is on the card on a night that killed nothing.
+    embed["fields"] += _field("Item level", [
+        (r["name"], r.get("class"), str(r["ilvl"]), r.get("role"))
+        for r in (summary.get("itemLevel") or [])[:TOP_N]])
+
+    # Worst parse is opt-in and sits after the grid, alone on a padded third row.
+    worst = parses.get("worst")
+    if worst:
+        pct = int(round(worst["percent"]))
         embed["fields"].append({
-            "name": label,
-            "value": (f"{ROLE_EMOJI.get(pr.get('role'), ROLE_BLANK)} "
-                      f"{pr['name']} — **{pct}**\n{pr['boss']}"),
+            "name": "Worst parse",
+            "value": (f"{ROLE_EMOJI.get(worst.get('role'), ROLE_BLANK)} "
+                      f"{worst['name']} — **{pct}**\n{worst['boss']}"),
             "inline": True})
+
+    if card_url:
+        # The image IS the grid. Nothing else changes: the description above it and the
+        # link below it are exactly the fallback's.
+        embed["image"] = {"url": card_url}
+        embed["fields"] = []
 
     if embed["fields"]:
         # Padded to a full row FIRST, then the link is appended as a full-width field.
