@@ -332,6 +332,15 @@ text in a PNG cannot be selected, searched or read by a screen reader — so the
 fields remain as the fallback and are used whenever the image cannot be drawn or published.
 Both are rendered from the same `summary` keys, so they cannot disagree.
 
+**Item level is coloured on the parse bands.** Warcraft Logs ranks each raid zone across an
+item level bracket range (`worldData.zone.brackets`: The Venomous Abyss is 272–344 in steps
+of 3), read live per recap so it rolls over with the tier. An item level's position in that
+range, 0–100, is coloured exactly as a parse would be — grey, green, blue, purple, orange —
+so a purple 318 and a purple 83 beside it mean the same thing. The page's column header
+carries the raid's mean item level in the same pill the parse header wears; the card does
+the same. Without a bracket range the numbers print plain: uncoloured is "unknown", grey
+would claim "poor".
+
 The image is the recap page's own markup transcribed into pixels: `recap_page.STYLE`'s
 Primer dark palette, the bordered columns with a chip header bar, the role glyphs, class
 colours, realm sub-line, muted values and quality-coloured parse pills. A first drawing with

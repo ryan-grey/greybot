@@ -3416,12 +3416,59 @@ def test_recap_end_to_end():
                   if f["name"] == "Top heals"]
     check("healing reads HPS/healing done on the card",
           heal_field and "**61K/261M**" in heal_field[0], heal_field)
-    _d, page_heals, _t, _de, _p = handler.recap_page.columns(
+    _d, page_heals, _t, _de, _p, _i = handler.recap_page.columns(
         [{"name": "Marloak", "server": "", "class": "Druid", "healing": 261_000_000,
           "hps": 61_000.0}])
     check("...and on the page", page_heals and page_heals[0][1] == "61K/261M", page_heals)
     check("...under an HPS / Healing header",
           "HPS / Healing" in html)
+
+    # Item level: the sixth column, coloured by the zone's bracket range on the parse
+    # bands, with the raid's mean in the header pill. The fake WCL here answers no
+    # worldData, so the dry-run page prints its numbers plain -- that is the fallback.
+    check("the page has an Item level column", "<b>Item level</b>" in html)
+    check("...printed plain when the zone's bracket range could not be read",
+          re.search(r'<span class="ilvl">\d{3}</span>', html)
+          and not re.search(r'<span class="ilvl" style="color:', html), None)
+    scale = {"min": 272, "max": 344, "bucket": 3}
+    check("ilvl_percent puts the range's floor at 0 and its ceiling at 100",
+          recap.ilvl_percent(272, scale) == 0 and recap.ilvl_percent(344, scale) == 100)
+    check("...clamps outside it", recap.ilvl_percent(200, scale) == 0
+          and recap.ilvl_percent(400, scale) == 100)
+    check("...and is None without a scale", recap.ilvl_percent(318, None) is None)
+    pct = recap.ilvl_percent(318, scale)
+    check("a 318 in a 272-344 zone is upper-middle: the blue band",
+          50 <= pct < 75 and handler.recap_page.parse_colors(pct)[0] == "#0070dd", pct)
+    ilvl_rows = [{"name": "Idknothing", "server": "Proudmoore", "class": "Monk",
+                  "ilvl": 318, "damage": 1},
+                 {"name": "Funhaver", "server": "Proudmoore", "class": "Shaman",
+                  "ilvl": 290, "damage": 1},
+                 {"name": "Nogear", "server": "", "class": "Mage", "ilvl": None,
+                  "damage": 1}]
+    page = handler.recap_page.render("Scrambled", "The Venomous Abyss", "Thursday", [],
+                                     ilvl_rows, [], ilvl_scale=scale)
+    check("with a scale the page colours each item level on the parse bands",
+          '<span class="ilvl" style="color:#0070dd">318</span>' in page
+          and '<span class="ilvl" style="color:#1eff00">290</span>' in page, None)
+    check("...a raider with no gear data is absent, not 0",
+          "Nogear" not in page.split("<b>Item level</b>")[1].split("</div>")[0])
+    check("...ranked best geared first",
+          page.index(">318<") < page.index(">290<"))
+    # (318 + 290) / 2 = 304, which is 44% of the range: the green band.
+    check("...and the header pill is the raid's mean, coloured on the same scale",
+          re.search(r'<span class="parse parse-badge" style="background:#1eff00;'
+                    r'color:#1f2328">304</span>', page), None)
+    check("...with the range explained in the note", "272&ndash;344" in page)
+    check("the six columns go six across on a wide screen",
+          "repeat(6, minmax(0, 1fr))" in page)
+    coloured = dict(dry_summary, ilvlScale=scale, ilvlAverage=304.0)
+    png2 = recap_card.render(coloured, "Scrambled", "Thursday", "The Venomous Abyss",
+                             "Heroic", 18)
+    pixels2 = set(_Image.open(_io.BytesIO(png2)).convert("RGB").getdata())
+    check("the drawn card wears the same header pill in the same colour",
+          recap_card._rgb("#1eff00") in pixels2 and recap_card._rgb("#1eff00") not in pixels)
+    check("zone_brackets returns None when the API answers nothing",
+          handler.wcl.zone_brackets("tok", 53) is None)
     check("most deaths is on the card", "Most deaths" in fields, fields)
     check("worst parse is OFF by default", "Worst parse" not in fields, fields)
 

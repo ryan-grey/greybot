@@ -211,9 +211,9 @@ section { margin-top:48px; }
 }
 @media (prefers-color-scheme: dark) { .killed .wb { color:#d29922; } }
 
-/* Three ranked columns */
+/* Six ranked columns: three across, six on a wide screen */
 .cols { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:20px; }
-@media (min-width:1180px) { .cols { grid-template-columns:repeat(5, minmax(0, 1fr)); } }
+@media (min-width:1180px) { .cols { grid-template-columns:repeat(6, minmax(0, 1fr)); } }
 .col { border:1px solid var(--line); border-radius:6px; overflow:hidden; background:var(--card); }
 .col h3 {
   display:flex; align-items:center; justify-content:center; gap:7px;
@@ -249,6 +249,8 @@ section { margin-top:48px; }
   font-size:12px; font-weight:600; line-height:20px; padding:0 8px;
   border-radius:999px; border:1px solid rgba(31,35,40,0.15);
 }
+/* Item level: the number itself takes the quality colour, no pill. */
+.ilvl { font-weight:600; font-variant-numeric:tabular-nums; }
 .sub { display:block; font-size:12px; color:var(--muted); line-height:1.3; }
 .sources { list-style:none; }
 .sources li { padding:10px 0; border-bottom:1px solid var(--line); }
@@ -309,10 +311,39 @@ def parse_colors(percent):
     return PARSE_BANDS[-1][1], PARSE_BANDS[-1][2]
 
 
-def _pill(percent, extra=""):
+def _pill(percent, extra="", label=None):
     bg, fg = parse_colors(percent)
     return (f'<span class="parse{extra}" style="background:{bg};color:{fg}">'
-            f'{int(round(percent))}</span>')
+            f'{_esc(label) if label is not None else int(round(percent))}</span>')
+
+
+def _ilvl(ilvl, scale):
+    """An item level, coloured by where it sits in the raid's bracket range.
+
+    The same quality bands as a parse, deliberately, so a purple 318 and a purple 83
+    beside it mean the same thing: upper quarter of the range Warcraft Logs ranks this
+    zone across. Without a scale the number is printed plain -- an uncoloured number is
+    "unknown", a grey one would claim "poor".
+    """
+    import recap
+    pct = recap.ilvl_percent(ilvl, scale)
+    if pct is None:
+        return f'<span class="ilvl">{int(ilvl)}</span>'
+    bg, _fg = parse_colors(pct)
+    return f'<span class="ilvl" style="color:{bg}">{int(ilvl)}</span>'
+
+
+def _ilvl_badge(rows, scale):
+    """The raid's mean item level as the header pill, coloured on the same scale."""
+    import recap
+    avg = recap.average_ilvl(rows)
+    if avg is None:
+        return None
+    pct = recap.ilvl_percent(avg, scale)
+    if pct is None:
+        return (f'<span class="parse parse-badge" style="background:var(--chip);'
+                f'color:var(--ink)">{int(round(avg))}</span>')
+    return _pill(pct, extra=" parse-badge", label=int(round(avg)))
 
 
 def _who(row, region=None, role=None):
@@ -365,8 +396,8 @@ def average_parse(rows):
     return (sum(got) / len(got)) if got else None
 
 
-def columns(rows, region=None):
-    """The three ranked lists, each with its own membership rule.
+def columns(rows, region=None, ilvl_scale=None):
+    """The six ranked lists, each with its own membership rule.
 
     DPS      every raider with a damage figure, highest first.
     Deaths   ONLY raiders who actually died. The list stops before the zeroes rather than
@@ -375,6 +406,8 @@ def columns(rows, region=None):
     Parse    every raider who was in at least one ranked kill, best mean first. A raider
              who was in no kill has no parse to average and is absent rather than last --
              absent means "no evidence", which is true; last would be a claim.
+    Item level  every raider whose gear could be read, best geared first, coloured by
+             `ilvl_scale` (the zone's bracket range) on the parse bands.
     """
     def ranked(field, per=None):
         # `per` names a per-second field to print in front of the total, "78K/145M".
@@ -400,19 +433,25 @@ def columns(rows, region=None):
     parses = [(_who(r, region, r.get("parseRole")), _pill(r["parseAvg"]))
               for r in sorted((r for r in rows if r.get("parseAvg") is not None),
                               key=lambda r: (-r["parseAvg"], r["name"]))]
-    return dps, heals, taken, deaths, parses
+    ilvls = [(_who(r, region), _ilvl(r["ilvl"], ilvl_scale))
+             for r in sorted((r for r in rows if isinstance(r.get("ilvl"), (int, float))),
+                             key=lambda r: (-r["ilvl"], r["name"]))]
+    return dps, heals, taken, deaths, parses, ilvls
 
 
 def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
            raiders=None, canonical=None, region=None, world_bosses=None,
-           difficulty="Heroic", raiders_heading="Prog Raiders"):
+           difficulty="Heroic", raiders_heading="Prog Raiders", ilvl_scale=None):
     """One night's recap page as a complete HTML document.
 
     `raiders_heading` names the people in the columns. The guild install says "Prog
     Raiders", which is the Discord role the prog team carries; a team install passes its
     own word, because its columns are not the prog team.
+
+    `ilvl_scale` is the zone's item level bracket range from Warcraft Logs, and it is what
+    colours the item level column; None prints the numbers plain.
     """
-    dps, heals, taken, deaths, parses = columns(rows or [], region)
+    dps, heals, taken, deaths, parses, ilvls = columns(rows or [], region, ilvl_scale)
     killed = "".join(f"<span>{_esc(b)}</span>" for b in boss_labels or ())
     # World bosses sit in the same chip row but marked, because they are not part of the
     # tier's count -- a reader glancing at four chips should not come away thinking the
@@ -452,7 +491,19 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
                 # was above or below the people in the list under it.
                 badge=(_pill(raid_parse, extra=" parse-badge")
                        if raid_parse is not None else None)),
+        _column("Item level", ilvls, "No gear data could be read.",
+                # The raid's mean item level, in the same pill the parse header wears,
+                # coloured on the same scale as the numbers under it.
+                badge=_ilvl_badge(rows or [], ilvl_scale)),
     ))
+    if ilvl_scale:
+        ilvl_note = (f" Item level is the highest equipped over the night&rsquo;s fights, "
+                     f"wipes included, coloured by where it sits in Warcraft Logs&rsquo; "
+                     f"item level range for this raid ({int(ilvl_scale['min'])}&ndash;"
+                     f"{int(ilvl_scale['max'])}), on the same bands as a parse.")
+    else:
+        ilvl_note = (" Item level is the highest equipped over the night&rsquo;s fights, "
+                     "wipes included.")
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -484,7 +535,7 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
       {_esc(difficulty)} raid fights only &mdash; dungeons and other difficulties in the same log are
       excluded. DPS and HPS are damage and healing done over the night&rsquo;s total fight
       time, as Warcraft Logs computes them for all fights. Overall parse is the mean of a raider&rsquo;s rankings across the kills they
-      were in; bosses they sat are not counted against them.
+      were in; bosses they sat are not counted against them.{ilvl_note}
     </p>
     <p class="note footnote">
       <sup>&dagger;</sup> <b>Every figure above excludes the world boss.</b> A world boss is

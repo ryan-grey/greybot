@@ -2229,10 +2229,18 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
 
     combined = recap_mod.raid_scope(
         [f for c in chosen for f in c["raidScope"]["fights"]], night_diff)
+    # The zone's item level bracket range, which is what colours an item level on the
+    # card and the page. One cheap query; None on any failure leaves the numbers plain.
+    zone_id = ((chosen[0]["detail"].get("zone") or {}).get("id"))
+    ilvl_scale = wcl.zone_brackets(token, zone_id) if zone_id else None
+    if zone_id and not ilvl_scale:
+        log("recap_ilvl_scale_unavailable", zone=zone_id,
+            note="item levels will be shown uncoloured")
     summary = recap_mod.summarise(combined, sources,
                                   show_worst_parse=bool(cfg.get("recap_worst_parse")),
                                   encounters=(tier.get("meta") or {}).get("encounters"),
-                                  dead=tier.get("dead") or set(), difficulty=night_diff)
+                                  dead=tier.get("dead") or set(), difficulty=night_diff,
+                                  ilvl_scale=ilvl_scale)
     summary["worldBosses"] = tier.get("worldBosses") or []
     diff_label = diff_name.title()
     who = display_name(cfg)
@@ -2258,7 +2266,8 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         raiders=summary.get("raiders"), canonical=page_url,
         region=cfg.get("guild_region"),
         world_bosses=summary.get("worldBosses"), difficulty=diff_label,
-        raiders_heading="Raiders" if is_team(cfg) else "Prog Raiders")
+        raiders_heading="Raiders" if is_team(cfg) else "Prog Raiders",
+        ilvl_scale=ilvl_scale)
 
     # Published BEFORE the card is posted, and the link is dropped if the put fails. A card
     # in the channel saying "full recap here" that 404s is worse than a card with no
@@ -2290,7 +2299,8 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
             bosses=summary.get("bosses"), prog=(summary.get("prog") or {}).get("name"),
             raiders=summary.get("raiders"),
         eligible=sum(len(src["eligible"]) for src in sources),
-            missingSections=summary["missing"], posted=False, stateWritten=False,
+            missingSections=summary["missing"], ilvlScale=ilvl_scale,
+            posted=False, stateWritten=False,
             note="DRY RUN — nothing posted, no night claimed")
         return {"ok": True, "night": night_key, "posted": False, "dry": True,
                 "payload": payload, "summary": summary, "recapPageRows": rows,

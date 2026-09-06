@@ -119,34 +119,57 @@ def _rate_and_total(row, field="total"):
     return _short(row[field])
 
 
-def _cells(summary, top_n=3):
-    """The six cells in grid order: (title, icon, rows, empty text).
+def _quality(percent):
+    """(bg, fg) RGB for a percent on the page's quality bands, or (None, None)."""
+    if percent is None:
+        return None, None
+    bg, fg = recap_page.parse_colors(percent)
+    return _rgb(bg), _rgb(fg)
 
-    A row is (name, class, server, value, role, pill) where `pill` is a parse percent to
-    draw as the page's quality-coloured pill instead of a plain value. Same keys and the
-    same cap as discord.recap_embed, deliberately: this is the embed's field list drawn.
+
+def _cells(summary, top_n=3):
+    """The six cells in grid order: (title, icon, rows, empty text, badge).
+
+    A row is (name, class, server, value, role, pill, colour): `pill` is a parse percent
+    to draw as the page's quality-coloured pill instead of a plain value, and `colour`
+    tints a plain value -- an item level takes its quality colour as text, the way the
+    page's `.ilvl` does. `badge` is (label, bg, fg) drawn as a pill in the header, the
+    page's raid-average pill. Same keys and the same cap as discord.recap_embed,
+    deliberately: this is the embed's field list drawn.
     """
-    def rows(key, fmt):
-        return [(r["name"], r.get("class"), r.get("server"), fmt(r), r.get("role"), None)
+    def rows(key, fmt, colour=lambda r: None):
+        return [(r["name"], r.get("class"), r.get("server"), fmt(r), r.get("role"), None,
+                 colour(r))
                 for r in (summary.get(key) or [])[:top_n]]
 
     parses = summary.get("parses") or {}
     top = parses.get("top") or ([parses["best"]] if parses.get("best") else [])
+
+    import recap
+    scale = summary.get("ilvlScale")
+    avg = summary.get("ilvlAverage")
+    badge = None
+    if isinstance(avg, (int, float)):
+        bg, fg = _quality(recap.ilvl_percent(avg, scale))
+        badge = (str(int(round(avg))), bg or CHIP_ACCENT_BG, fg or INK)
+
     return [
         ("DPS / Damage", "dps", rows("damage", _rate_and_total),
-         "No damage table could be read."),
+         "No damage table could be read.", None),
         ("HPS / Healing", "healer", rows("healing", _rate_and_total),
-         "No healing table could be read."),
+         "No healing table could be read.", None),
         ("Damage taken", "tank", rows("damageTaken", lambda r: _short(r["total"])),
-         "No damage-taken table could be read."),
+         "No damage-taken table could be read.", None),
         ("Deaths", "skull", rows("deaths", lambda r: str(r["deaths"])),
-         "Nobody died. Genuinely."),
+         "Nobody died. Genuinely.", None),
         ("Best parses", None,
          [(p["name"], p.get("class"), p.get("boss") or p.get("server"), None,
-           p.get("role"), float(p["percent"])) for p in top[:top_n]],
-         "No ranked kills."),
-        ("Item level", None, rows("itemLevel", lambda r: str(r["ilvl"])),
-         "No gear data could be read."),
+           p.get("role"), float(p["percent"]), None) for p in top[:top_n]],
+         "No ranked kills.", None),
+        ("Item level", None,
+         rows("itemLevel", lambda r: str(r["ilvl"]),
+              colour=lambda r: _quality(recap.ilvl_percent(r["ilvl"], scale))[0]),
+         "No gear data could be read.", badge),
     ]
 
 
@@ -222,8 +245,9 @@ def _ellipsis(canvas, text, font, limit):
     return (text + "…") if text else ""
 
 
-def _column(canvas, x, y, w, title, icon, rows, empty):
-    """One `.col`: bordered box, chip header with icon and uppercase title, three rows."""
+def _column(canvas, x, y, w, title, icon, rows, empty, badge=None):
+    """One `.col`: bordered box, chip header with icon, uppercase title and an optional
+    badge pill, three rows."""
     h = COL_HEAD + ROW_H * 3
     canvas.rect(x, y, x + w, y + h, fill=BG, outline=LINE, radius=RADIUS)
     # Header bar, squared at the bottom and rounded at the top like the CSS overflow.
@@ -237,13 +261,24 @@ def _column(canvas, x, y, w, title, icon, rows, empty):
     spacing = 0.6
     tw = sum(canvas.width(c, head_font) + spacing for c in label) - spacing
     icon_w = 13 + 7 if icon else 0
-    hx = x + (w - tw - icon_w) / 2
+    badge_font = canvas.font("semibold", 11)
+    badge_w = (max(34, canvas.width(badge[0], badge_font) + 14) + 7) if badge else 0
+    hx = x + (w - tw - icon_w - badge_w) / 2
     hy = y + (COL_HEAD - 13) / 2
     if icon == "skull":
         canvas.skull(hx, hy, 13)
     elif icon:
         canvas.glyph(icon, hx, hy, 13)
     canvas.text(hx + icon_w, hy - 1, label, head_font, INK, spacing=spacing)
+    if badge:
+        # .parse-badge: the raid's average in the header, same pill as the rows use.
+        text, bg, fg = badge
+        bx = hx + icon_w + tw + 7
+        bw = badge_w - 7
+        by = y + (COL_HEAD - 18) / 2
+        canvas.rect(bx, by, bx + bw, by + 18, fill=bg, outline=PILL_BORDER, radius=9)
+        canvas.text(bx + (bw - canvas.width(text, badge_font)) / 2, by + 2, text,
+                    badge_font, fg)
 
     if not rows:
         canvas.text(x + 14, y + COL_HEAD + 12, empty, canvas.font("regular", 13), MUTED)
@@ -253,7 +288,7 @@ def _column(canvas, x, y, w, title, icon, rows, empty):
     sub_font = canvas.font("regular", 11)
     val_font = canvas.font("regular", 13)
     pill_font = canvas.font("semibold", 12)
-    for n, (name, klass, sub, value, role, pill) in enumerate(rows[:3]):
+    for n, (name, klass, sub, value, role, pill, vcolour) in enumerate(rows[:3]):
         ry = y + COL_HEAD + n * ROW_H
         if n:
             canvas.hline(x, x + w, ry, LINE)
@@ -271,8 +306,10 @@ def _column(canvas, x, y, w, title, icon, rows, empty):
                         label, pill_font, _rgb(fg))
             vw = pw
         else:
-            vw = canvas.width(value, val_font)
-            canvas.text(right - vw, ry + (ROW_H - 16) / 2, value, val_font, MUTED)
+            # A coloured value is the page's `.ilvl`: semibold in its quality colour.
+            font = canvas.font("semibold", 13) if vcolour else val_font
+            vw = canvas.width(value, font)
+            canvas.text(right - vw, ry + (ROW_H - 16) / 2, value, font, vcolour or MUTED)
         # Role glyph, then the name in its class colour, then the realm under it.
         gy = ry + 12
         canvas.glyph(role, left, gy + 2, 13)
@@ -350,10 +387,10 @@ def render(summary, guild_name=None, night_text=None, raid_name=None, difficulty
         y += 8
 
         # .cols
-        for i, (title, icon, rows, empty) in enumerate(cells):
+        for i, (title, icon, rows, empty, badge) in enumerate(cells):
             x = PAD + (i % COLUMNS) * (col_w + COL_GAP)
             cy = y + (i // COLUMNS) * (col_h + COL_GAP)
-            _column(canvas, x, cy, col_w, title, icon, rows, empty)
+            _column(canvas, x, cy, col_w, title, icon, rows, empty, badge)
 
         out = io.BytesIO()
         image.save(out, format="PNG", optimize=True)

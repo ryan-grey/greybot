@@ -329,6 +329,39 @@ query($code: String!, $encounterID: Int!, $difficulty: Int!) {
 """ % RATE
 
 
+# A raid zone's item level bracket range. Warcraft Logs ranks each zone in brackets
+# `bucket` item levels wide between `min` and `max` (The Venomous Abyss: 272-344 by 3),
+# and colours an item level by where it sits in that range. Read live rather than
+# hard-coded so it rolls over with the tier and never has to be edited.
+ZONE_BRACKETS_Q = """
+query($zoneID: Int!) {
+  %s
+  worldData { zone(id: $zoneID) { id name brackets { type min max bucket } } }
+}
+""" % RATE
+
+
+def zone_brackets(token, zone_id):
+    """{"min", "max", "bucket"} for a zone's Item Level brackets, or None.
+
+    None on ANY failure -- an unknown zone, a zone bracketed by something other than item
+    level, a bracket range that is not yet set (the Tidebound Grotto carries 0-0), or the
+    API being down. This colours a number; it must never cost the recap.
+    """
+    try:
+        data = query(token, ZONE_BRACKETS_Q, {"zoneID": int(zone_id)})
+        zone = ((data.get("worldData") or {}).get("zone")) or {}
+        b = zone.get("brackets") or {}
+        lo, hi = b.get("min"), b.get("max")
+        if (str(b.get("type") or "").lower() != "item level"
+                or not isinstance(lo, (int, float)) or not isinstance(hi, (int, float))
+                or hi <= lo):
+            return None
+        return {"min": int(lo), "max": int(hi), "bucket": int(b.get("bucket") or 1)}
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
 def _report(data):
     return ((data.get("reportData") or {}).get("report")) or {}
 

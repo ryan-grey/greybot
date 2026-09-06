@@ -574,8 +574,33 @@ def top_item_levels(sources, limit=3):
     return item_levels(sources, limit)
 
 
+def ilvl_percent(ilvl, scale):
+    """Where an item level sits in the raid's bracket range, 0-100, or None.
+
+    `scale` is wcl.zone_brackets' {"min", "max"}: the item level range Warcraft Logs
+    ranks the zone across. An item level at the bottom of the range is 0 and one at the
+    top is 100, which puts it on the SAME quality bands the parses use -- grey, green,
+    blue, purple, orange -- so the colour of a 318 means the same thing as the colour of a
+    parse next to it. Clamped, because a raider can turn up under-geared for the zone.
+
+    None without a scale. A colour that cannot be computed is not drawn, never grey.
+    """
+    if not scale or not isinstance(ilvl, (int, float)):
+        return None
+    lo, hi = scale.get("min"), scale.get("max")
+    if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)) or hi <= lo:
+        return None
+    return max(0.0, min(100.0, (float(ilvl) - lo) / (hi - lo) * 100.0))
+
+
+def average_ilvl(rows):
+    """Mean equipped item level of the raiders who have one, or None."""
+    got = [r["ilvl"] for r in rows or () if isinstance(r.get("ilvl"), (int, float))]
+    return (sum(got) / len(got)) if got else None
+
+
 def summarise(scope, sources, show_worst_parse=False, encounters=None,
-              dead=None, difficulty=HEROIC):
+              dead=None, difficulty=HEROIC, ilvl_scale=None):
     """Everything the card needs, with each section independently omittable.
 
     A section that could not be read is absent from the result rather than present and
@@ -614,6 +639,14 @@ def summarise(scope, sources, show_worst_parse=False, encounters=None,
     # kills and wipes alike -- unlike parses, which only exist for kills, so a wipe night
     # still has a best-geared list.
     out["itemLevel"] = top_item_levels(sources)
+    # The colour scale rides with the numbers, so both renderers colour a 318 the same
+    # way -- and `ilvlAverage` is the whole raid's, not the top three's, because the
+    # header pill on the page answers "how geared is the team", not "how geared are
+    # the three people under it".
+    out["ilvlScale"] = ilvl_scale
+    out["ilvlAverage"] = average_ilvl(item_levels(sources))
+    for r in out["itemLevel"]:
+        r["percent"] = ilvl_percent(r["ilvl"], ilvl_scale)
     out["parses"] = parses(sources, eligible_names, difficulty)
     if not show_worst_parse and out["parses"]:
         # Dropped here rather than at render time, so a card that is not supposed to carry
