@@ -3363,10 +3363,15 @@ def test_recap_end_to_end():
         url = handler.recap_card_url(bucket, "meers-raid/2026-09-04", dry_summary,
                                      "Meer's Raid", "Thursday", "The Venomous Abyss",
                                      "Heroic")
-        check("the card is published beside the team's page",
-              url == "https://r/cards/recap/meers-raid/2026-09-04.png"
-              and puts and puts[0][0] == "cards/recap/meers-raid/2026-09-04.png"
+        check("the card is published beside the team's page, keyed by its pixels",
+              re.fullmatch(r"https://r/cards/recap/meers-raid/2026-09-04-[0-9a-f]{8}\.png",
+                           url or "")
+              and puts and puts[0][0] == url[len("https://r/"):]
               and puts[0][1] == "image/png", (url, puts))
+        again = handler.recap_card_url(bucket, "meers-raid/2026-09-04", dry_summary,
+                                       "Meer's Raid", "Thursday", "The Venomous Abyss",
+                                       "Heroic")
+        check("...the same picture lands on the same key", again == url, (again, url))
         puts.clear()
         check("a dry run draws the card but publishes nothing",
               handler.recap_card_url(bucket, "2026-09-04", dry_summary, "Scrambled",

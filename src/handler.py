@@ -589,7 +589,14 @@ def recap_card_url(cfg, page_path, summary, guild_name, night_text, raid_name, d
             log("recap_card_drawn", night=page_path, bytes=len(png), published=False,
                 note="dry run — drawn, not published")
             return None
-        key = f"cards/recap/{page_path}.png"
+        # The key carries a hash of the PNG. Discord's image proxy caches by URL for as
+        # long as it likes and a CloudFront edge for an hour, so a redrawn card published
+        # under the OLD key showed the old picture on a fresh post -- it happened on the
+        # first manual repost. Different pixels, different URL; identical pixels reuse
+        # the same object. The kill card keeps its stable key on purpose: it is drawn
+        # once per boss and never redrawn.
+        import hashlib
+        key = f"cards/recap/{page_path}-{hashlib.sha1(png).hexdigest()[:8]}.png"
         publish_bytes(cfg, key, png, "image/png")
         return f"{cfg['recap_page_url']}/{key}"
     except Exception as exc:                                       # noqa: BLE001
