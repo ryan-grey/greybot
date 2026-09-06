@@ -331,6 +331,13 @@ instead of re-flowing, so the same grid reaches both. It costs what the kill car
 text in a PNG cannot be selected, searched or read by a screen reader — so the six embed
 fields remain as the fallback and are used whenever the image cannot be drawn or published.
 Both are rendered from the same `summary` keys, so they cannot disagree.
+
+The image is the recap page's own markup transcribed into pixels: `recap_page.STYLE`'s
+Primer dark palette, the bordered columns with a chip header bar, the role glyphs, class
+colours, realm sub-line, muted values and quality-coloured parse pills. A first drawing with
+its own design looked like a scoreboard from a different product next to the page it linked
+to. The page uses the system font stack, which a Lambda does not have, so the card is set in
+Inter (OFL, vendored under `assets/fonts/` with DejaVu, which the kill card still uses).
 It runs on a second EventBridge schedule pointed at the **same** Lambda with
 `{"mode": "recap"}` — one function, two schedules, not a parallel stack.
 

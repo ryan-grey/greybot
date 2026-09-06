@@ -50,6 +50,10 @@ rm -rf "$OUT"/bin "$OUT"/*.dist-info
 mkdir -p "$OUT/fonts"
 cp "$ROOT/assets/fonts/DejaVuSans.ttf" "$ROOT/assets/fonts/DejaVuSans-Bold.ttf" \
    "$ROOT/assets/fonts/LICENSE-DejaVu.txt" "$OUT/fonts/"
+# Inter draws the recap grid in the recap page's own look (the page uses the system font
+# stack, which a Lambda has none of). OFL-licensed; the licence travels with it.
+cp "$ROOT/assets/fonts/Inter-Regular.ttf" "$ROOT/assets/fonts/Inter-SemiBold.ttf" \
+   "$ROOT/assets/fonts/Inter-Bold.ttf" "$ROOT/assets/fonts/LICENSE-Inter.txt" "$OUT/fonts/"
 
 # __pycache__ would otherwise ride along from the pip install and, before this script, from
 # src/ itself. It is dead weight in the zip and it changes the CDK asset hash on a laptop

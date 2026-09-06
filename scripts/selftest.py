@@ -3321,14 +3321,24 @@ def test_recap_end_to_end():
                             "Heroic", 18)
     check("the recap grid draws from the real summary", png and png[:4] == b"\x89PNG")
     img = _Image.open(_io.BytesIO(png)).convert("RGB")
-    check("...at the grid's size", img.size == (recap_card.WIDTH, recap_card.HEIGHT),
-          img.size)
-    check("...with the accent on it", recap_card.ACCENT in set(img.getdata()))
+    check("...at the page's width, drawn at scale",
+          img.size[0] == recap_card.WIDTH_CSS * recap_card.SCALE, img.size)
+    pixels = set(img.getdata())
+    check("...in the recap page's palette: its ground and its chip header bar",
+          recap_card.BG in pixels and recap_card.CHIP in pixels)
+    check("...and a parse pill in a Warcraft Logs quality colour",
+          any(recap_card._rgb(bg) in pixels
+              for _f, bg, _fg in handler.recap_page.PARSE_BANDS))
+    check("the grid is drawn with Inter, the page's face",
+          recap_card._font_path("semibold").endswith("Inter-SemiBold.ttf"),
+          recap_card._font_path("semibold"))
     check("an empty summary is still a grid, of empty cells",
           recap_card.render({}) and recap_card.render({})[:4] == b"\x89PNG")
     titles = [c[0] for c in recap_card._cells(dry_summary)]
-    check("the drawn cells are the embed's six, in the embed's order", titles == grid,
-          titles)
+    check("the drawn cells are the embed's six, in the embed's order, titled as the page "
+          "titles them",
+          titles == ["DPS / Damage", "HPS / Healing", "Damage taken", "Deaths",
+                     "Best parses", "Item level"], titles)
     check("a summary that is not a dict returns None, never raises",
           recap_card.render(object()) is None)
 
