@@ -615,10 +615,12 @@ safe because nobody else in the guild files a Saturday report: Meerclar's Saturd
 are personal and never appear under the guild. A guild-sourced team without raid days is
 refused by `register-team.py`, because it would be the guild announced twice.
 
-**Its recap fires at 11:30 PM Eastern on Saturday itself**, not the morning after, from its
-own schedule `ryangrey-greybot-recap-saturday-raid` (`cron(30 23 ? * SAT *)`) whose input
-names the team — `{"mode":"recap","team":"saturday-raid"}` — so the guild and Meer's Raid
-do not run at that hour. The shared Wednesday/Friday schedule still runs for it and finds
+**Its recap fires at 1:00 AM Eastern on Sunday**, from its own schedule
+`ryangrey-greybot-recap-saturday-raid` (`cron(0 1 ? * SUN *)`) whose input names the team —
+`{"mode":"recap","team":"saturday-raid"}` — so the guild and Meer's Raid do not run at that
+hour. It was 11:30 PM Saturday for one evening; the raid runs to 12:20–12:35 AM, so that
+would have recapped the night mid-raid and claimed it. The eighteen-hour lookback from
+1 AM reaches back to 7 AM Saturday, and the night is keyed on the report's Saturday start. The shared Wednesday/Friday schedule still runs for it and finds
 nothing, by the raid-day filter. Its page lives under `/saturday-raid/<night>/`.
 
 ```sh
