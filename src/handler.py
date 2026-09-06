@@ -584,6 +584,9 @@ def recap_card_url(cfg, page_path, summary, guild_name, night_text, raid_name, d
         if not png:
             log("recap_card_not_drawn", night=page_path,
                 note="posting with the field grid instead")
+            if not dry:
+                recap_card_alert(cfg, page_path, guild_name, "the card could not be drawn "
+                                 "(recap_card.render returned nothing)")
             return None
         if dry:
             log("recap_card_drawn", night=page_path, bytes=len(png), published=False,
@@ -602,7 +605,43 @@ def recap_card_url(cfg, page_path, summary, guild_name, night_text, raid_name, d
     except Exception as exc:                                       # noqa: BLE001
         log("recap_card_failed", night=page_path, error=repr(exc),
             note="posting with the field grid instead")
+        if not dry:
+            recap_card_alert(cfg, page_path, guild_name,
+                             f"publishing the card failed: {exc!r}")
         return None
+
+
+def recap_card_alert(cfg, page_path, who, why):
+    """One email per fallback: the recap went out as text, here is why.
+
+    Through the same topic the health checks mail on, so it arrives the same way. The
+    fallback is deliberate and the post is not lost -- but a recap that quietly went out
+    without its card is a broken feature nobody knows about until somebody notices the
+    channel looks different, and by then the night is claimed and cannot be re-posted
+    by the schedule. Swallows its own failure: a mail pipe that is down must never
+    reach back and take the recap down with it, which is the rule every alert here
+    follows.
+    """
+    try:
+        body = (f"greyBot posted the recap for {page_path} WITHOUT its drawn card.\n\n"
+                f"Why: {why}\n\n"
+                f"What went out instead: the same six leaderboards as text fields on the "
+                f"embed (top damage, top heals, damage taken, most deaths, best parses, "
+                f"item level), with the full-recap link. The page itself is unaffected.\n\n"
+                f"What to check: CloudWatch for ryangrey-greybot around this run -- "
+                f"recap_card_not_drawn means Pillow or the fonts are missing from the "
+                f"package (scripts/build-lambda.sh ships both); recap_card_failed carries "
+                f"the exception, usually the S3 put to the recap bucket.\n\n"
+                f"To re-post with the card once fixed: delete the text post, release the "
+                f"night (dynamodb update-item ... DELETE posted :b on the tenant's RECAPS "
+                f"row) and invoke {{\"mode\":\"recap\",\"manual\":true,...}}.")
+        sent = notify.publish(cfg.get("alert_topic_arn"),
+                              f"greyBot posted the {who} recap without its card "
+                              f"({page_path})", body)
+        log("recap_card_alert", night=page_path, sent=bool(sent),
+            configured=bool(cfg.get("alert_topic_arn")))
+    except Exception as exc:                                       # noqa: BLE001
+        log("recap_card_alert_undeliverable", night=page_path, error=repr(exc))
 
 
 def _remember_post(scope, sent, kind, now_iso):

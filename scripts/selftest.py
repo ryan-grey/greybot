@@ -3384,6 +3384,51 @@ def test_recap_end_to_end():
         check("a refused put returns None and the fields carry the recap",
               handler.recap_card_url(bucket, "2026-09-04", dry_summary, "S", "T", "V", "H")
               is None)
+
+        # Falling back is allowed; falling back SILENTLY is not. Every fallback on a real
+        # post mails the operator, once, saying which night and why -- a dry run does not.
+        mailed = dict(bucket, alert_topic_arn="arn:aws:sns:us-east-1:0:ryangrey-dev-alerts")
+        SENT.clear()
+        handler.recap_card_url(mailed, "2026-09-04", dry_summary, "Scrambled", "T", "V", "H")
+        check("a refused put on a real post sends one email", len(SENT) == 1, SENT)
+        check("...naming the night and the reason",
+              SENT and "2026-09-04" in SENT[0]["body"] and "s3" in SENT[0]["body"]
+              and "Scrambled" in SENT[0]["subject"], SENT)
+        check("...and saying the recap still went out as text",
+              SENT and "text fields" in SENT[0]["body"], SENT)
+        SENT.clear()
+        handler.recap_card_url(mailed, "2026-09-04", dry_summary, "S", "T", "V", "H",
+                               dry=True)
+        check("a dry run that cannot publish mails nobody", SENT == [], SENT)
+        handler.publish_bytes = real_publish
+        real_render = handler.recap_card.render
+        handler.recap_card.render = lambda *a, **kw: None
+        try:
+            SENT.clear()
+            check("a card that cannot be drawn on a real post also mails, once",
+                  handler.recap_card_url(mailed, "meers-raid/2026-09-04", dry_summary,
+                                         "Meer's Raid", "T", "V", "H") is None
+                  and len(SENT) == 1 and "drawn" in SENT[0]["body"], SENT)
+            SENT.clear()
+            handler.recap_card_url(mailed, "2026-09-04", dry_summary, "S", "T", "V", "H",
+                                   dry=True)
+            check("...but not on a dry run", SENT == [], SENT)
+            SENT.clear()
+            handler.recap_card_url(bucket, "2026-09-04", dry_summary, "S", "T", "V", "H")
+            check("no alert topic configured means no mail, and still no error",
+                  SENT == [], SENT)
+        finally:
+            handler.recap_card.render = real_render
+        # A broken mail pipe must never take the recap down with it.
+        real_sns_publish = handler.notify.sns.publish
+        handler.notify.sns.publish = lambda **kw: (_ for _ in ()).throw(RuntimeError("sns"))
+        try:
+            handler.publish_bytes = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("s3"))
+            check("an alert that cannot be sent is logged, and the fallback still returns",
+                  handler.recap_card_url(mailed, "2026-09-04", dry_summary, "S", "T", "V",
+                                         "H") is None)
+        finally:
+            handler.notify.sns.publish = real_sns_publish
     finally:
         handler.publish_bytes = real_publish
     check("the progression boss is the one with the most wipes",

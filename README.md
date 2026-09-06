@@ -330,7 +330,12 @@ phone, so six leaderboards became a screen and a half of stacked lists. An image
 instead of re-flowing, so the same grid reaches both. It costs what the kill card costs —
 text in a PNG cannot be selected, searched or read by a screen reader — so the six embed
 fields remain as the fallback and are used whenever the image cannot be drawn or published.
-Both are rendered from the same `summary` keys, so they cannot disagree.
+Both are rendered from the same `summary` keys, so they cannot disagree. **Every fallback on
+a real post also sends one email** through the same `ryangrey-dev-alerts` topic the health
+checks use, naming the night and the reason (`recap_card_not_drawn` / `recap_card_failed`
+in CloudWatch carry the same), because a recap that quietly went out as text is a card
+nobody knows is broken. Dry runs and an unconfigured bucket do not mail: the first is a
+preview, the second is a choice.
 
 **The page's chip row is the whole story of the pulls.** A killed boss wears its wipe count
 ("5/8 Sszorak · 3 wipes"); a boss pulled and left standing gets a plain chip with its pulls
