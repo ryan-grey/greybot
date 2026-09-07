@@ -40,6 +40,8 @@ SCHEDULE="${SCHEDULE_NAME:-ryangrey-greybot-poll}"
 
 OUT="$ROOT/docs/parity-baseline"
 mkdir -p "$OUT"
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export ACCOUNT_ID
 
 say() { printf '==> %s\n' "$1"; }
 grab() { # grab <file> <aws args...>
@@ -101,6 +103,18 @@ grab alarms.json aws cloudwatch describe-alarms --alarm-name-prefix greybot
 
 say "Log group"
 grab log-group.json aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/$FN"
+
+# Account identifiers stay out of the versioned baseline.
+python3 - "$OUT" <<'PY'
+import os, pathlib, sys
+account = os.environ['ACCOUNT_ID']
+assert len(account) == 12 and account.isdigit()
+for path in pathlib.Path(sys.argv[1]).iterdir():
+    if path.is_file():
+        text = path.read_text()
+        path.write_text(text.replace(account, '${AWS_ACCOUNT_ID}'))
+PY
+unset ACCOUNT_ID
 
 # A single sorted digest makes "did anything move" one diff rather than twenty.
 say "Digest"

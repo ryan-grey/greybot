@@ -20,7 +20,7 @@ from greybot.stack import GreybotStack
 app = cdk.App()
 
 env = cdk.Environment(
-    account=os.environ.get("CDK_DEFAULT_ACCOUNT") or "${AWS_ACCOUNT_ID}",
+    account=os.environ.get("CDK_DEFAULT_ACCOUNT"),
     region=os.environ.get("CDK_DEFAULT_REGION") or "us-east-1",
 )
 
