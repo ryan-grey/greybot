@@ -1,0 +1,19 @@
+# Captured data never lives here; it lives in ~/Library/Application Support/discord-local-log
+events*.jsonl
+discord.db
+discord.db-*
+
+# The Vencord build tree lives in ~/.local/discord-local-log, not in the repo
+Vencord/
+dist/
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# macOS
+.DS_Store
+

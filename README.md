@@ -1,11 +1,26 @@
-# greyBot — Scrambled raid progress
+# greyBot
+
+Discord moderation, verification, raid signups, progression announcements and
+searchable history, with an administrator website and local reader integrations.
+The maintained source now includes the former standalone reader and capture projects.
+
+Start with [the consolidated architecture and build](docs/consolidation.md) and
+[the control service documentation](control/README.md). Build all distribution
+components with `python3 scripts/build-release.py`; private runtime data and
+credentials stay outside the repository and release artifacts.
+
+## Original raid-service reference
+
+The sections below document the raid service's development and original webhook
+deployment. Current production delivery uses the greyBot application; the legacy
+webhook is retired. The admin/Gateway service runs on a persistent Docker host,
+while raid scheduling and scorecard generation retain their AWS runtime.
 
 Announces in Discord when the WoW guild **Scrambled** (Proudmoore-US) kills a Heroic raid
 boss for the first time, and posts a separate AOTC card tagging Prog Raiders when the tier
 is cleared.
 
-EventBridge Scheduler → Lambda → Discord webhook. No gateway connection, no server,
-about **$0.02/month**.
+Raid delivery: EventBridge Scheduler → Lambda → Discord bot application.
 
 ---
 

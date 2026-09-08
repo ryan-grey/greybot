@@ -199,7 +199,11 @@ SETUP_COMMAND = {
     ],
 }
 
-COMMANDS = [PROGRESS_COMMAND, SETUP_COMMAND]
+from polls import COMMAND as POLL_COMMAND
+
+from raid_commands import commands as raid_commands
+
+COMMANDS = [PROGRESS_COMMAND, SETUP_COMMAND, POLL_COMMAND, *raid_commands()]
 
 
 def command_options(body):

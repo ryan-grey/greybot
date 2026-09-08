@@ -1,0 +1,17 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const context = {};
+vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../control/greybot_control/static/event-labels.js'), 'utf8'), context);
+const resolve = (kind, id) => ({name: ({members:{'7':'River','8':'Sky'},roles:{'3':'Raiders','4':'Saturday Raiders'},channels:{'5':'#general'}})[kind]?.[id] || 'Unavailable'});
+const label = (kind, payload, subject='8') => context.describeGreybotEvent({kind,subject,payload:JSON.stringify(payload)},resolve,'Scrambled');
+assert.equal(label('GUILD_AUDIT_LOG_ENTRY_CREATE',{actor:'7',action_type:25,roles_added:[{id:'3'}],roles_removed:[{id:'4'}]}),'River added Raiders and removed Saturday Raiders for Sky');
+assert.equal(label('GUILD_AUDIT_LOG_ENTRY_CREATE',{actor:'7',action_type:14,target_id:'5',overwrite_target:{id:'3',type:0}}),"River changed Raiders's permissions in #general");
+assert.equal(label('GUILD_AUDIT_LOG_ENTRY_CREATE',{actor:'7',action_type:25}),"River changed Sky's roles (earlier role details were not captured)");
+assert.equal(label('MESSAGE_DELETE',{channel_id:'5'}),'A message from Sky was deleted in #general');
+assert.equal(label('CHANNEL_VISIBILITY_APPLIED',{channel:'5',hidden:true}),'Sky hid #general in their channel list');
+assert.match(label('HOST_HEALTH_GAP',{restart_confirmed:false}),/monitoring missed/);
+assert.match(label('ACTION_RESULT',{state:'unknown'}),/uncertain/);
+assert.doesNotMatch(label('GUILD_AUDIT_LOG_ENTRY_CREATE',{action_type:999}),/999|audit entry/i);
+console.log('Event explanations: 8 checks passed');

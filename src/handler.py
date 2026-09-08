@@ -1047,6 +1047,21 @@ def handle_interaction(event, cfg, scope, now):
         return interactions.unauthorized()
 
     kind = body.get("type")
+    raid_request = (kind == 2 and body.get("data", {}).get("name") in {"create", "quickcreate", "raid"}
+                    or kind in {3, 5} and str(body.get("data", {}).get("custom_id", "")).startswith("greybot:raid:"))
+    if raid_request:
+        if body.get("guild_id") != cfg.get("discord_guild_id"):
+            return interactions.unauthorized()
+        import role_relay
+        return interactions.http(200, role_relay.forward(body_bytes,
+            headers.get("x-signature-ed25519"), headers.get("x-signature-timestamp")))
+    if kind == 3 and (str(body.get("data", {}).get("custom_id", "")).startswith("greybot:role:")
+                      or body.get("data", {}).get("custom_id") == "greybot:verify"):
+        if body.get("guild_id") != cfg.get("discord_guild_id"):
+            return interactions.unauthorized()
+        import role_relay
+        return interactions.http(200, role_relay.forward(body_bytes,
+            headers.get("x-signature-ed25519"), headers.get("x-signature-timestamp")))
     if kind == interactions.PING:
         log("interaction_ping")
         return interactions.http(200, {"type": interactions.PONG})
@@ -1054,6 +1069,9 @@ def handle_interaction(event, cfg, scope, now):
     if kind == interactions.APPLICATION_COMMAND:
         name = interactions.command_name(body)
         log("interaction_command", command=name)
+        if name == "poll":
+            import polls
+            return interactions.http(200, polls.response(body, cfg.get("discord_guild_id")))
         if name == "progress":
             # Answer as the server that asked, not as whichever install the
             # poller's config happens to name.
@@ -1477,7 +1495,10 @@ def destination(cfg):
             raise discord.DiscordError(
                 "this install posts to a channel, but no bot token is configured")
         return {"bot_token": cfg["bot_token"], "channel": cfg["channel_id"]}
-    return {"webhook": cfg.get("webhook")}
+    if not cfg.get("webhook"):
+        raise discord.DiscordError(
+            "no announcement channel or legacy webhook is configured")
+    return {"webhook": cfg["webhook"]}
 
 
 def tenant_configs(cfg):

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>greyBot · Raid events</title><link rel="stylesheet" href="/assets/style.css"><script src="/assets/raids.js" defer></script></head>
+<body><header class="global-header"><a class="brand" href="/about"><img class="mark" src="/assets/avatar.png" alt="" width="32" height="32">greyBot</a><span class="slash">/</span><span>Raid events</span><div class="global-actions"><a href="/">Administration</a></div></header>
+<main class="workspace"><div class="page-heading"><div><h1>Raid events</h1><p class="muted">Signups, specializations and shared raid history for your server.</p></div><button id="reload">Refresh</button></div>
+<div id="raid-notice" role="status" aria-live="polite"></div><a id="raid-login" class="primary" href="/auth/login?destination=raids" hidden>Sign in with Discord</a>
+<section class="box" id="raid-create" hidden><div class="box-header"><strong>Create an event</strong></div><form id="raid-form" class="raid-form">
+<label>Title<input name="title" maxlength="200" required></label><label>Channel<select name="channel" required></select></label>
+<label>Signup template<select name="template"><option value="wowretail1">WoW classes and specializations</option><option value="wowretail2">WoW combat roles</option><option value="standard">Simple attendance</option></select></label>
+<label>Starts (your local time)<input name="when" type="datetime-local" required></label><label class="raid-wide">Details<textarea name="description" maxlength="3500" rows="3"></textarea></label><button class="primary" type="submit">Create signup</button>
+</form></section>
+<div class="filters"><label>Show<select id="raid-filter"><option value="current">Current events</option><option value="history">Past events</option><option value="all">All events</option></select></label></div>
+<div id="raid-list"></div><section class="box"><div class="box-header"><strong>Signup history</strong><span class="muted">Recorded responses, not proof of attendance</span></div><div id="raid-attendance" class="record-list"></div></section>
+<p id="raid-requests" class="muted"></p><div id="raid-member" class="signed-in-member"></div>
+</main><dialog id="raid-edit"><form method="dialog"><h2>Edit event</h2><label>Title<input name="title" maxlength="200" required></label><label>Starts (your local time)<input name="when" type="datetime-local" required></label><label>Details<textarea name="description" rows="5" maxlength="3500"></textarea></label><p class="muted">Saving the start time also sets the signup deadline to that time.</p><button value="cancel" formnovalidate>Cancel</button><button id="raid-save" value="save" class="primary">Save changes</button></form></dialog>
+</body></html>

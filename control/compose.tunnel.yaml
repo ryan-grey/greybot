@@ -1,0 +1,17 @@
+name: greybot
+services:
+  tunnel:
+    image: cloudflare/cloudflared:2026.8.3
+    user: '1000:10'
+    restart: unless-stopped
+    command: [tunnel, --no-autoupdate, run, --token-file, /run/secrets/tunnel-token]
+    volumes:
+      - /volume1/docker/greybot/private/tunnel.token:/run/secrets/tunnel-token:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'

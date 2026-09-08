@@ -1,0 +1,12 @@
+**
+!control/
+!control/Dockerfile
+!control/requirements.txt
+!control/greybot_control/
+!control/greybot_control/*.py
+!control/greybot_control/static/
+!control/greybot_control/static/*.html
+!control/greybot_control/static/*.css
+!control/greybot_control/static/*.js
+!assets/
+!assets/greyBot-avatar-v3.png

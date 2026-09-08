@@ -506,7 +506,7 @@ def test_config():
     print("\nConfig from SSM")
     config._cache.clear()
     cfg = config.load()
-    check("the seven required parameters are read in one call",
+    check("raid configuration includes the optional legacy destination",
           {"wcl_client_id", "wcl_client_secret", "webhook", "role_id",
            "guild_name", "guild_realm", "guild_region"} <= set(cfg), sorted(cfg))
     check("Blizzard credentials are optional, and absent means art is simply off",
@@ -576,6 +576,35 @@ def test_config():
     SSM_VALUES["/greybot/guild/realm"] = saved
     config._cache.clear()
     config.load()
+
+    # Removing the retired credential must leave the bot route and recap settings
+    # usable, while a genuinely unconfigured legacy destination fails explicitly.
+    import handler
+    saved_webhook = SSM_VALUES.pop("/greybot/discord/webhook_url")
+    original_get = config.ssm.get_parameters
+    try:
+        config._cache.clear()
+        migrated = dict(config.load(), channel_id="555", bot_token="test-token")
+        check("missing retired webhook does not block bot-channel delivery",
+              migrated["webhook"] == "" and handler.destination(migrated)
+              == {"bot_token": "test-token", "channel": "555"})
+        try:
+            handler.destination({"webhook": ""})
+            check("missing legacy destination fails explicitly", False)
+        except discord.DiscordError:
+            check("missing legacy destination fails explicitly", True)
+        def deny_legacy(Names=None, WithDecryption=False):
+            if config.DISCORD_WEBHOOK in Names:
+                raise RuntimeError("AccessDeniedException")
+            return original_get(Names=Names, WithDecryption=WithDecryption)
+        config.ssm.get_parameters = deny_legacy
+        config._cache.clear()
+        check("revoked webhook IAM access does not block raid configuration",
+              config.load()["guild_name"] == "Scrambled")
+    finally:
+        config.ssm.get_parameters = original_get
+        SSM_VALUES["/greybot/discord/webhook_url"] = saved_webhook
+        config._cache.clear()
 
 
 def test_boss_art():
@@ -1472,8 +1501,8 @@ def test_interactions():
                      "application_id": "1"}), cfg, pk, now)["body"])["type"]
           == interactions.CHANNEL_MESSAGE_WITH_SOURCE)
 
-    check("the registered command set is /progress and /setup",
-          [c["name"] for c in interactions.COMMANDS] == ["progress", "setup"])
+    check("the registered command set includes progress, setup, poll and raid commands",
+          [c["name"] for c in interactions.COMMANDS] == ["progress", "setup", "poll", "create", "quickcreate", "raid"])
 
     setup = interactions.SETUP_COMMAND
     # 0x20 is MANAGE_GUILD. Discord takes this as a STRING bitfield; an int here
@@ -2437,6 +2466,12 @@ def test_health():
     check("...definitely, having asked all five questions",
           res["definite"] and [p["probe"] for p in res["probes"]] ==
           ["webhook", "identity", "installation", "membership", "member"], res["probes"])
+
+    health._get = responder(webhook=(404, {"code": 10015}))
+    res = health.check(dict(cfg, channel_id="555"), now)
+    check("retired webhook does not make bot-channel delivery unhealthy",
+          res["status"] == health.OK
+          and all(p["probe"] != "webhook" for p in res["probes"]), res)
 
     # THE FALSE ALARM THIS BLOCK EXISTS FOR. greyBot is authorised with
     # `applications.commands` and not `bot`, so it has no member and never has. The first

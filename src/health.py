@@ -349,7 +349,9 @@ def check(cfg, now=None):
     probes = []
     member = None
 
-    if cfg.get("webhook"):
+    # The retained rollback credential is not the destination of a bot-channel
+    # install. Revoking it must not generate an announcement-outage alert.
+    if cfg.get("webhook") and not cfg.get("channel_id"):
         probes.append(webhook_probe(cfg["webhook"]))
 
     token, gid = cfg.get("bot_token"), cfg.get("discord_guild_id")

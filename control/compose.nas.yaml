@@ -1,0 +1,5 @@
+services:
+  worker:
+    volumes:
+      - ${GREYBOT_DATA_DIR:?Set private data directory}:/state
+      - ${GREYBOT_AUDIT_DIR:?Set private archive directory}:/archive

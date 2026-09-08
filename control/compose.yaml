@@ -1,0 +1,36 @@
+name: greybot
+
+x-runtime: &runtime
+  image: greybot-control:local
+  build:
+    context: ..
+    dockerfile: control/Dockerfile
+  restart: unless-stopped
+  init: true
+  env_file:
+    - ${GREYBOT_ENV_FILE:?Set the absolute path to the private runtime environment file}
+  environment:
+    GREYBOT_STATE_DIR: /state
+  volumes:
+    - ${GREYBOT_DATA_DIR:?Set the absolute path to the private data directory}:/state
+  read_only: true
+  tmpfs:
+    - /tmp:size=32m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '3'
+
+services:
+  web:
+    <<: *runtime
+    ports:
+      - '127.0.0.1:8088:8080'
+  worker:
+    <<: *runtime
+    command: [python, -m, greybot_control.worker]

@@ -1,0 +1,21 @@
+# Local state lives in ~/.local/discord-mcp, never here - but belt and braces
+index.db
+index.db-shm
+index.db-wal
+discord-changes.log
+
+# Anything that could hold a token, an export, or real message data
+.env
+.env.*
+config.json
+config.*.json
+*.zip
+package/
+discord.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+

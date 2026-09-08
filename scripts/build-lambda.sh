@@ -41,8 +41,10 @@ cp "$ROOT/src/"*.py "$OUT/"
 # happens to be -- and both would fail at RUNTIME rather than at build time if the wrong
 # architecture were shipped, which is the failure this whole script exists to prevent.
 python3 -m pip install --quiet --platform manylinux2014_aarch64 --implementation cp \
-  --python-version 3.12 --only-binary=:all: --target "$OUT" pynacl pillow
-rm -rf "$OUT"/bin "$OUT"/*.dist-info
+  --python-version 3.12 --only-binary=:all: --target "$OUT" \
+  pynacl==1.6.2 pillow==12.2.0 cffi==2.1.1 pycparser==3.0
+# Keep upstream distribution metadata and license files in the deployment.
+rm -rf "$OUT"/bin
 
 # The fonts the card is drawn with. A Lambda has no system fonts at all, and macOS's are
 # Apple's to license rather than mine to redistribute, so DejaVu travels with the package

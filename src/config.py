@@ -38,7 +38,7 @@ GUILD_NAME = f"{PREFIX}/guild/name"
 GUILD_REALM = f"{PREFIX}/guild/realm"
 GUILD_REGION = f"{PREFIX}/guild/region"
 
-NAMES = [WCL_CLIENT_ID, WCL_CLIENT_SECRET, DISCORD_WEBHOOK, DISCORD_ROLE_ID,
+NAMES = [WCL_CLIENT_ID, WCL_CLIENT_SECRET, DISCORD_ROLE_ID,
          GUILD_NAME, GUILD_REALM, GUILD_REGION]
 
 # Optional. Boss art is decoration, so the bot must run perfectly well without these --
@@ -139,7 +139,7 @@ _fetched_at = {"t": 0.0}
 
 
 def load(now=None):
-    """All seven parameters, or a failure naming exactly which are missing.
+    """Required raid parameters, plus optional delivery and presentation settings.
 
     SSM answers a request for a parameter that does not exist by simply omitting it from
     Parameters and listing it under InvalidParameters, with a 200. Not checking that turns
@@ -154,6 +154,15 @@ def load(now=None):
     missing = [n for n in NAMES if n not in got or not got[n].strip()]
     if missing:
         raise RuntimeError("missing or empty SSM parameters: " + ", ".join(missing))
+
+    # Registered channels use the bot token. Retiring the legacy webhook must not
+    # stop config loading, interactions, or scorecard generation. Fetch it alone so
+    # removing its IAM grant cannot disable unrelated optional features.
+    try:
+        legacy = ssm.get_parameters(Names=[DISCORD_WEBHOOK], WithDecryption=True)
+        got.update({p["Name"]: p["Value"] for p in legacy.get("Parameters", [])})
+    except Exception:                                          # noqa: BLE001
+        print(json.dumps({"event": "legacy_webhook_config_unavailable"}))
 
     # Optional parameters are fetched SEPARATELY, and failure here is survivable.
     # GetParameters denies the entire call if the caller lacks permission on any single
@@ -182,7 +191,7 @@ def load(now=None):
     _cache.update({
         "wcl_client_id": got[WCL_CLIENT_ID].strip(),
         "wcl_client_secret": got[WCL_CLIENT_SECRET].strip(),
-        "webhook": got[DISCORD_WEBHOOK].strip(),
+        "webhook": got.get(DISCORD_WEBHOOK, "").strip(),
         "role_id": got[DISCORD_ROLE_ID].strip(),
         "guild_name": got[GUILD_NAME].strip(),
         # Raider.IO and Warcraft Logs both want the realm SLUG, lowercase and hyphenated.
