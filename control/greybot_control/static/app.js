@@ -469,5 +469,31 @@ $("#apply-member-roles").addEventListener("click",handle(async()=>{
   try { const result=await api("/api/member-roles",{method:"POST",body:JSON.stringify(reviewedRoleChange)}); $("#role-result").textContent=`${result.jobs.length} requests queued; check Moderation for each result.`; invalidateRoleReview(); }
   finally {button.disabled=false;}
 }));
-const initialPanel = document.querySelector(`[data-panel="${["dashboard","review","events","messages","moderation","settings","activity"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "dashboard"}"]`);
+const dashboardDialogs = {review: ["Needs Review", loadReview], messages: ["Message search", loadMessages], activity: ["Activity scoreboard", loadActivity]};
+async function openDashboardDialog(id) {
+  const dialog = document.getElementById(`${id}-dialog`);
+  dialog.showModal();
+  const status = dialog.querySelector(".dialog-status");
+  status.textContent = "Loading…";
+  try { await dashboardDialogs[id][1](); status.textContent = ""; }
+  catch (error) { status.textContent = error.message; }
+}
+for (const [id, [title]] of Object.entries(dashboardDialogs)) {
+  const dialog = document.createElement("dialog");
+  dialog.id = `${id}-dialog`; dialog.className = "dashboard-dialog";
+  dialog.setAttribute("aria-labelledby", `${id}-dialog-title`);
+  const heading = document.createElement("div"); heading.className = "dialog-heading";
+  const label = document.createElement("h2"); label.id = `${id}-dialog-title`; label.textContent = title;
+  const close = document.createElement("button"); close.textContent = "Close";
+  close.addEventListener("click", () => dialog.close()); heading.append(label, close);
+  const status = document.createElement("p"); status.className = "dialog-status muted"; status.setAttribute("role", "status");
+  const content = document.getElementById(id); content.classList.remove("panel"); content.hidden = false;
+  dialog.append(heading, status, content); document.body.append(dialog);
+  document.querySelector(`[data-dashboard-dialog="${id}"]`).addEventListener("click", () => openDashboardDialog(id));
+}
+const requestedPanel = location.hash.slice(1);
+const initialPanel = document.querySelector(`[data-panel="${["dashboard","events","moderation","settings"].includes(requestedPanel) ? requestedPanel : "dashboard"}"]`);
 initialPanel.click();
+if (dashboardDialogs[requestedPanel]) {
+  handle(async () => { await refresh(); await openDashboardDialog(requestedPanel); })();
+}

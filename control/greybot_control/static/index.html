@@ -18,12 +18,9 @@
     <div class="repo-title"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2M3 7h10v8H3z"/></svg><span>greyBot</span><span class="badge">Private</span></div>
     <nav aria-label="Main navigation">
       <button data-panel="dashboard" class="active">Dashboard</button>
-      <button data-panel="review">Needs Review</button>
       <button data-panel="events"><span aria-hidden="true">◷</span> Event history</button>
-      <button data-panel="messages"><span aria-hidden="true">⌕</span> Message search</button>
       <button data-panel="moderation"><span aria-hidden="true">◇</span> Moderation</button>
       <button data-panel="settings"><span aria-hidden="true">⚙</span> Settings</button>
-      <button data-panel="activity">Activity scoreboard</button>
     </nav>
   </div>
   <main class="workspace">
@@ -33,9 +30,12 @@
       <div class="main-column">
         <section id="dashboard" class="panel">
           <div class="dashboard-cards">
-            <div class="box dashboard-card"><h2>Raid events</h2><p class="muted">Manage signups and review complete rosters and past event responses.</p><a href="/raids">Open raid events</a></div>
+            <div class="box dashboard-card"><h2>Raid events</h2><p class="muted">Manage signups and review complete rosters and past event responses.</p><a class="button primary" href="/raids">Open raid events</a></div>
             <div class="box dashboard-card"><h2>Member roles</h2><p class="muted">Find members by role or name, then review your selection before adding or removing a role.</p><button id="open-member-roles" class="primary">Manage member roles</button></div>
-            <div class="box dashboard-card"><h2>greyNAS</h2><p class="muted">Hosts greyBot's server and private audit archive.</p><p id="host-uptime">Waiting for health monitor</p><button id="open-health">Health log</button></div>
+            <div class="box dashboard-card"><h2>greyNAS</h2><p class="muted">Hosts greyBot's server and private audit archive.</p><p id="host-uptime">Waiting for health monitor</p><button id="open-health" class="primary">Health log</button></div>
+            <div class="box dashboard-card"><h2>Needs Review</h2><p class="muted">Review roles, channel access and permission differences.</p><button data-dashboard-dialog="review" class="primary">Review checklist</button></div>
+            <div class="box dashboard-card"><h2>Message search</h2><p class="muted">Find captured server messages by text, channel or member.</p><button data-dashboard-dialog="messages" class="primary">Search messages</button></div>
+            <div class="box dashboard-card"><h2>Activity scoreboard</h2><p class="muted">Compare member activity from messages, reactions and voice time.</p><button data-dashboard-dialog="activity" class="primary">View scoreboard</button></div>
           </div>
         </section>
         <section id="review" class="panel" hidden><p class="muted">Check items after reviewing them; this records your acknowledgement and does not change server permissions. Access findings show possible missing roles, not an inferred membership requirement.</p><div id="review-list" class="box record-list"></div></section>

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def sources():
     paths = [ROOT / 'control' / 'Dockerfile', ROOT / '.dockerignore',
-             ROOT / 'assets' / 'greyBot-avatar-v3.png']
+             ROOT / 'assets' / 'greyBot-avatar-v4.png']
     paths += list((ROOT / 'control').glob('requirements*.txt'))
     paths += list((ROOT / 'control').glob('compose*.yaml'))
     paths += list((ROOT / 'control' / 'greybot_control').glob('*.py'))
