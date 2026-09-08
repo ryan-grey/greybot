@@ -38,8 +38,9 @@ def main():
         for path in selected:
             archive.add(path, arcname=str(path.relative_to(ROOT)), recursive=False)
     shutil.make_archive(str(out / 'greybot-lambda'), 'zip', ROOT / 'build' / 'lambda')
-    manifest = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                for p in selected}
+    manifest = [{'path': str(p.relative_to(ROOT)),
+                 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
+                for p in selected]
     (out / 'source-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     artifacts = [bundle, out / 'greybot-lambda.zip', out / 'source-manifest.json']
     (out / 'SHA256SUMS').write_text(''.join(
