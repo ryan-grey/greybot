@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# The second EventBridge schedule: the morning-after raid recap.
+# The second EventBridge schedule: the post-raid recap.
 #
-# Scrambled raids Tuesday and Thursday, 9pm to midnight Eastern, so the recap fires
-# Wednesday and Friday at 10am Eastern. Two cards a week, each covering one night --
+# Prog and Meer's Raid end at midnight Eastern Tuesday and Thursday nights, so recaps
+# fire Wednesday and Friday at 12:15am Eastern. Two cards per team a week --
 # despite the name, this is not a weekly digest, and the brief's own contents ("top 3
 # damage for the night", "bosses killed that night") describe one raid night.
 #
 # NOTE THE TIMEZONE ARGUMENT. It is the whole reason this schedule is a cron rather than
 # a rate(), and it is what the poller's rate(15 minutes) never needed: a bare UTC cron for
-# 10am Eastern is 14:00 in summer and 15:00 in winter, so it silently drifts an hour every
+# 12:15am Eastern is 04:15 in summer and 05:15 in winter, so it silently drifts an hour every
 # November and every March and has to be edited by hand twice a year. Scheduler will keep
-# 10am at 10am if you tell it which 10am you meant.
+# 12:15am at 12:15am when given America/New_York.
 #
 # Both the expression and whether this runs at all come from SSM rather than from this
 # file, so the recorded configuration and the thing actually firing cannot disagree.

@@ -555,17 +555,19 @@ two teams in Warcraft Logs would close it outright.
 
 ### Schedule, and the DST trap
 
-Scrambled raids Tuesday and Thursday, 9pm to midnight Eastern, so the recap fires Wednesday
-and Friday at 5:30am Eastern — two cards a week, each covering one night, posted before
-anyone is up. (It fired at 10am until 2026-09-04; the first two recaps ran at that time.)
+Prog and Meer's Raid end at midnight Eastern Tuesday and Thursday nights, so their recaps
+fire Wednesday and Friday at 12:15am Eastern, 15 minutes after the scheduled end.
+The shared schedule posts to `#progbot` and `#meerbots`; Saturday Raid keeps its separate
+schedule. This is a fixed clock schedule, not a detector for raids ending early or late.
+Parse scores reflect the data available at posting time and may change afterward.
 
 ```
-cron(30 5 ? * WED,FRI *)   timezone America/New_York
+cron(15 0 ? * WED,FRI *)   timezone America/New_York
 ```
 
-**The timezone argument is the point.** A bare UTC cron for 5:30am Eastern is 09:30 in
-summer and 10:30 in winter, so it drifts an hour every November and every March and has to
-be edited by hand twice a year. `--schedule-expression-timezone` keeps 5:30 at 5:30.
+**The timezone argument is the point.** A bare UTC cron for 12:15am Eastern is 04:15 in
+summer and 05:15 in winter, so it drifts an hour every November and every March and has to
+be edited by hand twice a year. `--schedule-expression-timezone` keeps 12:15 at 12:15.
 
 The kill poller has never had this problem and does not need the fix: it runs on
 `rate(15 minutes)`, which has no relationship to wall-clock time at all.
