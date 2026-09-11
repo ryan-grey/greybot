@@ -1,5 +1,6 @@
 """Mythic+ cards and full pages using the raid recap's exact styling and fonts."""
 import html
+import hashlib
 from urllib.parse import urlsplit
 
 import mplus
@@ -105,4 +106,5 @@ def discord_post(summary, guild, page_url, card_url=None):
         # Match raid recaps: one six-panel image, without six extra mobile lists.
         embed.pop("fields")
     return {"allowed_mentions":{"parse":[]}, "embeds":[embed],
+            'nonce':hashlib.sha256(('mplus-week:'+page_url).encode()).hexdigest()[:24],'enforce_nonce':True,
             "components":[{"type":1,"components":[{"type":2,"style":5,"label":"Full Mythic+ recap","url":page_url}]}]}

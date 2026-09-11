@@ -41,10 +41,19 @@ class Repository:
             if not cursor:
                 return result
 
-    def lease(self):
+    def after(self, prefix, cursor, limit=50):
+        """One bounded queue page; the saved key is excluded on resume."""
+        response=self.client.query(TableName=self.table,
+            KeyConditionExpression='pk=:p AND sk BETWEEN :a AND :z',
+            ExpressionAttributeValues={':p':{'S':self.pk},':a':{'S':cursor or prefix},':z':{'S':prefix+'\uffff'}},
+            ConsistentRead=True,Limit=limit+1)
+        return [(row['sk']['S'],json.loads(row['body']['S'])) for row in response.get('Items',[])
+                if row['sk']['S'] > (cursor or prefix)][:limit]
+
+    def lease(self, key="LEASE"):
         owner, now = uuid.uuid4().hex, int(time.time())
         try:
-            self.client.update_item(TableName=self.table, Key=self.key("LEASE"),
+            self.client.update_item(TableName=self.table, Key=self.key(key),
                 UpdateExpression="SET #expires=:e, #owner=:o", ConditionExpression="attribute_not_exists(#expires) OR #expires < :n",
                 ExpressionAttributeNames={"#expires":"expires", "#owner":"owner"},
                 ExpressionAttributeValues={":e":{"N":str(now+90)},":n":{"N":str(now)},":o":{"S":owner}})
@@ -54,7 +63,7 @@ class Repository:
                 return None
             raise
 
-    def release(self, owner):
-        self.client.update_item(TableName=self.table, Key=self.key("LEASE"), UpdateExpression="SET #expires=:e",
+    def release(self, owner, key="LEASE"):
+        self.client.update_item(TableName=self.table, Key=self.key(key), UpdateExpression="SET #expires=:e",
             ConditionExpression="#owner=:o", ExpressionAttributeNames={"#expires":"expires", "#owner":"owner"},
             ExpressionAttributeValues={":e":{"N":"0"},":o":{"S":owner}})

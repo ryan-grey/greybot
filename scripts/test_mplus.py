@@ -12,6 +12,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
 import mplus
 import mplus_collect
 import mplus_presentation
+import mplus_records
 
 NOW=datetime(2026,9,15,14,tzinfo=timezone.utc)
 START,END=mplus.week_window(NOW)
@@ -36,11 +37,59 @@ class Repo:
         if once and k in self.data:return False
         self.data[k]=v;return True
     def prefix(self,p):return [v for k,v in self.data.items() if k.startswith(p)]
-    def lease(self):return 'test'
-    def release(self,k):pass
+    def lease(self,key='LEASE'):return 'test'
+    def release(self,k,key='LEASE'):pass
+    def after(self,p,cursor,limit=50):
+        return [(k,v) for k,v in sorted(self.data.items()) if k.startswith(p) and k>cursor][:limit]
 
 
 class MythicTests(unittest.TestCase):
+    def test_record_improvement_rules_and_delivery_once(self):
+        base=run(level=10);best=mplus_records.record_key(base)
+        repo=Repo();repo.put('RECORDS',{'best':{best:base},'since':(NOW-timedelta(hours=2)).isoformat(),
+                                      'cursor':mplus_records.QUEUE})
+        fresh=NOW-timedelta(hours=1)
+        lower=run(2,level=9,completed=fresh)
+        equal=run(3,level=10,completed=fresh)
+        faster=run(4,level=10,completed=fresh);faster['elapsed_ms']=900
+        higher=run(5,level=11,completed=fresh)
+        untimed=run(6,level=12,timed=False,completed=fresh)
+        outsider=run(7,guild=1,level=13,completed=fresh)
+        for i,r in enumerate((lower,equal,faster,higher,untimed,outsider)):
+            repo.put(mplus_records.QUEUE+str(i),r)
+        post=Mock(return_value=SimpleNamespace(message_id='123'))
+        cfg={'bot_token':'test'}
+        self.assertEqual(mplus_records.process(repo,cfg,'123',NOW,post=post)['record_alerts'],2)
+        mplus_records.process(repo,cfg,'123',NOW,post=post)
+        self.assertEqual(post.call_count,2)
+        self.assertEqual(repo.get('RECORDS')['best'][best]['level'],11)
+        payload=post.call_args.args[1]
+        self.assertIn('Aster, Birch',payload['embeds'][0]['description'])
+        self.assertNotIn('Cedar',payload['embeds'][0]['description'])
+        self.assertEqual(payload['allowed_mentions'],{'parse':[]})
+        self.assertEqual(mplus_records.timer(123456),'2:03.456')
+
+    def test_record_baseline_is_quiet_and_historical_results_stay_quiet(self):
+        repo=Repo();post=Mock()
+        self.assertEqual(mplus_records.process(repo,{},'123',NOW,post=post)['skipped'],'warming_record_baseline')
+        repo.put('COLLECTOR',{'roster_size':5,'record_baseline_profiles':5})
+        baseline=run();repo.put('RUN#old',baseline)
+        self.assertTrue(mplus_records.process(repo,{},'123',NOW,post=post)['baseline_ready'])
+        late=run(2,level=15)
+        repo.put(mplus_records.QUEUE+(NOW+timedelta(seconds=1)).isoformat()+'#2',late)
+        mplus_records.process(repo,{},'123',NOW+timedelta(seconds=2),post=post)
+        self.assertFalse(post.called)
+        self.assertEqual(repo.get('RECORDS')['best'][mplus_records.record_key(late)]['level'],15)
+
+    def test_record_ambiguous_send_is_not_retried(self):
+        repo=Repo();repo.put('RECORDS',{'best':{},'since':(NOW-timedelta(days=2)).isoformat(),'cursor':mplus_records.QUEUE})
+        r=run();repo.put(mplus_records.QUEUE+'1',r)
+        post=Mock(side_effect=TimeoutError('ambiguous'))
+        with self.assertRaises(TimeoutError):mplus_records.process(repo,{'bot_token':'test'},'123',NOW,post=post)
+        self.assertEqual(repo.get('RECORD_POST#'+r['id'])['state'],'needs_review')
+        mplus_records.process(repo,{'bot_token':'test'},'123',NOW,post=post)
+        self.assertEqual(post.call_count,1)
+
     def test_collector_deduplicates_and_resumes_pending_character(self):
         repo=Repo()
         repo.put('SEASONS',{'at':NOW.isoformat(),'region':'us','items':SEASONS})

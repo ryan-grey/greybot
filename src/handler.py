@@ -1568,7 +1568,7 @@ def handler(event, context):
             return handle_followup(event["followup"], cfg, scope, now)
         if event.get("admin"):
             return handle_admin(event, cfg, scope, now, now_iso)
-        if event.get("mode") in ("mplus_collect", "mplus_recap"):
+        if event.get("mode") in ("mplus_collect", "mplus_recap", "mplus_records"):
             import mplus_service
             return mplus_service.handle(event, cfg, now, context)
 

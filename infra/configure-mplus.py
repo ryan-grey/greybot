@@ -27,6 +27,7 @@ def configure(args):
         'Condition':{'ForAllValues:StringLike':{'dynamodb:LeadingKeys':['MPLUS#*']}}
     }]}
     schedules=[(args.function+'-mplus-collect','rate(1 minute)','UTC','mplus_collect',True),
+               (args.function+'-mplus-records','rate(1 minute)','UTC','mplus_records',args.records),
                (args.function+'-mplus-recap','cron(0 10 ? * TUE *)','America/New_York','mplus_recap',args.publish)]
     print(json.dumps({'function':args.function,'query_scope':'MPLUS partition only',
                       'schedules':[{'name':n,'expression':e,'timezone':z,'enabled':on}
@@ -71,4 +72,5 @@ if __name__=='__main__':
     parser.add_argument('--channel',required=True)
     parser.add_argument('--apply',action='store_true')
     parser.add_argument('--publish',action='store_true')
+    parser.add_argument('--records',action='store_true',help='Enable new dungeon record announcements')
     configure(parser.parse_args())

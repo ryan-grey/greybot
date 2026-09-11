@@ -130,7 +130,7 @@ def post(webhook_url, payload, timeout=10, sleep=time.sleep):
                       timeout=timeout, sleep=sleep)
 
 
-def _post_json(url, payload, headers=None, timeout=10, sleep=time.sleep):
+def _post_json(url, payload, headers=None, timeout=10, sleep=time.sleep, max_attempts=MAX_ATTEMPTS):
     """POST one message, retrying 429 and 5xx.
 
     Discord answers a rate limit with retry_after in the body, so the wait is read rather
@@ -144,7 +144,7 @@ def _post_json(url, payload, headers=None, timeout=10, sleep=time.sleep):
     """
     body = json.dumps(payload).encode("utf-8")
     last = None
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    for attempt in range(1, max_attempts + 1):
         req = urllib.request.Request(
             url, data=body, method="POST",
             headers={"Content-Type": "application/json",
@@ -183,7 +183,7 @@ def _post_json(url, payload, headers=None, timeout=10, sleep=time.sleep):
         except urllib.error.URLError as exc:
             last = f"network error: {exc.reason}"
             sleep(min(2 ** attempt, 8))
-    raise DiscordError(f"gave up after {MAX_ATTEMPTS} attempts: {last}")
+    raise DiscordError(f"gave up after {max_attempts} attempts: {last}")
 
 
 def _author(guild_label, guild_url, icon_url=None):
@@ -550,7 +550,7 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
 CHANNEL_API = "https://discord.com/api/v10/channels"
 
 
-def post_to(destination, payload, timeout=10, sleep=time.sleep):
+def post_to(destination, payload, timeout=10, sleep=time.sleep, max_attempts=MAX_ATTEMPTS):
     """POST one announcement to wherever this install posts.
 
     Two destinations, one call site. A single-tenant install posts through the
@@ -575,4 +575,4 @@ def post_to(destination, payload, timeout=10, sleep=time.sleep):
                            "or a bot token and channel id")
     return _post_json(f"{CHANNEL_API}/{channel}/messages", payload,
                       headers={"Authorization": f"Bot {token}"},
-                      timeout=timeout, sleep=sleep)
+                      timeout=timeout, sleep=sleep, max_attempts=max_attempts)

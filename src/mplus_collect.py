@@ -61,7 +61,7 @@ def collect(repo, cfg, now, budget=35, source=fetch):
                 for field in ("mythic_plus_recent_runs","mythic_plus_weekly_highest_level_runs","mythic_plus_best_runs"):
                     for run in profile.get(field,[]):
                         match = re.search(r"/mythic-plus-runs/(season-[a-z0-9-]+)/(\d+)", run.get("url", ""))
-                        if match and mplus.stamp(run["completed_at"]) >= now - timedelta(days=15):
+                        if match and (field == 'mythic_plus_best_runs' or mplus.stamp(run["completed_at"]) >= now - timedelta(days=15)):
                             refs["/".join(match.groups())] = match.groups()
                 complete = True
                 for identity, (season, run_id) in refs.items():
@@ -74,8 +74,10 @@ def collect(repo, cfg, now, budget=35, source=fetch):
                     run = mplus.normalize_run(raw, guild_keys, now)
                     # Include even ineligible runs in the seen ledger, never in totals.
                     if len(run["guild_members"]) >= 2:
-                        repo.put("RUN#"+run["completed"][:10]+"#"+identity, run, once=True)
-                        runs += 1
+                        # Queue first: a crash cannot retain a run without its record candidate.
+                        repo.put('RECORD_CANDIDATE#'+now.isoformat()+'#'+identity,run,once=True)
+                        if repo.put("RUN#"+run["completed"][:10]+"#"+identity, run, once=True):
+                            runs += 1
                     repo.put("SEEN#"+identity,{"id":identity,"at":now.isoformat()}, once=True)
                 if not complete:
                     break  # Resume this character rather than losing its pending runs.
@@ -85,7 +87,9 @@ def collect(repo, cfg, now, budget=35, source=fetch):
                 repo.put("ERROR#"+now.date().isoformat()+"#"+char["key"], {"key":char["key"],"at":now.isoformat()})
             cursor = (cursor + 1) % len(members)
             count += 1
-        repo.put("COLLECTOR", {**meta,"cursor":cursor,"at":now.isoformat(),"profiles":count,"errors":errors})
+        repo.put("COLLECTOR", {**meta,"cursor":cursor,"at":now.isoformat(),"profiles":count,"errors":errors,
+                              'record_baseline_profiles':meta.get('record_baseline_profiles',0)+count,
+                              'roster_size':len(members)})
         return {"profiles":count,"new_runs":runs,"errors":errors,"roster_size":len(members)}
     finally:
         repo.release(owner)

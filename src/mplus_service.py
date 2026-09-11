@@ -6,6 +6,7 @@ import discord
 import mplus_collect
 import mplus_presentation
 import mplus_store
+import mplus_records
 import store
 
 
@@ -13,6 +14,11 @@ def handle(event, cfg, now, context=None):
     if os.environ.get("MPLUS_ENABLED") != "1":
         return {"ok":True,"skipped":"mplus_disabled"}
     repo = mplus_store.Repository(store.ddb, store.TABLE, cfg["discord_guild_id"])
+    if event['mode']=='mplus_records':
+        channel=os.environ.get('MPLUS_CHANNEL_ID','')
+        if not channel.isdecimal():raise ValueError('Mythic+ destination must be configured')
+        budget=min(35,max(0,context.get_remaining_time_in_millis()/1000-15)) if context else 35
+        return {'ok':True,**mplus_records.process(repo,cfg,channel,now,budget=budget)}
     if event["mode"] == "mplus_collect":
         budget = min(35, max(0, context.get_remaining_time_in_millis()/1000-15)) if context else 35
         return {"ok":True, **mplus_collect.collect(repo,cfg,now,budget=budget)}
@@ -50,7 +56,7 @@ def handle(event, cfg, now, context=None):
         publish_bytes(cfg,path+"/card.png",image,"image/png")
         repo.put("POST#"+key,{"state":"sending","at":now.isoformat(),"url":page_url})
         result=discord.post_to({"bot_token":cfg["bot_token"],"channel":channel},
-            mplus_presentation.discord_post(summary,cfg["guild_name"],page_url,image_url))
+            mplus_presentation.discord_post(summary,cfg["guild_name"],page_url,image_url),max_attempts=1)
         repo.put("POST#"+key,{"state":"posted","at":now.isoformat(),"url":page_url,
                             "message":str(getattr(result,"message_id", ""))})
     except Exception:

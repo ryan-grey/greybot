@@ -340,6 +340,9 @@ results. Ordinary run categories require at least two guild characters; full-gui
 categories require all five. IO gain includes score earned in other groups for
 qualifying participants. Missing baselines remain unavailable, and source coverage
 limitations are disclosed rather than treating the API as a complete run history.
+Season-based week numbers appear on every recap. Separate one-time dungeon-record
+alerts recognize a higher timed key or a faster time at the current record level,
+after quietly establishing an initial baseline.
 
 See [Mythic+ rules and rollout](docs/mythic-plus.md) for calculation, scheduling,
 collection, first-week limitations and deployment controls.

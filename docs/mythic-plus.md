@@ -100,3 +100,24 @@ Verify fresh collector state, score snapshots, retained run records, the configu
 channel, Lambda result and both schedule states. Do not send synthetic standings to
 the guild during validation. The first Tuesday may have partial run coverage and no
 IO ranking until two real weekly boundary snapshots exist.
+
+## New dungeon records
+
+The record dispatcher checks every minute and posts to the same configured channel.
+Enable its schedule with `infra/configure-mplus.py --records --publish --apply`
+and the existing required arguments. It first waits for one complete roster pass
+under the record collector, then quietly seeds records from retained runs including
+available season-best runs. This avoids announcing the historical backlog.
+
+Each season/dungeon has a highest timed level and the fastest completion at that
+level. A higher timed level or a strictly faster equal-level run sets a new record;
+an equal time, lower level, untimed run or group with fewer than two guild characters
+does not. Alerts name the guild characters, dungeon, key level, elapsed time to
+milliseconds, time limit and previous record, with a link to the source run.
+
+These are observed guild records, subject to the same source-history limitations
+as the weekly boards. Late discovery of a pre-activation run can improve the baseline
+silently. Run candidates have a durable queue and cursor; per-run publication claims
+and Discord nonces prevent repeat alerts. Ambiguous sends are marked `needs_review`
+and are not retried automatically. Record processing has a separate lease and does
+not delay collection or raid announcements. A new season has independent records.
