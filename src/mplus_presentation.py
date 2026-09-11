@@ -21,12 +21,12 @@ def card(summary, guild):
     for key, title in mplus.CATEGORIES:
         rows = [(r["name"], r.get("class"), r.get("detail") or r.get("server"),
                  mplus.display_value(key, r), None, None, None) for r in summary["boards"][key][:3]]
-        empty = "Baseline not available" if key == "score" and summary["score_unavailable"] else "No qualifying results"
+        empty = "Scores unavailable" if key == 'overall' else "Baseline not available" if key == "score" and summary["score_unavailable"] else "No qualifying results"
         cells.append((title, None, rows, empty, None))
     chips = [f'{summary["timed_count"]} timed runs', f'{summary["members"]} characters',
              f'{summary["guild_count"]} full-guild runs', 'Observed runs · full details on website']
     return recap_card.render({"bossLabels":chips}, guild_name=guild, night_text=label(summary),
-        raid_name=(summary.get('season') or {}).get('name','Weekly Mythic+')+' · 2+ guild members / full guild',
+        raid_name=(summary.get('season') or {}).get('name','Weekly Mythic+')+' · Guild runs + overall IO',
         cells=cells, kicker="MYTHIC+ RECAP")
 
 
@@ -40,7 +40,7 @@ def page(summary, guild):
     columns = []
     for key, title in mplus.CATEGORIES:
         entries = []
-        for row in summary["boards"][key]:
+        for row in summary["boards"][key][:20]:
             name = esc(row["name"])
             href = safe_url(row.get("url"))
             if href:
@@ -94,7 +94,7 @@ def discord_post(summary, guild, page_url, card_url=None):
         rows = summary["boards"][key][:3]
         text = "\n".join(f'{r["rank"]}. {clean(r["name"])} — **{mplus.display_value(key,r)}**' for r in rows)
         fields.append({"name":title, "value":text or ("Baseline unavailable" if key == "score" and summary["score_unavailable"] else "No qualifying results"), "inline":True})
-    embed = {"title":f'{guild} · Weekly Mythic+', "description":label(summary) + " · Observed runs; 2+ guild members unless marked all-guild",
+    embed = {"title":f'{guild} · Weekly Mythic+', "description":label(summary) + " · Guild runs: 2+ members; overall IO: all guild characters",
              "color":0x4493F8, "fields":fields, "url":page_url,
              "author":{"name":"Raider.IO", "url":"https://raider.io"},
              "footer":{"text":"greyBot · Full standings, rosters and coverage on the website"}}

@@ -45,6 +45,27 @@ class Repo:
 
 
 class MythicTests(unittest.TestCase):
+    def test_overall_io_includes_members_without_any_guild_run_and_caps_page(self):
+        scores=[{**mplus.person(PEOPLE[0]),'key':str(i),'name':f'RankedCharacter{i:02}',
+                 'score':3000-i} for i in range(25)]
+        summary=mplus.summarize([],{},START,END,overall_scores=scores)
+        self.assertEqual(len(summary['boards']['overall']),25)
+        self.assertEqual(summary['boards']['overall'][0]['value'],3000)
+        self.assertEqual(summary['boards']['score'],[])
+        page=mplus_presentation.page(summary,'Test')
+        self.assertIn('RankedCharacter19',page)
+        self.assertNotIn('RankedCharacter20',page)
+        self.assertEqual(mplus.display_value('overall',summary['boards']['overall'][0]),'3,000.0')
+
+    def test_overall_io_requires_fresh_same_season_end_sample_only(self):
+        repo=Repo();repo.put('SEASONS',{'items':SEASONS,'region':'us'})
+        repo.put('ROSTER',{'members':[mplus.person(p) for p in PEOPLE]})
+        for i in range(3):
+            repo.put(f'SCORE#{END.date()}#{KEYS[i]}',{'key':KEYS[i],'at':(END-timedelta(minutes=5 if i!=1 else 65)).isoformat(),
+                     'season':'season-test' if i!=2 else 'season-old','score':3000})
+        result=mplus_collect.weekly_data(repo,NOW)
+        self.assertEqual([p['key'] for p in result['boards']['overall']],[KEYS[0]])
+
     def test_record_page_escapes_names_and_links_actual_runs(self):
         r=run();r['roster'][0]['name']='<script>alert(1)</script>'
         output=mplus_record_board.page([r],'Test','Season','https://example.test/card.png',NOW)
@@ -231,7 +252,7 @@ class MythicTests(unittest.TestCase):
         s=mplus.summarize([a,a,b,c,d],{},START,END)
         self.assertEqual(s['timed_count'],2)
         self.assertEqual(s['guild_count'],1)
-        self.assertEqual(s['boards']['timed'][0]['value'],2)
+        self.assertEqual(s['boards']['ten'][0]['value'],2)
         self.assertEqual(len(s['boards']['guild_timed']),5)
         self.assertEqual(len(s['runs']),3)
 
@@ -269,14 +290,14 @@ class MythicTests(unittest.TestCase):
         s=mplus.summarize([run()],{KEYS[4]:{'start':0,'end':9999,'season_start':'a','season_end':'a'}},START,END)
         self.assertEqual(s['boards']['score'],[])
 
-    def test_ties_keep_rank_and_full_page_keeps_everyone(self):
+    def test_ties_keep_rank(self):
         s=mplus.summarize([run(guild=5)],{},START,END)
-        self.assertEqual([r['rank'] for r in s['boards']['timed']],[1]*5)
+        self.assertEqual([r['rank'] for r in s['boards']['ten']],[1]*5)
         text=mplus_presentation.page(s,'Example Guild')
         self.assertIn('Ember',text)
         payload=mplus_presentation.discord_post(s,'Example Guild','https://example.org/recap/')
         self.assertEqual(len(payload['embeds'][0]['fields']),6)
-        self.assertEqual(len(payload['embeds'][0]['fields'][2]['value'].splitlines()),3)
+        self.assertEqual(len(payload['embeds'][0]['fields'][3]['value'].splitlines()),3)
         image_payload=mplus_presentation.discord_post(s,'Example Guild','https://example.org/recap/',
                                                       'https://example.org/recap/card.png')
         self.assertNotIn('fields',image_payload['embeds'][0])

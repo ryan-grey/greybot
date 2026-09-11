@@ -27,14 +27,16 @@ Primer palette and page stylesheet. No new host is required.
 - Highest timed key: each qualifying guild character's highest timed key.
 - Weekly IO gain: overall score change for characters with a qualifying guild run,
   including points earned in other groups, as approved by Ryan.
-- Timed runs: qualifying timed completions per character.
+- Highest overall IO: every guild character with a fresh same-season score at the
+  reporting cutoff, even without any guild-group runs that week.
 - Timed +10 runs: qualifying timed completions at level 10 or higher per character.
 - All-guild highest: highest timed runs whose entire five-character party is guild.
   Show each complete party on the website.
 - All-guild runs: each character's timed completions in full-guild groups.
 - Alts remain separate characters; no unverified Discord/account-name matching.
 - Equal values share competition rank; deterministic name ordering breaks display
-  ties. The Discord card shows exactly up to three entries; the website shows all.
+  ties. The Discord card shows up to three entries; each website leaderboard is
+  capped at 20 entries, including ties (deterministic name ordering at the cutoff).
 
 ## IO calculation
 

@@ -117,7 +117,13 @@ def weekly_data(repo, now):
     if season:
         runs=[r for r in runs if r['season']==season['slug']]
         snapshots={k:v for k,v in snapshots.items() if v['season_end']==season['slug']}
-    result = mplus.summarize(runs,snapshots,start,end)
+    members={p['key']:p for p in (repo.get('ROSTER') or {}).get('members',[])}
+    overall=[]
+    for key,row in last.items():
+        if (key in members and season and row.get('season') == season['slug']
+                and 0 <= (end-mplus.stamp(row['at'])).total_seconds() <= 3600):
+            overall.append({**members[key],'score':row['score']})
+    result = mplus.summarize(runs,snapshots,start,end,overall_scores=overall)
     result['season']=season
     meta=repo.get("COLLECTOR") or {}
     result["coverage"] += " Collection began " + str(meta.get("first_observed","not yet")) + "."

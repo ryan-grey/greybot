@@ -9,7 +9,7 @@ EASTERN = ZoneInfo("America/New_York")
 CATEGORIES = (
     ("highest", "Highest timed key"),
     ("score", "Weekly IO gain"),
-    ("timed", "Timed runs"),
+    ("overall", "Highest overall IO"),
     ("ten", "Timed +10 runs"),
     ("guild_highest", "All-guild highest"),
     ("guild_timed", "All-guild runs"),
@@ -109,7 +109,7 @@ def _rank(rows, metric):
     return rows
 
 
-def summarize(runs, snapshots, start, end):
+def summarize(runs, snapshots, start, end, overall_scores=None):
     """snapshots contains explicit same-season start/end scores, not inferred zeros.
 
     Total IO delta is ranked only for characters with a qualifying guild run.
@@ -136,7 +136,7 @@ def summarize(runs, snapshots, start, end):
                 best[key] = r
     boards["highest"] = _rank([{**people[k], "value": r["level"], "detail": r["dungeon"],
                                 "run": r["id"], "url": r["url"]} for k, r in best.items()], "value")
-    for category, selected in (("timed", timed), ("ten", [r for r in timed if r["level"] >= 10]),
+    for category, selected in (("ten", [r for r in timed if r["level"] >= 10]),
                                ("guild_timed", [r for r in timed if len(r["guild_members"]) == 5])):
         counts = Counter(k for r in selected for k in r["guild_members"])
         boards[category] = _rank([{**people[k], "value": n, "detail": "timed runs"} for k, n in counts.items()], "value")
@@ -159,13 +159,18 @@ def summarize(runs, snapshots, start, end):
         if gain > 0:
             boards["score"].append({**p, "value": gain, "detail": f"{first:,.1f} → {last:,.1f}"})
     _rank(boards["score"], "value")
+    for person in overall_scores or []:
+        value=float(person['score'])
+        if math.isfinite(value) and value >= 0:
+            boards['overall'].append({**person,'value':value,'detail':'Overall season IO'})
+    _rank(boards['overall'],'value')
     return {"start": start.isoformat(), "end": end.isoformat(), "boards": boards,
             "runs": sorted(eligible, key=lambda r:r["completed"], reverse=True),
             "timed_count":len(timed), "guild_count":len(all_guild), "members":len(people),
             "score_unavailable":unavailable,
             "coverage": "Observed runs; source APIs can omit runs or update late. Guild membership is captured when a run is first collected.",
-            "score_note": "Overall character IO change between weekly snapshots, among characters with a 2+ guild-member run; includes score earned in other groups. Missing or cross-season baselines are not ranked.",
-            "ranking_note": "Character-based standings; alts are separate. Equal values share a rank, with names ordering ties; the card shows three entries per category and the full page shows everyone."}
+            "score_note": "Weekly IO gain requires a 2+ guild-member run and comparable weekly snapshots; includes score earned in other groups. Highest overall IO includes all guild characters with a fresh end-of-week score, regardless of group participation. Missing or cross-season scores are not ranked.",
+            "ranking_note": "Character-based standings; alts are separate. Equal values share a rank, with names ordering ties; the card shows three entries per category and the full page shows at most 20 per category."}
 
 
 def display_value(category, row):
@@ -173,4 +178,6 @@ def display_value(category, row):
         return f'+{row["value"]}'
     if category == "score":
         return f'+{row["value"]:,.1f}'
+    if category == "overall":
+        return f'{row["value"]:,.1f}'
     return str(row["value"])
