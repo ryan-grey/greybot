@@ -41,6 +41,36 @@ class API:
 
 
 class VerificationTests(unittest.TestCase):
+    def test_help_is_private_and_never_queues_role_grants(self):
+        from dataclasses import replace
+        from greybot_control.verification import receive_help
+        cfg = replace(self.cfg, start_channel_id="12")
+        packet = {"type":3, "application_id":cfg.client_id, "guild_id":cfg.guild_id,
+                  "channel_id":"12", "member":{"user":{"id":"8"}},
+                  "message":{"author":{"id":cfg.client_id}},
+                  "data":{"custom_id":"greybot:verification_help"}}
+        response = receive_help(cfg, self.store, packet)
+        self.assertEqual(response["data"]["flags"], 64)
+        self.assertEqual(response["data"]["allowed_mentions"], {"parse":[]})
+        self.assertIn("does not notify staff", response["data"]["content"])
+        self.assertEqual(self.store.jobs(cfg.guild_id), [])
+        import time
+        from nacl.signing import SigningKey
+        key = SigningKey.generate()
+        raw = json.dumps(packet).encode()
+        timestamp = str(int(time.time()))
+        headers = {"x-signature-timestamp":timestamp,
+                   "x-signature-ed25519":key.sign(timestamp.encode() + raw).signature.hex()}
+        with patch.dict(os.environ, {"GREYBOT_DISCORD_PUBLIC_KEY":key.verify_key.encode().hex()}):
+            with TestClient(create_app(cfg, self.store, self.api), base_url=cfg.origin) as client:
+                result = client.post("/discord/roles", content=raw, headers=headers)
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(result.json()["data"]["flags"], 64)
+                self.assertEqual(client.post("/discord/roles", content=raw).status_code, 401)
+        for field, value in (("guild_id", "other"), ("channel_id", "private"), ("application_id", "other")):
+            with self.assertRaises(Denied):
+                receive_help(cfg, self.store, {**packet, field:value})
+
     def test_non_admin_full_flow_archives_grant_without_private_channel_access(self):
         from greybot_control.local_archive import LocalArchive
         from greybot_control.worker import execute_one

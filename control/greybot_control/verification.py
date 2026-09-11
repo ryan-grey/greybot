@@ -18,6 +18,32 @@ def configured():
     return bool(os.environ.get("GREYBOT_TURNSTILE_SITE_KEY") and os.environ.get("GREYBOT_TURNSTILE_SECRET"))
 
 
+def help_button():
+    return {"type": 2, "style": 2, "label": "Get verification help", "custom_id": "greybot:verification_help"}
+
+
+def receive_help(cfg, store, packet):
+    """Private guidance only: no role grants, tickets, or staff-channel access."""
+    user = packet.get("member", {}).get("user", {})
+    welcome = store.settings(cfg.guild_id)["values"].get("welcome_channel", "")
+    if (packet.get("type") != 3 or packet.get("application_id") != cfg.client_id
+            or packet.get("guild_id") != cfg.guild_id or not user.get("id") or user.get("bot")
+            or packet.get("data", {}).get("custom_id") != "greybot:verification_help"
+            or packet.get("message", {}).get("author", {}).get("id") != cfg.client_id
+            or packet.get("channel_id") not in {value for value in (cfg.start_channel_id, welcome) if value}):
+        raise Denied("This help button is unavailable")
+    return {"type": 4, "data": {"flags": 64, "allowed_mentions": {"parse": []}, "content": (
+        "**Need help unlocking channels?**\n"
+        "1. Accept the server rules if Discord asks.\n"
+        "2. Open verification below and check that you're signed into the same Discord account you joined with.\n"
+        "3. If the human check expired or failed, reload and complete a new check.\n"
+        "4. If it says verified, return to Discord → Channels & Roles → Browse Channels. Your roles still determine access.\n"
+        "5. If the member role stays pending or failed, ask your inviter to contact an Officer or GM with your server name and the error text. Don't send passwords or verification codes.\n\n"
+        "Only you can see this reply. This button does not notify staff or open a ticket."),
+        "components": [{"type": 1, "components": [{"type": 2, "style": 5,
+            "label": "Open verification", "url": cfg.origin + "/verify"}]}]}}
+
+
 def receive(cfg, store, packet):
     """A shared welcome button answers only the member who clicked it."""
     settings = store.settings(cfg.guild_id)["values"]

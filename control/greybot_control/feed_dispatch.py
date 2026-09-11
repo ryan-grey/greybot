@@ -284,8 +284,9 @@ class Feed:
                     body["content"] += " Verify you're human to unlock the server."
                     if start:
                         body["content"] += " Start here: <#" + str(start["id"]) + ">."
+                    from .verification import help_button
                     body["components"] = [{"type": 1, "components": [{"type": 2, "style": 1,
-                        "label": "Verify to unlock channels", "custom_id": "greybot:verify"}]}]
+                        "label": "Verify to unlock channels", "custom_id": "greybot:verify"}, help_button()]}]
                 targets[settings["welcome_channel"]] = body
             with self.store.connection() as db:
                 db.execute("BEGIN IMMEDIATE")

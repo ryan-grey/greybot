@@ -80,6 +80,8 @@ class DashboardAPITests(unittest.TestCase):
         self.assertEqual(self.store.jobs("1")[0]["state"],"completed")
         self.assertEqual(self.api.members[1]["roles"],["2","3"])
     def test_channel_preferences_cannot_leak_or_escalate(self):
+        values = self.store.settings("1")["values"]
+        self.store.save_settings("1", "7", 0, {**values, "verification_role":"2"})
         headers=self.login("8","-channels")
         listing=self.client.get("/api/channel-choices");self.assertEqual(listing.status_code,200)
         self.assertEqual([c["id"] for c in listing.json()["channels"]],["10"])

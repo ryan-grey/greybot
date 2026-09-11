@@ -205,6 +205,9 @@ def create_app(cfg=None, store=None, discord=None):
                     return raid_reply(str(exc))
             if packet.get("data", {}).get("custom_id") == "greybot:verify":
                 return receive_verification(cfg, store, packet)
+            if packet.get("data", {}).get("custom_id") == "greybot:verification_help":
+                from .verification import receive_help
+                return receive_help(cfg, store, packet)
             return receive_roles(cfg, store, packet)
         except (ValueError, KeyError, TypeError):
             raise HTTPException(400, "Invalid interaction") from None

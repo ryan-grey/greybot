@@ -16,8 +16,8 @@ def hidden_channels(store, guild, user):
     return {p["channel"]: p["hidden"] for r in rows if (p := json.loads(r[0]))}
 
 
-def choices(guild, roles, channels, member, owned, protected_channels=()):
-    base = next((r for r in roles if r.get("name") == "Baby Dinosaur Princesses"), None)
+def choices(guild, roles, channels, member, owned, protected_channels=(), verified_role=""):
+    base = next((r for r in roles if r["id"] == verified_role), None)
     held = [r for r in roles if r["id"] in member.get("roles", [])]
     if (not base or member.get("pending") or member["user"].get("bot") or not
             (base["id"] in member.get("roles", []) or any(r["position"] > base["position"] for r in held))):
@@ -53,12 +53,13 @@ async def execute(cfg, store, api, job):
         raise Denied("Membership ended")
     owned = hidden_channels(store, cfg.guild_id, job["subject"])
     protected = (*cfg.public_channel_ids, cfg.start_channel_id, store.settings(cfg.guild_id)["values"].get("welcome_channel", ""))
-    allowed = choices(guild, roles, channels, member, owned, protected)
+    verified_role = store.settings(cfg.guild_id)["values"].get("verification_role", "")
+    allowed = choices(guild, roles, channels, member, owned, protected, verified_role)
     if body["channel"] not in {c["id"] for c in allowed}:
         raise Denied("Channel is no longer eligible")
     channel = await api.request("GET", f'/channels/{body["channel"]}')
     # Fresh channel check immediately before changing only the View deny bit.
-    if not choices(guild, roles, [channel], member, owned, protected):
+    if not choices(guild, roles, [channel], member, owned, protected, verified_role):
         raise Denied("Channel access changed")
     current = overwrite(channel, job["subject"]) or {"allow": "0", "deny": "0"}
     deny = int(current["deny"])
@@ -84,7 +85,8 @@ def install(app, cfg, store, api, cookie, static):
         if not member:
             raise Denied("Server membership is required")
         protected = (*cfg.public_channel_ids, cfg.start_channel_id, store.settings(cfg.guild_id)["values"].get("welcome_channel", ""))
-        allowed = choices(guild, roles, channels, member, hidden_channels(store, cfg.guild_id, session["user"]), protected)
+        verified_role = store.settings(cfg.guild_id)["values"].get("verification_role", "")
+        allowed = choices(guild, roles, channels, member, hidden_channels(store, cfg.guild_id, session["user"]), protected, verified_role)
         return session, member, allowed
 
     @app.get("/channels")

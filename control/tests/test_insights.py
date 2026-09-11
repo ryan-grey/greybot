@@ -37,17 +37,26 @@ class InsightsTests(unittest.TestCase):
             {"id":"1","type":0,"allow":"0","deny":str(VIEW)},
             {"id":"3","type":0,"allow":str(VIEW),"deny":"0"},
             {"id":"7","type":1,"allow":"0","deny":str(VIEW)}]}
-        self.assertEqual(choices(self.guild,self.roles,[channel],self.member,{"9":True}),[])
+        self.assertEqual(choices(self.guild,self.roles,[channel],self.member,{"9":True}, verified_role="2"),[])
         self.member["roles"].append("3")
-        self.assertTrue(choices(self.guild,self.roles,[channel],self.member,{"9":True})[0]["hidden"])
-        self.assertEqual(choices(self.guild,self.roles,[channel],self.member,{}),[])
+        self.assertTrue(choices(self.guild,self.roles,[channel],self.member,{"9":True}, verified_role="2")[0]["hidden"])
+        self.assertEqual(choices(self.guild,self.roles,[channel],self.member,{}, verified_role="2"),[])
 
     def test_protected_channel_id_survives_rename(self):
         channel = {"id": "9", "name": "renamed-arrivals", "type": 0, "permission_overwrites": []}
-        self.assertEqual(choices(self.guild, self.roles, [channel], self.member, {}, ("9",)), [])
+        self.assertEqual(choices(self.guild, self.roles, [channel], self.member, {}, ("9",), "2"), [])
         channel["id"] = "11"
         channel["name"] = "bots"
-        self.assertEqual(choices(self.guild, self.roles, [channel], self.member, {}, ("9",))[0]["id"], "11")
+        self.assertEqual(choices(self.guild, self.roles, [channel], self.member, {}, ("9",), "2")[0]["id"], "11")
+
+    def test_verified_role_uses_id_and_fails_closed_without_it(self):
+        self.roles[1]["name"] = "Renamed membership"
+        channel = {"id":"9", "name":"chat", "type":0, "permission_overwrites":[]}
+        self.assertEqual(choices(self.guild, self.roles, [channel], self.member, {}, verified_role="2")[0]["id"], "9")
+        self.roles.append({"id":"5", "name":"Baby Dinosaur Princesses", "permissions":str(VIEW), "position":1})
+        for missing in ("", "deleted"):
+            with self.assertRaises(Denied):
+                choices(self.guild, self.roles, [channel], self.member, {}, verified_role=missing)
 
     def test_health_records_bounded_gaps_not_invented_outages(self):
         health_tick(self.store,"1",now=1000,uptime=100)
