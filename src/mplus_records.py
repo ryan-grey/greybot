@@ -1,6 +1,7 @@
 """Seasonal dungeon records with a quiet baseline and at-most-once delivery."""
 import time
 import hashlib
+import os
 
 import discord
 import mplus
@@ -25,7 +26,7 @@ def timer(milliseconds):
     return f'{minutes}:{seconds:02d}.{ms:03d}'
 
 
-def payload(run, previous=None):
+def payload(run, previous=None, board_url=None):
     def clean(value):
         value=str(value).replace('@','＠')
         for char in ('\\','*','_','`','~','|','[',']'):
@@ -45,6 +46,10 @@ def payload(run, previous=None):
     if url:
         embed['url']=url
         result['components']=[{'type':1,'components':[{'type':2,'style':5,'label':'View run','url':url}]}]
+    if board_url:
+        result['content'] = f'🏆 [Updated dungeon-record card]({board_url})'
+        result.setdefault('components', [{'type':1,'components':[]}])[0]['components'].insert(0,
+            {'type':2,'style':5,'label':'Pinned record card','url':board_url})
     return result
 
 
@@ -66,6 +71,10 @@ def process(repo, cfg, channel, now, budget=35, post=discord.post_to):
             repo.put('RECORDS',state)
             return {'baseline_ready':True,'dungeon_records':len(best)}
         count=0
+        board_url=None
+        if os.environ.get('MPLUS_RECORD_BOARD_ENABLED') == '1':
+            from mplus_record_board import sync
+            board_url=sync(repo,cfg,channel,state,now)
         for cursor,run in repo.after(QUEUE,state['cursor']):
             if time.monotonic()-started >= budget:break
             key=record_key(run)
@@ -74,9 +83,12 @@ def process(repo, cfg, channel, now, budget=35, post=discord.post_to):
             # Historical discovery can improve the baseline without sending old news.
             announce=better and mplus.stamp(run['completed']) > mplus.stamp(state['since'])
             claim='RECORD_POST#'+run['id']
+            if better and os.environ.get('MPLUS_RECORD_BOARD_ENABLED') == '1':
+                updated={**state,'best':{**state['best'],key:run}}
+                board_url=sync(repo,cfg,channel,updated,now)
             if announce and repo.put(claim,{'state':'sending','at':now.isoformat(),'run':run['id']},once=True):
                 try:
-                    result=post({'bot_token':cfg['bot_token'],'channel':channel},payload(run,previous),timeout=8,max_attempts=1)
+                    result=post({'bot_token':cfg['bot_token'],'channel':channel},payload(run,previous,board_url),timeout=8,max_attempts=1)
                     repo.put(claim,{'state':'posted','at':now.isoformat(),'run':run['id'],
                                    'message':str(getattr(result,'message_id',''))})
                     count+=1

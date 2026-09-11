@@ -13,6 +13,7 @@ import mplus
 import mplus_collect
 import mplus_presentation
 import mplus_records
+import mplus_record_board
 
 NOW=datetime(2026,9,15,14,tzinfo=timezone.utc)
 START,END=mplus.week_window(NOW)
@@ -44,6 +45,47 @@ class Repo:
 
 
 class MythicTests(unittest.TestCase):
+    def test_board_creation_pin_retry_and_edit_reuses_message(self):
+        repo=Repo();repo.put('SEASONS',{'items':SEASONS})
+        state={'best':{'test':run()}}
+        cfg={'guild_region':'us','guild_name':'Test','discord_guild_id':'123',
+             'bot_token':'test','recap_page_url':'https://example.test'}
+        with patch('mplus_record_board.render',return_value=b'png'), patch('handler.publish_bytes'), \
+             patch('mplus_record_board.discord.post_to',return_value=SimpleNamespace(message_id='456')) as post, \
+             patch('mplus_record_board.request',side_effect=TimeoutError) as request:
+            with self.assertRaises(TimeoutError):mplus_record_board.sync(repo,cfg,'789',state,NOW)
+            self.assertEqual(repo.get('RECORD_BOARD#789')['message'],'456')
+            request.side_effect=None
+            url=mplus_record_board.sync(repo,cfg,'789',state,NOW)
+            self.assertEqual(url,'https://discord.com/channels/123/789/456')
+            self.assertEqual(post.call_count,1)
+            request.reset_mock()
+            mplus_record_board.sync(repo,cfg,'789',state,NOW)
+            request.assert_not_called()
+            state['best']['test']['level']=11
+            mplus_record_board.sync(repo,cfg,'789',state,NOW)
+            self.assertEqual(request.call_args.args[1],'PATCH')
+            self.assertEqual(post.call_count,1)
+
+    def test_record_refresh_precedes_announcement_and_links_pin(self):
+        r=run(completed=NOW-timedelta(minutes=1))
+        repo=Repo();repo.put('RECORDS',{'best':{},'since':(NOW-timedelta(hours=1)).isoformat(),'cursor':mplus_records.QUEUE})
+        repo.put(mplus_records.QUEUE+'1',r)
+        calls=[]
+        def sync(*args):calls.append('refresh');return 'https://discord.com/channels/1/2/3'
+        def post(*args,**kwargs):
+            self.assertEqual(calls[-1],'refresh')
+            self.assertIn('/1/2/3',args[1]['content'])
+            calls.append('post');return SimpleNamespace(message_id='4')
+        with patch.dict(os.environ,{'MPLUS_RECORD_BOARD_ENABLED':'1'}),patch('mplus_record_board.sync',side_effect=sync):
+            mplus_records.process(repo,{'bot_token':'test'},'2',NOW,post=post)
+        self.assertEqual(calls,['refresh','refresh','post'])
+
+    def test_board_ambiguous_creation_never_duplicates(self):
+        repo=Repo();repo.put('SEASONS',{'items':SEASONS});repo.put('RECORD_BOARD#789',{'state':'sending'})
+        with self.assertRaises(RuntimeError):
+            mplus_record_board.sync(repo,{'guild_region':'us'},'789',{'best':{'test':run()}},NOW)
+
     def test_record_improvement_rules_and_delivery_once(self):
         base=run(level=10);best=mplus_records.record_key(base)
         repo=Repo();repo.put('RECORDS',{'best':{best:base},'since':(NOW-timedelta(hours=2)).isoformat(),

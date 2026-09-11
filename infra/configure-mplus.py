@@ -37,6 +37,8 @@ def configure(args):
     iam.put_role_policy(RoleName=role,PolicyName='greybot-mplus-query',PolicyDocument=json.dumps(policy))
     env={**cfg.get('Environment',{}).get('Variables',{}),'MPLUS_ENABLED':'1',
          'MPLUS_CHANNEL_ID':args.channel,'MPLUS_SCORE_POLICY':'overall_for_participants'}
+    if args.record_board:
+        env['MPLUS_RECORD_BOARD_ENABLED']='1'
     if env != cfg.get('Environment',{}).get('Variables',{}):
         lam.update_function_configuration(FunctionName=args.function,RevisionId=cfg['RevisionId'],
                                           Environment={'Variables':env})
@@ -73,4 +75,5 @@ if __name__=='__main__':
     parser.add_argument('--apply',action='store_true')
     parser.add_argument('--publish',action='store_true')
     parser.add_argument('--records',action='store_true',help='Enable new dungeon record announcements')
+    parser.add_argument('--record-board',action='store_true',help='Maintain a pinned dungeon-record card')
     configure(parser.parse_args())
