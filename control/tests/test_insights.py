@@ -42,6 +42,13 @@ class InsightsTests(unittest.TestCase):
         self.assertTrue(choices(self.guild,self.roles,[channel],self.member,{"9":True})[0]["hidden"])
         self.assertEqual(choices(self.guild,self.roles,[channel],self.member,{}),[])
 
+    def test_protected_channel_id_survives_rename(self):
+        channel = {"id": "9", "name": "renamed-arrivals", "type": 0, "permission_overwrites": []}
+        self.assertEqual(choices(self.guild, self.roles, [channel], self.member, {}, ("9",)), [])
+        channel["id"] = "11"
+        channel["name"] = "bots"
+        self.assertEqual(choices(self.guild, self.roles, [channel], self.member, {}, ("9",))[0]["id"], "11")
+
     def test_health_records_bounded_gaps_not_invented_outages(self):
         health_tick(self.store,"1",now=1000,uptime=100)
         health_tick(self.store,"1",now=1030,uptime=130)

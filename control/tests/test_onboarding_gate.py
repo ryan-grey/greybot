@@ -107,6 +107,17 @@ class GateTests(unittest.TestCase):
         with self.assertRaises(Denied):
             plan("1", roles, channels, "2", "3", "missing")
 
+    def test_public_channel_ids_survive_rename_and_reject_name_copy(self):
+        roles = [{"id": "1", "permissions": "0", "position": 0},
+                 {"id": "2", "permissions": str(VIEW), "position": 1}]
+        channels = [{"id": "3", "type": 0, "name": "arrivals", "permission_overwrites": []},
+                    {"id": "4", "type": 0, "name": "anything", "permission_overwrites": []},
+                    {"id": "5", "type": 0, "name": "start-here", "permission_overwrites": []}]
+        result = plan("1", roles, channels, "2", "3", public_channel_ids=("4",))
+        member = {"roles": [], "user": {"id": "8"}}
+        visible = {c["id"] for c in result["channels"] if effective_permissions("1", result["roles"], member, c) & VIEW}
+        self.assertEqual(visible, {"3", "4"})
+
     def test_cutover_archives_before_writes_and_rejects_stale_review(self):
         async def run(root):
             cfg = Config("1", "9", "test", "test", "http://localhost", root / "state", enforce=True, archive_dir=root / "archive")

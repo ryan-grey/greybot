@@ -32,6 +32,8 @@ class Config:
     capture_content: bool = False
     enforce: bool = False
     archive_dir: Path | None = None
+    start_channel_id: str = ""
+    public_channel_ids: tuple[str, ...] = ()
 
     @property
     def secure(self):
@@ -67,6 +69,10 @@ class Config:
             raise ValueError("Archive must be outside the repository")
         if days < 0 or (bucket and days < 1) or (bucket and local) or (enforce and not (bucket or local)):
             raise ValueError("Configure one archive before enabling enforcement")
+        start_channel = os.environ.get("GREYBOT_START_CHANNEL_ID", "").strip()
+        public_channels = tuple(filter(None, (v.strip() for v in os.environ.get("GREYBOT_PUBLIC_CHANNEL_IDS", "").split(","))))
+        if any(not value.isdecimal() for value in (*public_channels, *((start_channel,) if start_channel else ()))):
+            raise ValueError("Configured channel IDs must be numeric")
         return cls(guild, client, secret("GREYBOT_BOT_TOKEN"),
                    secret("GREYBOT_OAUTH_SECRET"), origin, state, bucket, days,
-                   os.environ.get("GREYBOT_CAPTURE_CONTENT") == "1", enforce, archive_dir)
+                   os.environ.get("GREYBOT_CAPTURE_CONTENT") == "1", enforce, archive_dir, start_channel, public_channels)

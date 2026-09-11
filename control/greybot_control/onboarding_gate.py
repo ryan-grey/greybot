@@ -15,7 +15,7 @@ from .mutes import effective_permissions
 VIEW = 1 << 10
 
 
-def plan(guild, roles, channels, verified_role, welcome_channel, rules_channel=None):
+def plan(guild, roles, channels, verified_role, welcome_channel, rules_channel=None, public_channel_ids=()):
     by_id = {role["id"]: role for role in roles}
     if verified_role not in by_id or verified_role == guild or guild not in by_id:
         raise Denied("Choose a valid verified member role")
@@ -26,7 +26,7 @@ def plan(guild, roles, channels, verified_role, welcome_channel, rules_channel=N
     public_channels = {welcome_channel}
     public_channels.update(channel["id"] for channel in channels
                            if channel.get("type") in {0, 5}
-                           and channel.get("name") in {"channel-preferences", "channel-list", "channel-guide", "verify-membership", "start-here", "➡️start-here⬅️"})
+                           and channel["id"] in public_channel_ids)
     if rules_channel:
         public_channels.add(rules_channel)
     planned_roles = deepcopy(roles)
@@ -145,7 +145,8 @@ async def snapshot(cfg, store, api):
             raise Unavailable("Member pagination did not advance")
         after = next_after
     rules_channel = guild.get("rules_channel_id")
-    planned = plan(cfg.guild_id, roles, channels, role, welcome, rules_channel)
+    planned = plan(cfg.guild_id, roles, channels, role, welcome, rules_channel,
+                   (*cfg.public_channel_ids, cfg.start_channel_id))
     review = review_members(cfg.guild_id, roles, channels, members, guild["owner_id"], role, planned)
     # Only permission-related state enters the review digest. Names and activity
     # changes do not invalidate a plan, but membership and permission changes do.

@@ -27,9 +27,11 @@ class FeedAPI:
 
 class FeedTests(Base):
     def test_welcome_points_to_start_here(self):
+        from dataclasses import replace
+        self.feed.cfg = replace(self.cfg, start_channel_id="6")
         async def directory():
             data = copy.deepcopy(DATA)
-            data["channels"].append({"id": "6", "name": "➡️start-here⬅️"})
+            data["channels"].append({"id": "6", "name": "any-renamed-channel"})
             return data
         self.feed.directory.get = directory
         self.configure(welcome_enabled=True, welcome_channel="5", verification_enabled=True)
