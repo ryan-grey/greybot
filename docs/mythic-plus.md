@@ -7,6 +7,15 @@ Primer palette and page stylesheet. No new host is required.
 ## Reporting rules
 
 - Publish Tuesdays at 10am America/New_York, following daylight saving time.
+- Number reports from the regional main Mythic+ season's launch week, not from
+  greyBot's first post. Raider.IO's static season metadata is refreshed daily;
+  special-event seasons are excluded. Midnight Season 2 started August 18, 2026
+  in the US, so August 18–25 is Week #1 and September 8–15 is Week #4.
+  Sources: [Raider.IO season metadata](https://raider.io/api/v1/mythic-plus/static-data?expansion_id=11)
+  and [Blizzard's season announcement](https://news.blizzard.com/en-us/article/24294369/midnight-season-2-is-now-live).
+  Cards, Discord titles and full recap headings share the same computed week label.
+  Week numbering resets with the next main season; `MPLUS_EXPANSION_ID` defaults
+  to 11 (Midnight) and must follow the expansion when that changes.
 - Reporting window: the preceding Tuesday at 10am through this Tuesday at 10am,
   start inclusive/end exclusive. This is an explicit reporting week, not a claim
   about Blizzard's maintenance/reset time. Include the interval on every recap.

@@ -35,6 +35,25 @@ def week_window(now):
     return (end - timedelta(days=7)).astimezone(timezone.utc), end.astimezone(timezone.utc)
 
 
+def season_week(seasons, region, start, end):
+    """Label the reporting week from the region's main-season launch date.
+
+    The report cutoff is 10am Eastern, before the usual US season opening time.
+    Date arithmetic therefore labels the launch Tuesday's report interval Week 1;
+    elapsed UTC hours would produce an off-by-one (and can drift at DST).
+    """
+    candidates=[s for s in seasons if s.get('is_main_season') and s.get('starts',{}).get(region)
+                and stamp(s['starts'][region]) < end
+                and (not s.get('ends',{}).get(region) or stamp(s['ends'][region]) > start)]
+    if not candidates:
+        raise ValueError('No main Mythic+ season covers this reporting week')
+    season=max(candidates,key=lambda s:stamp(s['starts'][region]))
+    launch=stamp(season['starts'][region])
+    week=max(1,(start.astimezone(EASTERN).date()-launch.astimezone(EASTERN).date()).days//7+1)
+    name=season['name'].replace('MN Season','Midnight Season').split(' • ')[0]
+    return {'slug':season['slug'],'name':name,'week':week,'starts':launch.isoformat(),'region':region}
+
+
 def character_key(character):
     def value(field):
         raw = character.get(field, "")

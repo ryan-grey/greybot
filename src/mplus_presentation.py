@@ -1,6 +1,6 @@
 """Mythic+ cards and full pages using the raid recap's exact styling and fonts."""
 import html
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 import mplus
 import recap_card
@@ -10,7 +10,9 @@ import recap_page
 def label(summary):
     first = mplus.stamp(summary["start"]).astimezone(mplus.EASTERN)
     last = mplus.stamp(summary["end"]).astimezone(mplus.EASTERN)
-    return f'{first:%b %d} – {last:%b %d, %Y}'
+    dates=f'{first:%b %d} – {last:%b %d, %Y}'
+    season=summary.get('season')
+    return f'Week #{season["week"]} · {dates}' if season else dates
 
 
 def card(summary, guild):
@@ -23,7 +25,8 @@ def card(summary, guild):
     chips = [f'{summary["timed_count"]} timed runs', f'{summary["members"]} characters',
              f'{summary["guild_count"]} full-guild runs', 'Observed runs · full details on website']
     return recap_card.render({"bossLabels":chips}, guild_name=guild, night_text=label(summary),
-        raid_name="Weekly Mythic+ · 2+ guild members / full guild", cells=cells, kicker="MYTHIC+ RECAP")
+        raid_name=(summary.get('season') or {}).get('name','Weekly Mythic+')+' · 2+ guild members / full guild',
+        cells=cells, kicker="MYTHIC+ RECAP")
 
 
 def safe_url(value):
@@ -61,6 +64,9 @@ def page(summary, guild):
                     f'{len(run["guild_members"])}/5 guild members<br><small>{roster}</small></li>')
     title = esc(f'{guild} — {label(summary)}')
     notes = " ".join(esc(summary[k]) for k in ("coverage", "score_note", "ranking_note"))
+    season=summary.get('season')
+    season_text=(f'{esc(season["name"])} · Season began {mplus.stamp(season["starts"]):%b %d, %Y} · '
+                 if season else '')
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
 <title>{title} · Mythic+ recap</title><style>{recap_page.STYLE}
@@ -68,7 +74,7 @@ def page(summary, guild):
 .sources li {{padding:10px 0}} .sources small {{color:var(--muted)}}
 </style></head><body><header class="topbar"><a class="tb-brand" href="https://ryangrey.dev">ryangrey.dev</a><span class="lede">greyBot</span></header>
 <main class="wrap"><p class="kicker">Mythic+ recap</p><h1>{title}</h1>
-<p class="lede">Tuesday 10am to Tuesday 10am Eastern · {summary["timed_count"]} observed timed runs · {summary["members"]} characters</p>
+<p class="lede">{season_text}Tuesday 10am to Tuesday 10am Eastern · {summary["timed_count"]} observed timed runs · {summary["members"]} characters</p>
 <section><h2>Guild leaderboards</h2><div class="cols">{"".join(columns)}</div><p class="note">{notes}</p></section>
 <section><h2>Qualifying runs</h2><p class="note">★ Guild member at first observation · full rosters shown for every run</p><ul class="sources">{"".join(runs) or '<li>No qualifying runs collected for this week.</li>'}</ul></section>
 <section><h2>Sources</h2><p class="note">Run rosters, timing and IO scores from <a href="https://raider.io">Raider.IO</a>; run links above provide the underlying results.</p></section></main>
@@ -91,6 +97,9 @@ def discord_post(summary, guild, page_url, card_url=None):
              "color":0x4493F8, "fields":fields, "url":page_url,
              "author":{"name":"Raider.IO", "url":"https://raider.io"},
              "footer":{"text":"greyBot · Full standings, rosters and coverage on the website"}}
+    if summary.get('season'):
+        season=summary['season']
+        embed['title']=f'{guild} · {season["name"]} · Week #{season["week"]}'
     if card_url:
         embed["image"] = {"url":card_url}
         # Match raid recaps: one six-panel image, without six extra mobile lists.

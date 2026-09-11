@@ -17,6 +17,8 @@ NOW=datetime(2026,9,15,14,tzinfo=timezone.utc)
 START,END=mplus.week_window(NOW)
 PEOPLE=[{"name":n,"realm":"Test Realm","region":"us","class":"Mage"} for n in ("Aster","Birch","Cedar","Dawn","Ember")]
 KEYS=[mplus.character_key(p) for p in PEOPLE]
+SEASONS=[{'slug':'season-test','name':'MN Season 2','is_main_season':True,
+          'starts':{'us':'2026-08-18T15:00:00Z'},'ends':{'us':'2030-01-01T00:00:00Z'}}]
 
 
 def run(identity=1, guild=2, level=10, timed=True, completed=None):
@@ -41,6 +43,7 @@ class Repo:
 class MythicTests(unittest.TestCase):
     def test_collector_deduplicates_and_resumes_pending_character(self):
         repo=Repo()
+        repo.put('SEASONS',{'at':NOW.isoformat(),'region':'us','items':SEASONS})
         repo.put('ROSTER',{'at':NOW.isoformat(),'members':[mplus.person(p) for p in PEOPLE]})
         raw={"season":"season-test","status":"finished","keystone_run_id":1,
              "mythic_level":12,"clear_time_ms":1000,"keystone_time_ms":2000,
@@ -62,6 +65,7 @@ class MythicTests(unittest.TestCase):
 
     def test_failed_profile_preserves_score_and_advances_cursor(self):
         repo=Repo();repo.put('ROSTER',{'at':NOW.isoformat(),'members':[mplus.person(PEOPLE[0])]})
+        repo.put('SEASONS',{'at':NOW.isoformat(),'region':'us','items':SEASONS})
         key=f'SCORE#{(END+timedelta(days=7)).date()}#{KEYS[0]}'
         repo.put(key,{'score':55})
         result=mplus_collect.collect(repo,{},NOW,source=Mock(side_effect=TimeoutError()))
@@ -76,6 +80,7 @@ class MythicTests(unittest.TestCase):
             import mplus_service
         summary=mplus.summarize([run()],{},START,END)
         summary['collector_at']=NOW.isoformat()
+        summary['season']=mplus.season_week(SEASONS,'us',START,END)
         cfg={'discord_guild_id':'test','guild_name':'Example Guild','bot_token':'test',
              'recap_page_url':'https://example.org','recap_page_bucket':'test'}
         repo=Repo();upload=Mock();post=Mock(return_value=SimpleNamespace(message_id='123'))
@@ -98,6 +103,28 @@ class MythicTests(unittest.TestCase):
             repo.data.clear();summary['collector_at']=(NOW-timedelta(hours=2)).isoformat()
             with self.assertRaises(RuntimeError):mplus_service.handle({'mode':'mplus_recap'},cfg,NOW)
             self.assertEqual(repo.data,{})
+
+    def test_season_week_launch_current_and_rollover(self):
+        start,end=mplus.week_window(datetime(2026,8,25,14,tzinfo=timezone.utc))
+        self.assertEqual(mplus.season_week(SEASONS,'us',start,end)['week'],1)
+        self.assertEqual(mplus.season_week(SEASONS,'us',START,END)['week'],4)
+        special={**SEASONS[0],'slug':'season-special','is_main_season':False,
+                 'starts':{'us':'2026-09-08T15:00:00Z'}}
+        self.assertEqual(mplus.season_week(SEASONS+[special],'us',START,END)['week'],4)
+        next_season={**SEASONS[0],'slug':'season-next','name':'MN Season 3',
+                     'starts':{'us':'2026-09-08T15:00:00Z'}}
+        self.assertEqual(mplus.season_week(SEASONS+[next_season],'us',START,END)['week'],1)
+        with self.assertRaises(ValueError):mplus.season_week(SEASONS,'eu',START,END)
+        s=mplus.summarize([run()],{},START,END);s['season']=mplus.season_week(SEASONS,'us',START,END)
+        self.assertIn('Week #4',mplus_presentation.label(s))
+        self.assertIn('Week #4',mplus_presentation.page(s,'Example Guild'))
+        self.assertIn('Week #4',mplus_presentation.discord_post(s,'Example Guild','https://example.org')['embeds'][0]['title'])
+
+    def test_season_metadata_collected_without_dungeon_payloads(self):
+        repo=Repo();repo.put('ROSTER',{'at':NOW.isoformat(),'members':[mplus.person(PEOPLE[0])]})
+        source=Mock(side_effect=[{'seasons':[{**SEASONS[0],'dungeons':['unneeded']} ]},{}])
+        mplus_collect.collect(repo,{'guild_region':'us'},NOW,source=source)
+        self.assertEqual(repo.get('SEASONS')['items'],SEASONS)
 
     def test_minimum_members_dedupe_and_counts(self):
         a=run();b=run(2,guild=1);c=run(3,guild=5);d=run(4,guild=5,timed=False)

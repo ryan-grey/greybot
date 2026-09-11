@@ -22,6 +22,8 @@ def handle(event, cfg, now, context=None):
     # Do not publish an apparently empty week during a collection outage.
     if not summary.get("collector_at") or (now-mplus.stamp(summary["collector_at"])).total_seconds() > 3600:
         raise RuntimeError("Mythic+ collection is stale; restore collection before publishing")
+    if not summary.get('season'):
+        raise RuntimeError('Mythic+ season metadata is missing; cannot label the recap week')
     # Explicit policy prevents a deployment from silently selecting a score definition.
     if os.environ.get("MPLUS_SCORE_POLICY") != "overall_for_participants":
         return {"ok":True,"skipped":"score_policy_required"}

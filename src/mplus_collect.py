@@ -1,5 +1,6 @@
 """Bounded, resumable Raider.IO collection; frequent polls retain observed run history."""
 from datetime import timedelta
+import os
 import re
 import time
 
@@ -19,6 +20,17 @@ def collect(repo, cfg, now, budget=35, source=fetch):
         return {"skipped":"collector_busy"}
     started = time.monotonic()
     try:
+        seasons=repo.get('SEASONS')
+        if not seasons or (now-mplus.stamp(seasons['at'])).total_seconds() > 86400:
+            try:
+                data=source('mythic-plus/static-data',expansion_id=int(os.environ.get('MPLUS_EXPANSION_ID','11')))
+                items=[{k:s[k] for k in ('slug','name','is_main_season','starts','ends') if k in s}
+                       for s in data['seasons'] if s.get('is_main_season')]
+                if not items:raise ValueError('No main Mythic+ seasons returned')
+                seasons={'at':now.isoformat(),'region':cfg['guild_region'],'items':items}
+                repo.put('SEASONS',seasons)
+            except (raiderio.RaiderIOError, TimeoutError, ValueError, KeyError, TypeError):
+                if not seasons:raise
         roster = repo.get("ROSTER")
         if not roster or (now - mplus.stamp(roster["at"])).total_seconds() > 3600:
             data = source("guilds/profile", region=cfg["guild_region"], realm=cfg["guild_realm"],
@@ -96,7 +108,13 @@ def weekly_data(repo, now):
                    for boundary,row in ((start,a),(end,b))):
             continue
         snapshots[key]={"start":a["score"],"end":b["score"],"season_start":a["season"],"season_end":b["season"]}
+    seasons=repo.get('SEASONS')
+    season=mplus.season_week(seasons['items'],seasons['region'],start,end) if seasons else None
+    if season:
+        runs=[r for r in runs if r['season']==season['slug']]
+        snapshots={k:v for k,v in snapshots.items() if v['season_end']==season['slug']}
     result = mplus.summarize(runs,snapshots,start,end)
+    result['season']=season
     meta=repo.get("COLLECTOR") or {}
     result["coverage"] += " Collection began " + str(meta.get("first_observed","not yet")) + "."
     result["coverage"] += " Scores are the latest API observations before each boundary, within one hour; upstream updates can lag."
