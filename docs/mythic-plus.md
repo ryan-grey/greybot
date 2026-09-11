@@ -125,7 +125,10 @@ not delay collection or raid announcements. A new season has independent records
 
 `MPLUS_RECORD_BOARD_ENABLED=1` maintains one pinned image in the configured
 Mythic+ channel. The card uses Inter, the existing dark palette, green key levels,
-and WoW class colors for guild record holders. It shows current-season records
+and WoW class colors for guild record holders. Each panel places dungeon artwork
+from Raider.IO's season metadata on the left; bounded image downloads are cached
+within the worker process. A style version forces an image refresh after layout
+changes without waiting for a new record. It shows current-season records
 for timed groups with at least two guild characters; higher keys win, then faster
 times at the same level. A new record refreshes the existing message before its
 announcement links back to the pin. Historical discoveries refresh the card

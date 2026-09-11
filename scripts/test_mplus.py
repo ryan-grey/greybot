@@ -50,7 +50,7 @@ class MythicTests(unittest.TestCase):
         state={'best':{'test':run()}}
         cfg={'guild_region':'us','guild_name':'Test','discord_guild_id':'123',
              'bot_token':'test','recap_page_url':'https://example.test'}
-        with patch('mplus_record_board.render',return_value=b'png'), patch('handler.publish_bytes'), \
+        with patch('mplus_record_board.render',return_value=b'png'), patch('mplus_record_board.artwork',return_value={}), patch('handler.publish_bytes'), \
              patch('mplus_record_board.discord.post_to',return_value=SimpleNamespace(message_id='456')) as post, \
              patch('mplus_record_board.request',side_effect=TimeoutError) as request:
             with self.assertRaises(TimeoutError):mplus_record_board.sync(repo,cfg,'789',state,NOW)

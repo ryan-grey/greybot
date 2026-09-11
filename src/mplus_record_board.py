@@ -3,11 +3,49 @@ import hashlib
 import io
 import json
 import urllib.request
+from urllib.parse import urlsplit
+from concurrent.futures import ThreadPoolExecutor
 
 import discord
 import mplus
 import recap_card
 import recap_page
+
+STYLE_VERSION = 'dungeon-art-v2'
+_art_cache = {}
+
+
+def artwork(season, runs):
+    """Read official dungeon artwork URLs from Raider.IO, with bounded downloads."""
+    from PIL import Image
+    from mplus_collect import fetch
+    if season not in _art_cache or any(r['dungeon'] not in _art_cache[season] for r in runs):
+        import os
+        metadata = fetch('mythic-plus/static-data', expansion_id=int(os.environ.get('MPLUS_EXPANSION_ID', '11')))
+        current = next(s for s in metadata['seasons'] if s['slug'] == season)
+        wanted = {r['dungeon'] for r in runs}
+        def load(dungeon):
+            url = dungeon['background_image_url']
+            parsed = urlsplit(url)
+            if parsed.scheme != 'https' or parsed.netloc != 'cdn.raiderio.net' or not parsed.path.startswith('/images/dungeons/'):
+                raise ValueError('Untrusted dungeon artwork URL')
+            req = urllib.request.Request(url, headers={'User-Agent': 'greyBot'})
+            with urllib.request.urlopen(req, timeout=6) as response:
+                if urlsplit(response.url).netloc != 'cdn.raiderio.net':
+                    raise ValueError('Unexpected artwork redirect')
+                data = response.read(2_000_001)
+            if len(data) > 2_000_000:
+                raise ValueError('Dungeon artwork exceeds size limit')
+            image = Image.open(io.BytesIO(data))
+            if image.width * image.height > 8_000_000:
+                raise ValueError('Dungeon artwork exceeds pixel limit')
+            return dungeon['name'], image.convert('RGB')
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            _art_cache[season] = dict(pool.map(load, [d for d in current['dungeons'] if d['name'] in wanted]))
+    if any(r['dungeon'] not in _art_cache[season] for r in runs):
+        del _art_cache[season]
+        raise ValueError('Missing dungeon artwork in season metadata')
+    return _art_cache[season]
 
 
 def current_runs(state, seasons, region, now):
@@ -20,12 +58,12 @@ def current_runs(state, seasons, region, now):
     return active, runs
 
 
-def render(runs, guild, season):
-    from PIL import Image, ImageDraw
+def render(runs, guild, season, art=None):
+    from PIL import Image, ImageDraw, ImageOps
     from mplus_records import timer
     c = recap_card
     pairs = [runs[i:i+2] for i in range(0, len(runs), 2)]
-    heights = [100 + 22 * max(len(r['guild_members']) for r in pair) for pair in pairs]
+    heights = [134 + 22 * max(len(r['guild_members']) for r in pair) for pair in pairs]
     height = 160 + sum(h + 16 for h in heights)
     image = Image.new('RGB', (1280, height * 2), c.BG)
     canvas = c._Canvas(image, ImageDraw.Draw(image), {})
@@ -38,14 +76,26 @@ def render(runs, guild, season):
         for column, run in enumerate(pair):
             x = 24 + column * 304
             canvas.rect(x, y, x+288, y+panel_height, fill=c.CHIP, outline=c.LINE, radius=10)
-            canvas.text(x+14, y+12, c._ellipsis(canvas, run['dungeon'], canvas.font('bold', 17), 260), canvas.font('bold', 17), c.INK)
-            canvas.text(x+14, y+40, f'+{run["level"]}', canvas.font('bold', 30), (63, 185, 80))
-            canvas.text(x+91, y+49, timer(run['elapsed_ms']), canvas.font('semibold', 18), c.INK)
-            canvas.text(x+14, y+78, 'GUILD RECORD HOLDERS', canvas.font('bold', 10), c.MUTED, spacing=0.6)
+            if art and run['dungeon'] in art:
+                tile = ImageOps.fit(art[run['dungeon']], (160, 180), method=Image.Resampling.LANCZOS)
+                mask = Image.new('L', tile.size)
+                ImageDraw.Draw(mask).rounded_rectangle((0, 0, 159, 179), radius=12, fill=255)
+                image.paste(tile, (int((x+14)*2), int((y+14)*2)), mask)
+            title_font = canvas.font('bold', 16)
+            lines = ['']
+            for word in run['dungeon'].split():
+                candidate = (lines[-1]+' '+word).strip()
+                if canvas.width(candidate, title_font) > 166 and lines[-1]:lines.append(word)
+                else:lines[-1] = candidate
+            for index, line in enumerate(lines[:2]):
+                canvas.text(x+106, y+12+index*20, line, title_font, c.INK)
+            canvas.text(x+106, y+53, f'+{run["level"]}', canvas.font('bold', 27), (63, 185, 80))
+            canvas.text(x+106, y+85, timer(run['elapsed_ms']), canvas.font('semibold', 16), c.INK)
+            canvas.text(x+14, y+112, 'GUILD RECORD HOLDERS', canvas.font('bold', 10), c.MUTED, spacing=0.6)
             members = [p for p in run['roster'] if p['key'] in run['guild_members']]
             for index, person in enumerate(members):
                 color = recap_page.class_color(person.get('class', '')) or '#f0f6fc'
-                canvas.text(x+14, y+98+index*22, person['name'], canvas.font('semibold', 16), color)
+                canvas.text(x+14, y+132+index*22, person['name'], canvas.font('semibold', 16), color)
         y += panel_height + 16
     canvas.text(24, y, 'Observed season records · Raider.IO · Names use WoW class colors', canvas.font('regular', 11), c.MUTED)
     output = io.BytesIO()
@@ -66,14 +116,14 @@ def sync(repo, cfg, channel, state, now):
     active, runs = current_runs(state, (repo.get('SEASONS') or {}).get('items', []), cfg['guild_region'], now)
     if not runs:
         return None
-    fingerprint = hashlib.sha256(json.dumps(runs, sort_keys=True).encode()).hexdigest()[:24]
+    fingerprint = hashlib.sha256((STYLE_VERSION+json.dumps(runs, sort_keys=True)).encode()).hexdigest()[:24]
     key = 'RECORD_BOARD#' + channel
     saved = repo.get(key) or {}
     if saved and not saved.get('message'):
         raise RuntimeError('Record card creation needs review before retrying')
     message = saved.get('message')
     if saved.get('fingerprint') != fingerprint:
-        image = render(runs, cfg['guild_name'], active['name'])
+        image = render(runs, cfg['guild_name'], active['name'], artwork(active['slug'], runs))
         from handler import publish_bytes
         path = f'mplus/records/{fingerprint}.png'
         publish_bytes(cfg, path, image, 'image/png')
