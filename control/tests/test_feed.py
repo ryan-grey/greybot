@@ -26,6 +26,20 @@ class FeedAPI:
 
 
 class FeedTests(Base):
+    def test_welcome_points_to_start_here(self):
+        async def directory():
+            data = copy.deepcopy(DATA)
+            data["channels"].append({"id": "6", "name": "start-here"})
+            return data
+        self.feed.directory.get = directory
+        self.configure(welcome_enabled=True, welcome_channel="5", verification_enabled=True)
+        self.event("start-here-welcome")
+        self.tick()
+        body = self.api.posts[0][1]
+        self.assertIn("<#6>", body["content"])
+        self.assertEqual(body["components"][0]["components"][0]["label"], "Verify to unlock channels")
+        self.assertNotIn("Open admin site", json.dumps(body))
+
     def test_admin_link_only_in_audit_delivery(self):
         self.configure(audit_feed_enabled=True, audit_channel="4",
                        welcome_enabled=True, welcome_channel="5",

@@ -279,9 +279,13 @@ class Feed:
                 body["embeds"][0]["url"] = "https://giphy.com/gifs/lizard-tom-the-wave-9w7YtTycjeLzW8V6io"
                 body["nonce"] = "join-" + str(row["seq"])
                 if settings.get("verification_enabled"):
-                    body["content"] += " Please verify you're human to unlock the server."
+                    start = next((channel for channel in data.get("channels", [])
+                                  if channel.get("name") in {"start-here", "verify-membership"}), None)
+                    body["content"] += " Verify you're human to unlock the server."
+                    if start:
+                        body["content"] += " Start here: <#" + str(start["id"]) + ">."
                     body["components"] = [{"type": 1, "components": [{"type": 2, "style": 1,
-                        "label": "Verify membership", "custom_id": "greybot:verify"}]}]
+                        "label": "Verify to unlock channels", "custom_id": "greybot:verify"}]}]
                 targets[settings["welcome_channel"]] = body
             with self.store.connection() as db:
                 db.execute("BEGIN IMMEDIATE")

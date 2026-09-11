@@ -26,7 +26,7 @@ def plan(guild, roles, channels, verified_role, welcome_channel, rules_channel=N
     public_channels = {welcome_channel}
     public_channels.update(channel["id"] for channel in channels
                            if channel.get("type") in {0, 5}
-                           and channel.get("name") in {"channel-preferences", "channel-list", "channel-guide", "verify-membership"})
+                           and channel.get("name") in {"channel-preferences", "channel-list", "channel-guide", "verify-membership", "start-here"})
     if rules_channel:
         public_channels.add(rules_channel)
     planned_roles = deepcopy(roles)
