@@ -12,8 +12,13 @@ import mplus
 import recap_card
 import recap_page
 
-STYLE_VERSION = 'dungeon-art-site-v4'
+STYLE_VERSION = 'season-title-v5'
 _art_cache = {}
+
+
+def board_title(season, emoji=True):
+    name=season.replace('MN Season','Midnight Season').split(' • ')[0]
+    return ('🗝️ ' if emoji else '') + name + '’s Highest Timed M+ Keys' + (' 🗝️' if emoji else '')
 
 
 def artwork(season, runs):
@@ -69,8 +74,21 @@ def render(runs, guild, season, art=None):
     image = Image.new('RGB', (1280, height * 2), c.BG)
     canvas = c._Canvas(image, ImageDraw.Draw(image), {})
     canvas.text(24, 18, 'GREYBOT  /  GUILD RECORDS', canvas.font('bold', 12), c.ACCENT, spacing=1)
-    canvas.text(24, 43, 'Mythic+ dungeon records', canvas.font('bold', 29), c.INK)
-    canvas.text(24, 83, f'{guild} · {season}', canvas.font('regular', 15), c.MUTED)
+    title=board_title(season,emoji=False)
+    size=24
+    while canvas.width(title,canvas.font('bold',size)) > 524:size-=1
+    # Draw a gold key: the bundled UI fonts do not contain colored emoji.
+    canvas.draw.ellipse((48,94,74,120),outline='#e8b44a',width=5)
+    canvas.draw.line((69,116,90,137),fill='#e8b44a',width=5)
+    canvas.draw.line((80,125,86,119),fill='#e8b44a',width=5)
+    canvas.draw.line((86,131,92,125),fill='#e8b44a',width=5)
+    key_x=int((54+canvas.width(title,canvas.font('bold',size))+12)*2)
+    canvas.draw.ellipse((key_x,94,key_x+26,120),outline='#e8b44a',width=5)
+    canvas.draw.line((key_x+21,116,key_x+42,137),fill='#e8b44a',width=5)
+    canvas.draw.line((key_x+32,125,key_x+38,119),fill='#e8b44a',width=5)
+    canvas.draw.line((key_x+38,131,key_x+44,125),fill='#e8b44a',width=5)
+    canvas.text(54, 43, title, canvas.font('bold', size), c.INK)
+    canvas.text(24, 83, f'{guild} · Season-long leaderboard', canvas.font('regular', 15), c.MUTED)
     canvas.text(24, 108, 'Highest timed key · fastest tie · 2+ guild members', canvas.font('regular', 14), c.MUTED)
     y = 144
     for pair, panel_height in zip(pairs, heights):
@@ -133,14 +151,14 @@ def page(runs, guild, season, image_url, now):
                       f'Time limit {timer(run["timer_ms"])}</p></article>')
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="60">
-<title>{esc(guild)} · Mythic+ dungeon records</title><style>{recap_page.STYLE}
+<title>{esc(board_title(season))}</title><style>{recap_page.STYLE}
 .record-card{{display:block;width:100%;max-width:640px;height:auto;margin:24px auto;border-radius:12px}}
 .records{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}}
 .records article{{background:var(--surface,var(--bg));border:1px solid var(--line,#3d444d);border-radius:10px;padding:20px}}
 .records h2{{font-size:19px;margin:0 0 12px}}.result{{font-size:24px}}.result strong{{color:#3fb950;margin-right:12px}}
 .holders{{font-weight:600}}.records a{{color:inherit}}
 </style></head><body><header class="topbar"><a class="tb-brand" href="https://ryangrey.dev">ryangrey.dev</a><span>greyBot</span></header>
-<main class="wrap"><p class="kicker">GUILD RECORDS</p><h1>{esc(guild)} · Mythic+ records</h1>
+<main class="wrap"><p class="kicker">{esc(guild)} · SEASON-LONG LEADERBOARD</p><h1>{esc(board_title(season))}</h1>
 <p class="lede">{esc(season)} · Highest timed keys with at least two guild members; fastest time breaks ties.</p>
 <p class="note">Updates automatically when greyBot finds a new record; this page refreshes every minute.</p>
 <img class="record-card" src="{esc(image_url,quote=True)}" alt="Dungeon artwork and current record card; accessible results and run links follow below.">
@@ -169,7 +187,7 @@ def sync(repo, cfg, channel, state, now):
         publish_bytes(cfg,'mplus/records/index.html',page(runs,cfg['guild_name'],active['name'],image_url,now).encode(),
                       'text/html; charset=utf-8',cache='public, max-age=60')
         body = {'allowed_mentions': {'parse': []}, 'embeds': [{
-            'title': cfg['guild_name'] + ' · Mythic+ records',
+            'title': board_title(active['name']),
             'description': 'Highest timed keys with 2+ guild members; fastest time breaks ties. This pinned card updates when records change.',
             'color': 0x4493F8, 'image': {'url': image_url},
             'author': {'name': 'Raider.IO', 'url': 'https://raider.io'},
