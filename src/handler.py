@@ -1568,6 +1568,9 @@ def handler(event, context):
             return handle_followup(event["followup"], cfg, scope, now)
         if event.get("admin"):
             return handle_admin(event, cfg, scope, now, now_iso)
+        if event.get("mode") in ("mplus_collect", "mplus_recap"):
+            import mplus_service
+            return mplus_service.handle(event, cfg, now, context)
 
     # Fan out. One poll per registered install, each on its own Scope and its own
     # merged config. A failure in one tenant is caught and logged rather than

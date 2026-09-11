@@ -331,6 +331,19 @@ point, and no amount of retrying will help.
 
 ---
 
+## Weekly Mythic+ recaps
+
+greyBot collects observed guild Mythic+ runs and publishes a Tuesday 10am Eastern
+recap using the raid card's six-panel layout and full website standings. Rankings
+cover timed keys, total weekly IO gain, timed runs, timed +10 runs, and full-guild
+results. Ordinary run categories require at least two guild characters; full-guild
+categories require all five. IO gain includes score earned in other groups for
+qualifying participants. Missing baselines remain unavailable, and source coverage
+limitations are disclosed rather than treating the API as a complete run history.
+
+See [Mythic+ rules and rollout](docs/mythic-plus.md) for calculation, scheduling,
+collection, first-week limitations and deployment controls.
+
 ## The morning-after recap, and the two-teams problem
 
 The morning after raid night a second card goes up in `#bots`: a two-by-three grid of top

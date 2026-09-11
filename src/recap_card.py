@@ -327,7 +327,7 @@ def _column(canvas, x, y, w, title, icon, rows, empty, badge=None):
 
 
 def render(summary, guild_name=None, night_text=None, raid_name=None, difficulty=None,
-           raiders=None):
+           raiders=None, *, cells=None, kicker="RAID RECAP"):
     """The grid as PNG bytes, or None if anything at all went wrong."""
     try:
         from PIL import Image, ImageDraw
@@ -335,7 +335,9 @@ def render(summary, guild_name=None, night_text=None, raid_name=None, difficulty
         return None
 
     try:
-        cells = _cells(summary)
+        cells = _cells(summary) if cells is None else cells
+        if len(cells) != COLUMNS * ROWS:
+            raise ValueError("A recap card requires six categories")
         col_w = (WIDTH_CSS - 2 * PAD - (COLUMNS - 1) * COL_GAP) / COLUMNS
         col_h = COL_HEAD + ROW_H * 3
 
@@ -372,7 +374,7 @@ def render(summary, guild_name=None, night_text=None, raid_name=None, difficulty
 
         # .kicker, h1, .lede, .killed
         y = TOPBAR + 24
-        canvas.text(PAD, y, "RAID RECAP", canvas.font("regular", 12), MUTED, spacing=2.5)
+        canvas.text(PAD, y, kicker, canvas.font("regular", 12), MUTED, spacing=2.5)
         y += 18
         title = " — ".join(s for s in (guild_name, night_text) if s)
         h1 = canvas.font("bold", 26)
