@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import html
 import urllib.request
 from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
@@ -11,7 +12,7 @@ import mplus
 import recap_card
 import recap_page
 
-STYLE_VERSION = 'dungeon-art-v2'
+STYLE_VERSION = 'dungeon-art-site-v4'
 _art_cache = {}
 
 
@@ -112,6 +113,42 @@ def request(token, method, path, body=None):
         return json.loads(raw) if raw else {}
 
 
+def page(runs, guild, season, image_url, now):
+    from mplus_records import timer
+    from mplus_presentation import safe_url
+    esc=html.escape
+    panels=[]
+    for run in runs:
+        members=[]
+        for person in run['roster']:
+            if person['key'] in run['guild_members']:
+                color=recap_page.class_color(person.get('class','')) or '#f0f6fc'
+                light=recap_page.class_color_on_light(color)
+                members.append(f'<span class="cls" style="--c-dark:{color};--c-light:{light}">{esc(person["name"])}</span>')
+        url=safe_url(run['url'])
+        title=esc(run['dungeon'])
+        if url:title=f'<a href="{esc(url,quote=True)}">{title}</a>'
+        panels.append(f'<article><h2>{title}</h2><p class="result"><strong>+{run["level"]}</strong> {timer(run["elapsed_ms"])}</p>'
+                      f'<p class="holders">{" · ".join(members)}</p><p class="note">{len(run["guild_members"])}/5 guild members · '
+                      f'Time limit {timer(run["timer_ms"])}</p></article>')
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="60">
+<title>{esc(guild)} · Mythic+ dungeon records</title><style>{recap_page.STYLE}
+.record-card{{display:block;width:100%;max-width:640px;height:auto;margin:24px auto;border-radius:12px}}
+.records{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}}
+.records article{{background:var(--surface,var(--bg));border:1px solid var(--line,#3d444d);border-radius:10px;padding:20px}}
+.records h2{{font-size:19px;margin:0 0 12px}}.result{{font-size:24px}}.result strong{{color:#3fb950;margin-right:12px}}
+.holders{{font-weight:600}}.records a{{color:inherit}}
+</style></head><body><header class="topbar"><a class="tb-brand" href="https://ryangrey.dev">ryangrey.dev</a><span>greyBot</span></header>
+<main class="wrap"><p class="kicker">GUILD RECORDS</p><h1>{esc(guild)} · Mythic+ records</h1>
+<p class="lede">{esc(season)} · Highest timed keys with at least two guild members; fastest time breaks ties.</p>
+<p class="note">Updates automatically when greyBot finds a new record; this page refreshes every minute.</p>
+<img class="record-card" src="{esc(image_url,quote=True)}" alt="Dungeon artwork and current record card; accessible results and run links follow below.">
+<div class="records">{"".join(panels)}</div><p class="note">Observed season records from <a href="https://raider.io">Raider.IO</a>; source coverage and updates can lag.
+Last changed <time datetime="{now.isoformat()}">{now:%Y-%m-%d %H:%M UTC}</time>.</p></main>
+<footer>greyBot · Guild Mythic+ records</footer></body></html>'''
+
+
 def sync(repo, cfg, channel, state, now):
     active, runs = current_runs(state, (repo.get('SEASONS') or {}).get('items', []), cfg['guild_region'], now)
     if not runs:
@@ -128,12 +165,17 @@ def sync(repo, cfg, channel, state, now):
         path = f'mplus/records/{fingerprint}.png'
         publish_bytes(cfg, path, image, 'image/png')
         image_url = cfg['recap_page_url'].rstrip('/') + '/' + path
+        page_url = cfg['recap_page_url'].rstrip('/') + '/mplus/records/'
+        publish_bytes(cfg,'mplus/records/index.html',page(runs,cfg['guild_name'],active['name'],image_url,now).encode(),
+                      'text/html; charset=utf-8',cache='public, max-age=60')
         body = {'allowed_mentions': {'parse': []}, 'embeds': [{
             'title': cfg['guild_name'] + ' · Mythic+ records',
             'description': 'Highest timed keys with 2+ guild members; fastest time breaks ties. This pinned card updates when records change.',
             'color': 0x4493F8, 'image': {'url': image_url},
             'author': {'name': 'Raider.IO', 'url': 'https://raider.io'},
             'timestamp': now.isoformat(), 'footer': {'text': active['name'] + ' · Observed guild records'}}]}
+        body['embeds'][0]['url']=page_url
+        body['components']=[{'type':1,'components':[{'type':2,'style':5,'label':'Live dungeon records','url':page_url}]}]
         if message:
             request(cfg['bot_token'], 'PATCH', f'{channel}/messages/{message}', body)
         else:

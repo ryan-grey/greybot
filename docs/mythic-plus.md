@@ -139,3 +139,8 @@ existing guild partition. Pin failures retry against that same message; an
 ambiguous initial send requires review rather than risking duplicate cards.
 The bot requires channel posting, embed and pin permissions. Existing weekly
 recap scheduling is unchanged.
+
+The pin links to `/mplus/records/` on the recap site. Each record update publishes
+the card and matching accessible HTML standings before updating Discord. The page
+includes dungeon run source links, class-colored names with light/dark contrast,
+and refreshes once per minute; HTML cache lifetime is 60 seconds.

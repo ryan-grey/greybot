@@ -45,6 +45,15 @@ class Repo:
 
 
 class MythicTests(unittest.TestCase):
+    def test_record_page_escapes_names_and_links_actual_runs(self):
+        r=run();r['roster'][0]['name']='<script>alert(1)</script>'
+        output=mplus_record_board.page([r],'Test','Season','https://example.test/card.png',NOW)
+        self.assertIn('&lt;script&gt;',output)
+        self.assertNotIn('<script>alert',output)
+        self.assertIn('http-equiv="refresh" content="60"',output)
+        self.assertIn(r['url'],output)
+        self.assertIn('--c-dark:',output)
+
     def test_board_creation_pin_retry_and_edit_reuses_message(self):
         repo=Repo();repo.put('SEASONS',{'items':SEASONS})
         state={'best':{'test':run()}}
