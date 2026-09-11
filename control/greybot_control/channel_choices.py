@@ -27,7 +27,7 @@ def choices(guild, roles, channels, member, owned):
         return []
     result = []
     for channel in channels:
-        if channel.get("type") not in (0, 2, 5, 13) or channel["id"] == guild.get("rules_channel_id") or channel.get("name") in ("bots", "channel-preferences", "channel-list", "channel-guide", "verify-membership", "start-here"):
+        if channel.get("type") not in (0, 2, 5, 13) or channel["id"] == guild.get("rules_channel_id") or channel.get("name") in ("bots", "channel-preferences", "channel-list", "channel-guide", "verify-membership", "start-here", "➡️start-here⬅️"):
             continue
         current = overwrite(channel, member["user"]["id"])
         prior_hidden = bool(owned.get(channel["id"]))

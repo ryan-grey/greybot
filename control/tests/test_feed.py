@@ -29,7 +29,7 @@ class FeedTests(Base):
     def test_welcome_points_to_start_here(self):
         async def directory():
             data = copy.deepcopy(DATA)
-            data["channels"].append({"id": "6", "name": "start-here"})
+            data["channels"].append({"id": "6", "name": "➡️start-here⬅️"})
             return data
         self.feed.directory.get = directory
         self.configure(welcome_enabled=True, welcome_channel="5", verification_enabled=True)

@@ -280,7 +280,7 @@ class Feed:
                 body["nonce"] = "join-" + str(row["seq"])
                 if settings.get("verification_enabled"):
                     start = next((channel for channel in data.get("channels", [])
-                                  if channel.get("name") in {"start-here", "verify-membership"}), None)
+                                  if channel.get("name") in {"start-here", "➡️start-here⬅️", "verify-membership"}), None)
                     body["content"] += " Verify you're human to unlock the server."
                     if start:
                         body["content"] += " Start here: <#" + str(start["id"]) + ">."
