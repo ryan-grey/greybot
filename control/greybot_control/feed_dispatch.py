@@ -128,7 +128,7 @@ def change_fields(payload, maps):
     return fields
 
 
-def render(row, keys, directory, settings, origin, details=None):
+def render(row, keys, directory, settings, origin, details=None, *, admin_link=False):
     p = json.loads(row["payload"])
     maps = {kind: {str(item["id"]): item for item in directory.get(kind, [])}
             for kind in ("members", "roles", "channels")}
@@ -175,10 +175,13 @@ def render(row, keys, directory, settings, origin, details=None):
     if p.get("action_type") in (13, 14, 15):
         icons["channel_updated"] = "⚔️"
     embed = {"title": " · ".join((icons.get(key, "") + " " + AUDIT_EVENTS[key][1]).strip() for key in keys)[:256],
-             "description": "\n".join(lines)[:700] + f"\n\n[Open admin site]({origin}/#events)", "color": 0x4493F8,
-             "author": {"name": "greyBot", "url": origin + "/about"},
+             "description": "\n".join(lines)[:700], "color": 0x4493F8,
+             "author": {"name": "greyBot"},
              "timestamp": datetime.fromtimestamp(p.get("occurred_at", row["observed"]), timezone.utc).isoformat(),
-             "footer": {"text": footer[:300]}, "url": origin + "/"}
+             "footer": {"text": footer[:300]}}
+    if admin_link:
+        embed["description"] += f"\n\n[Open admin site]({origin}/#events)"
+        embed["url"] = origin + "/"
     fields = change_fields({**p, **(details or {})}, maps)
     if fields:
         embed["fields"] = fields
@@ -255,7 +258,7 @@ class Feed:
                         data["members"] = [member for member in data["members"] if member["id"] != uid] + [known["value"]]
             targets = {}
             if keys:
-                targets[settings["audit_channel"]] = render(row, keys, data, settings, self.cfg.origin, self.store.details(row))
+                targets[settings["audit_channel"]] = render(row, keys, data, settings, self.cfg.origin, self.store.details(row), admin_link=True)
                 if row["kind"] == "GUILD_MEMBER_REMOVE":
                     targets[settings["audit_channel"]]["embeds"][0]["image"] = {
                         "url": "https://media.giphy.com/media/bc4pHNmIWVlPoqzV8n/giphy.gif"}

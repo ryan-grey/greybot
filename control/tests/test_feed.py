@@ -26,6 +26,21 @@ class FeedAPI:
 
 
 class FeedTests(Base):
+    def test_admin_link_only_in_audit_delivery(self):
+        self.configure(audit_feed_enabled=True, audit_channel="4",
+                       welcome_enabled=True, welcome_channel="5",
+                       goodbye_enabled=True, goodbye_channel="5")
+        self.event("join-link-check")
+        self.tick()
+        self.event("leave-link-check", "GUILD_MEMBER_REMOVE")
+        self.tick()
+        self.assertEqual(len(self.api.posts), 4)
+        for path, body in self.api.posts:
+            if path == "/channels/4/messages":
+                self.assertIn("Open admin site", json.dumps(body))
+            else:
+                self.assertNotIn(self.cfg.origin, json.dumps(body))
+
     def setUp(self):
         super().setUp()
         self.api = FeedAPI()
