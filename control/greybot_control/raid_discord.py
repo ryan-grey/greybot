@@ -251,7 +251,11 @@ def card(cfg, row, profiles):
         # the blank line before the next full-width category on mobile.
         fields.append({"name": emoji_text(ROLE_EMOJIS.get(combat_role({"roleName": k}))) + safe(k)[:60] + f" · {len(members)}",
                        "value": value + "\n\u200b", "inline": False})
-    totals = f"**Signups: {confirmed} (+{provisional})** · confirmed (+late/tentative)\n\n"
+    role_counts = {role: sum(len(v) for k, v in groups.items() if combat_role({"roleName": k}) == role)
+                   for role in ("Tank", "Healer", "Ranged", "Melee")}
+    counts_line = ("\u00a0" * 5).join(emoji_text(ROLE_EMOJIS[role]).rstrip() + f"; {count}"
+                                    for role, count in role_counts.items())
+    totals = f"**Signups: {confirmed} (+{provisional})**\n{counts_line}\n\n"
     embed = {"title": event["title"][:200], "description": totals + event.get("description", "")[:1900] +
              f"\n\n<t:{int(event['startTime'])}:F> · <t:{int(event['startTime'])}:R>",
              "color": 0x4493F8, "url": cfg.origin + "/raids#" + row["id"],
