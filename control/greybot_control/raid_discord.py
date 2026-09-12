@@ -245,9 +245,17 @@ def card(cfg, row, profiles):
         width = max(1, 4000 // max(1, count) - 1)
         display_groups = {k: [name[:width] for name in v] for k, v in names_only.items()}
     status_columns = ('Absence', 'Tentative', 'Bench')
-    ordered_groups = [(k,v) for k,v in display_groups.items() if k not in status_columns]
-    ordered_groups += [(k,display_groups[k]) for k in status_columns if k in display_groups]
+    def layout(k):
+        role = combat_role({'roleName': k})
+        return {'Tank': (0,0), 'Healer': (0,1), 'Melee': (1,0), 'Ranged': (1,1)}.get(role,
+               (3,status_columns.index(k)) if k in status_columns else (2,0))
+    ordered_groups = sorted(display_groups.items(), key=lambda pair: layout(pair[0]))
+    previous_row = None
     for k, members in ordered_groups:
+        row_number = layout(k)[0]
+        if previous_row is not None and row_number != previous_row:
+            fields.append({'name':'\u200b','value':'\u200b','inline':False})
+        previous_row = row_number
         chunks, chunk = [], []
         for member in members:
             if chunk and len("\n".join(chunk + [member])) > 1020:
@@ -260,7 +268,7 @@ def card(cfg, row, profiles):
             label = safe(k)[:60] + (f" · {len(members)}" if index == 0 else " · continued")
             status_icon = {'Absence': '❌ ', 'Tentative': '❔ ', 'Bench': '🪑 '}.get(k, '')
             fields.append({"name": status_icon + emoji_text(ROLE_EMOJIS.get(combat_role({"roleName": k}))) + label,
-                           "value": "\n".join(chunk) + "\n\u200b", "inline": k in status_columns})
+                           "value": "\n".join(chunk), "inline": row_number != 2})
     role_counts = {role: sum(len(v) for k, v in groups.items() if combat_role({"roleName": k}) == role)
                    for role in ("Tank", "Healer", "Ranged", "Melee")}
     counts_line = ("\u00a0" * 5).join(emoji_text(ROLE_EMOJIS[role]).rstrip() + f" {count}"

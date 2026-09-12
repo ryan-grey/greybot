@@ -75,14 +75,14 @@ class RaidDiscordTests(unittest.TestCase):
                  "closingTime": 9999999999, "state": "open", "signUps": [
                      {"userId": "4", "name": "Original nickname", "className": "Tank"}]}
         card = service.card(self.cfg, {"id": "abc", "body": event}, {"4": {"name": "Unknown member"}})
-        self.assertEqual(card["embeds"][0]["fields"][0]["value"], "Original nickname\n\u200b")
+        self.assertEqual(card["embeds"][0]["fields"][0]["value"], "Original nickname")
 
     def test_numbered_spec_keys_are_only_cleaned_for_display(self):
         event={'title':'Raid','leaderId':'3','startTime':9999999999,'closingTime':9999999999,'state':'open',
                'classes':[{'name':'Death Knight','specs':[{'name':'Frost1','roleName':'Melee'}]}],
                'signUps':[{'userId':'4','name':'Example','className':'Death Knight','specName':'Frost1','roleName':'Melee'}]}
         embed=service.card(self.cfg,{'id':'abc','body':event},{})['embeds'][0]
-        self.assertIn(' · Frost\n',embed['fields'][0]['value'])
+        self.assertTrue(embed['fields'][0]['value'].endswith(' · Frost'))
         self.assertEqual(event['signUps'][0]['specName'],'Frost1')
         self.assertEqual(raids.choices(event)[0]['label'],'Death Knight · Frost')
         self.assertEqual(raids.choices(event)[0]['specName'],'Frost1')
@@ -98,12 +98,16 @@ class RaidDiscordTests(unittest.TestCase):
         self.assertEqual([part.rsplit(' ',1)[1] for part in counts],['2','4','6','3'])
         self.assertNotIn(';',embed['description'].split('\n')[1])
         self.assertNotIn('confirmed',embed['description'])
-        self.assertEqual(len(embed['fields']),8)
+        self.assertEqual(len(embed['fields']),11)
         self.assertIn('Member0\nMember1',embed['fields'][0]['value'])
-        self.assertTrue(all(f['value'].endswith('\n\u200b') and '\n\n' not in f['value'] for f in embed['fields']))
+        self.assertTrue(all('\n\n' not in f['value'] for f in embed['fields']))
+        self.assertIn('Healers',embed['fields'][1]['name'])
+        self.assertEqual(embed['fields'][2],{'name':'\u200b','value':'\u200b','inline':False})
+        self.assertIn('Melee',embed['fields'][3]['name'])
+        self.assertIn('Ranged',embed['fields'][4]['name'])
         self.assertEqual([f['name'].split(' · ')[0] for f in embed['fields'][-3:]],['❌ Absence','❔ Tentative','🪑 Bench'])
         self.assertTrue(all(f['inline'] for f in embed['fields'][-3:]))
-        self.assertTrue(all(not f['inline'] for f in embed['fields'][:-3]))
+        self.assertTrue(all(f['inline'] for f in embed['fields'][:2]+embed['fields'][3:5]))
 
     def test_card_is_bounded_and_mentions_are_disabled(self):
         event = {"title": "x"*200, "description": "y"*3500, "leaderId": "3", "startTime": 9999999999,
