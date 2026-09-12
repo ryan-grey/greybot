@@ -75,7 +75,7 @@ class RaidDiscordTests(unittest.TestCase):
                  "closingTime": 9999999999, "state": "open", "signUps": [
                      {"userId": "4", "name": "Original nickname", "className": "Tank"}]}
         card = service.card(self.cfg, {"id": "abc", "body": event}, {"4": {"name": "Unknown member"}})
-        self.assertEqual(card["embeds"][0]["fields"][0]["value"], "Original nickname\n\n\u200b")
+        self.assertEqual(card["embeds"][0]["fields"][0]["value"], "Original nickname\n\u200b")
 
     def test_totals_exclude_absence_and_bench_and_space_members(self):
         groups = ['Tanks'] * 2 + ['Melee'] * 3 + ['Ranged'] * 6 + ['Healers'] * 4 + ['Late'] + ['Tentative'] * 2 + ['Absence'] * 3 + ['Bench']
@@ -84,8 +84,8 @@ class RaidDiscordTests(unittest.TestCase):
         embed = service.card(self.cfg, {'id':'abc','body':event}, {})['embeds'][0]
         self.assertTrue(embed['description'].startswith('**Signups: 15 (+3)**'))
         self.assertEqual(len(embed['fields']),8)
-        self.assertIn('Member0\n\nMember1',embed['fields'][0]['value'])
-        self.assertTrue(all(not f['inline'] and f['value'].endswith('\n\n\u200b') for f in embed['fields']))
+        self.assertIn('Member0\nMember1',embed['fields'][0]['value'])
+        self.assertTrue(all(not f['inline'] and f['value'].endswith('\n\u200b') and '\n\n' not in f['value'] for f in embed['fields']))
 
     def test_card_is_bounded_and_mentions_are_disabled(self):
         event = {"title": "x"*200, "description": "y"*3500, "leaderId": "3", "startTime": 9999999999,

@@ -236,20 +236,21 @@ def card(cfg, row, profiles):
     confirmed = sum(len(v) for k, v in groups.items() if k not in {"Late", "Tentative", "Absence", "Bench"})
     fields = []
     visible_groups = list(groups.items())[:8]
-    budget = min(420, 2600 // max(1, len(visible_groups)))
-    for k, members in visible_groups:
+    sizes = [min(1020, len("\n".join(v[:8])) + 45) for _, v in visible_groups]
+    for index, (k, members) in enumerate(visible_groups):
+        budget = min(1020, int(2600 * sizes[index] / max(1, sum(sizes))))
         shown = []
         for member in members[:8]:
-            if len("\n\n".join(shown + [member])) > budget - 45:
+            if len("\n".join(shown + [member])) > budget - 45:
                 break
             shown.append(member)
-        value = "\n\n".join(shown)
+        value = "\n".join(shown)
         if len(shown) < len(members):
-            value += f"\n\n+{len(members)-len(shown)} more — open roster"
+            value += f"\n+{len(members)-len(shown)} more — open roster"
         # Discord trims trailing whitespace; a zero-width final line preserves
         # the blank line before the next full-width category on mobile.
         fields.append({"name": emoji_text(ROLE_EMOJIS.get(combat_role({"roleName": k}))) + safe(k)[:60] + f" · {len(members)}",
-                       "value": value + "\n\n\u200b", "inline": False})
+                       "value": value + "\n\u200b", "inline": False})
     totals = f"**Signups: {confirmed} (+{provisional})** · confirmed (+late/tentative)\n\n"
     embed = {"title": event["title"][:200], "description": totals + event.get("description", "")[:1900] +
              f"\n\n<t:{int(event['startTime'])}:F> · <t:{int(event['startTime'])}:R>",
