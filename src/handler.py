@@ -1192,6 +1192,18 @@ def _alert_kind(prev, status, now, forced=False):
     return None
 
 
+def probe_report_visibility(token, guild_id, start_ms, end_ms, check_history=False, **extra):
+    """Separate a quiet announcement window from an inaccessible report history."""
+    recent, rate = wcl.reports_in_window(token, guild_id, start_ms, end_ms, limit=5, **extra)
+    visible = recent
+    if not recent and check_history:
+        # One report from any age proves access. A rolling 30-day fallback would
+        # recreate the same false alarm after a longer raid break.
+        visible, history_rate = wcl.reports_in_window(token, guild_id, 0, end_ms, limit=1, **extra)
+        rate = history_rate or rate
+    return recent, visible, rate
+
+
 def run_source_check(cfg, scope, now, now_iso, blind, detail=None):
     """Can greyBot still SEE the raid logs it exists to read?
 
@@ -1692,13 +1704,14 @@ def poll_one(event, cfg, scope, now, now_iso, started):
         heroic = sum(int((v or {}).get("heroic_bosses_killed") or 0)
                      for v in progression.values())
         extra = ({"user_id": int(cfg["wcl_user_id"])} if cfg.get("wcl_user_id") else {})
-        seen, seen_rate = wcl.reports_in_window(
-            token, gid, window_start_ms, int(now.timestamp() * 1000), limit=5, **extra)
+        seen, source_seen, seen_rate = probe_report_visibility(
+            token, gid, window_start_ms, int(now.timestamp() * 1000),
+            check_history=heroic > 0 and not is_team(cfg), **extra)
         rate = seen_rate or rate
         # A team is never "blind": Raider.IO's Heroic count is the guild's, so it says
         # nothing about whether one raider's uploads should be visible. A team that has
         # not raided in three days is simply quiet.
-        blind = heroic > 0 and not seen and not is_team(cfg)
+        blind = heroic > 0 and not source_seen and not is_team(cfg)
 
         if blind:
             # Deliberately NOT "the guild's logs are private any more". That hint was a
@@ -1714,7 +1727,8 @@ def poll_one(event, cfg, scope, now, now_iso, started):
                      "See docs/wcl-reportdata-blind.md.")
 
         run_source_check(cfg, scope, now, now_iso, blind,
-                         detail={"heroicKills": heroic, "reportsVisible": len(seen)})
+                         detail={"heroicKills": heroic, "reportsVisible": len(source_seen),
+                                 "recentReportsVisible": len(seen)})
 
         # Refresh the /progress snapshot even though nothing was announced. It used to be
         # written only on the kills path, so a guild that had not killed anything in an

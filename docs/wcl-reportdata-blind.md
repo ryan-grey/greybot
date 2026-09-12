@@ -1,5 +1,18 @@
 # Handoff: Warcraft Logs `reportData.reports()` returns empty for every guild
 
+## Quiet-window health check correction
+
+On September 11, 2026, the source warning was triggered after the latest guild
+report aged out of the three-day announcement window. Authentication and older
+reports remained accessible. The health check now requests at most one historical
+report, without a rolling age cutoff, before counting an empty recent window as
+source blindness. This fallback has no fight subquery and never expands the kill
+announcement window. Truly empty history still uses the existing consecutive-poll
+threshold; request failures propagate as errors instead of pretending the source
+returned an empty success. Team-upload behavior remains unchanged.
+
+The incident below is the separate August outage.
+
 **Status: RECOVERED on its own at ~19:30 UTC on 2026-08-31, cause still unknown.**
 The API started answering again between 19:00 and 19:31 UTC with no action taken and no
 code change. This is now an **incident record and a retrospective research brief**, not a
