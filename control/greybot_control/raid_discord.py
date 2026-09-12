@@ -232,7 +232,7 @@ def card(cfg, row, profiles):
         group = signup.get("roleName") or signup.get("className") or "Attending"
         spec = signup.get("specName", "")
         icon = signup.get("specEmoteId") or choices.get((signup.get("className"), spec), {}).get("emoji_id")
-        groups.setdefault(group, []).append(emoji_text(icon) + safe(name[:45]) + (" · " + safe(spec[:25]) if spec else ""))
+        groups.setdefault(group, []).append(emoji_text(icon) + safe(name[:45]) + (" · " + safe(raids.spec_label(spec)[:25]) if spec else ""))
         names_only.setdefault(group, []).append(safe(name[:45]))
     provisional = sum(len(v) for k, v in groups.items() if k in {"Late", "Tentative"})
     confirmed = sum(len(v) for k, v in groups.items() if k not in {"Late", "Tentative", "Absence", "Bench"})

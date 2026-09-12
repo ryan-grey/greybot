@@ -77,6 +77,17 @@ class RaidDiscordTests(unittest.TestCase):
         card = service.card(self.cfg, {"id": "abc", "body": event}, {"4": {"name": "Unknown member"}})
         self.assertEqual(card["embeds"][0]["fields"][0]["value"], "Original nickname\n\u200b")
 
+    def test_numbered_spec_keys_are_only_cleaned_for_display(self):
+        event={'title':'Raid','leaderId':'3','startTime':9999999999,'closingTime':9999999999,'state':'open',
+               'classes':[{'name':'Death Knight','specs':[{'name':'Frost1','roleName':'Melee'}]}],
+               'signUps':[{'userId':'4','name':'Example','className':'Death Knight','specName':'Frost1','roleName':'Melee'}]}
+        embed=service.card(self.cfg,{'id':'abc','body':event},{})['embeds'][0]
+        self.assertIn(' · Frost\n',embed['fields'][0]['value'])
+        self.assertEqual(event['signUps'][0]['specName'],'Frost1')
+        self.assertEqual(raids.choices(event)[0]['label'],'Death Knight · Frost')
+        self.assertEqual(raids.choices(event)[0]['specName'],'Frost1')
+        self.assertEqual(raids.spec_label('Restoration1'),'Restoration')
+
     def test_totals_exclude_absence_and_bench_and_space_members(self):
         groups = ['Tanks'] * 2 + ['Melee'] * 3 + ['Ranged'] * 6 + ['Healers'] * 4 + ['Late'] + ['Tentative'] * 2 + ['Absence'] * 3 + ['Bench']
         event = {'title':'Raid','leaderId':'3','startTime':9999999999,'closingTime':9999999999,

@@ -106,6 +106,7 @@ def install(app, cfg, store, api, cookie, static, directory):
                     pass
             display = copy.deepcopy(event)
             for signup in display["signUps"]:
+                signup["specName"] = raids.spec_label(signup.get("specName", ""))
                 profile = profiles.get(str(signup["userId"]), {})
                 known_name = profile.get("name")
                 signup["display"] = {"name": (known_name if known_name != "Unknown member" else None) or signup.get("name") or "Former member",

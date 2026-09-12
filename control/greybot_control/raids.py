@@ -1,6 +1,7 @@
 """Transactional raid rosters and permissions, independent of Discord delivery."""
 import copy
 import json
+import re
 import secrets
 import time
 
@@ -37,6 +38,10 @@ def list_events(store, guild):
             "SELECT * FROM raid_events WHERE guild=? ORDER BY json_extract(body,'$.startTime') DESC", (guild,))]
 
 
+def spec_label(name):
+    return re.sub(r"^(Frost|Restoration|Holy|Protection)\d+$", r"\1", str(name or ""))
+
+
 def choices(event):
     """Return stable template-local choices; class names alone aren't unique specs."""
     result = []
@@ -48,7 +53,7 @@ def choices(event):
             role = (spec or cls).get("roleName", cls.get("name", ""))
             label = cls.get("cName") or cls["name"]
             if spec:
-                label += " · " + (spec.get("cName") or spec["name"])
+                label += " · " + spec_label(spec.get("cName") or spec["name"])
             result.append({"value": f"{ci}:{si}", "label": label, "className": cls["name"],
                            "specName": (spec or {}).get("name", ""), "roleName": role,
                            "emoji_id": str((spec or cls).get("emoteId", "")),
