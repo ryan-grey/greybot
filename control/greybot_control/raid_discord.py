@@ -232,10 +232,26 @@ def card(cfg, row, profiles):
         spec = signup.get("specName", "")
         icon = signup.get("specEmoteId") or choices.get((signup.get("className"), spec), {}).get("emoji_id")
         groups.setdefault(group, []).append(emoji_text(icon) + safe(name[:45]) + (" · " + safe(spec[:25]) if spec else ""))
-    fields = [{"name": emoji_text(ROLE_EMOJIS.get(combat_role({"roleName": k}))) + safe(k)[:60] + f" · {len(v)}", "value": ("\n".join(v[:8]) +
-               (f"\n+{len(v)-8} more — open roster" if len(v) > 8 else ""))[:420], "inline": True}
-              for k, v in list(groups.items())[:6]]
-    embed = {"title": event["title"][:200], "description": event.get("description", "")[:2000] +
+    provisional = sum(len(v) for k, v in groups.items() if k in {"Late", "Tentative"})
+    confirmed = sum(len(v) for k, v in groups.items() if k not in {"Late", "Tentative", "Absence", "Bench"})
+    fields = []
+    visible_groups = list(groups.items())[:8]
+    budget = min(420, 2600 // max(1, len(visible_groups)))
+    for k, members in visible_groups:
+        shown = []
+        for member in members[:8]:
+            if len("\n\n".join(shown + [member])) > budget - 45:
+                break
+            shown.append(member)
+        value = "\n\n".join(shown)
+        if len(shown) < len(members):
+            value += f"\n\n+{len(members)-len(shown)} more — open roster"
+        # Discord trims trailing whitespace; a zero-width final line preserves
+        # the blank line before the next full-width category on mobile.
+        fields.append({"name": emoji_text(ROLE_EMOJIS.get(combat_role({"roleName": k}))) + safe(k)[:60] + f" · {len(members)}",
+                       "value": value + "\n\n\u200b", "inline": False})
+    totals = f"**Signups: {confirmed} (+{provisional})** · confirmed (+late/tentative)\n\n"
+    embed = {"title": event["title"][:200], "description": totals + event.get("description", "")[:1900] +
              f"\n\n<t:{int(event['startTime'])}:F> · <t:{int(event['startTime'])}:R>",
              "color": 0x4493F8, "url": cfg.origin + "/raids#" + row["id"],
              "author": {"name": (leader.get("name") or event.get("leaderName") or "Raid leader")[:256]},
