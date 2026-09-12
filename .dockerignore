@@ -10,3 +10,10 @@
 !control/greybot_control/static/*.js
 !assets/
 !assets/greyBot-avatar-v4.png
+!assets/fonts/
+!assets/fonts/*.ttf
+!assets/fonts/LICENSE-*.txt
+!src/
+!src/recap_card.py
+!src/recap_page.py
+!src/kill_card.py
