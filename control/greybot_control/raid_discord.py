@@ -258,7 +258,8 @@ def card(cfg, row, profiles):
             chunks.append(chunk)
         for index, chunk in enumerate(chunks):
             label = safe(k)[:60] + (f" · {len(members)}" if index == 0 else " · continued")
-            fields.append({"name": emoji_text(ROLE_EMOJIS.get(combat_role({"roleName": k}))) + label,
+            status_icon = {'Absence': '❌ ', 'Tentative': '❔ ', 'Bench': '🪑 '}.get(k, '')
+            fields.append({"name": status_icon + emoji_text(ROLE_EMOJIS.get(combat_role({"roleName": k}))) + label,
                            "value": "\n".join(chunk) + "\n\u200b", "inline": k in status_columns})
     role_counts = {role: sum(len(v) for k, v in groups.items() if combat_role({"roleName": k}) == role)
                    for role in ("Tank", "Healer", "Ranged", "Melee")}

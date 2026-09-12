@@ -101,7 +101,7 @@ class RaidDiscordTests(unittest.TestCase):
         self.assertEqual(len(embed['fields']),8)
         self.assertIn('Member0\nMember1',embed['fields'][0]['value'])
         self.assertTrue(all(f['value'].endswith('\n\u200b') and '\n\n' not in f['value'] for f in embed['fields']))
-        self.assertEqual([f['name'].split(' · ')[0] for f in embed['fields'][-3:]],['Absence','Tentative','Bench'])
+        self.assertEqual([f['name'].split(' · ')[0] for f in embed['fields'][-3:]],['❌ Absence','❔ Tentative','🪑 Bench'])
         self.assertTrue(all(f['inline'] for f in embed['fields'][-3:]))
         self.assertTrue(all(not f['inline'] for f in embed['fields'][:-3]))
 
