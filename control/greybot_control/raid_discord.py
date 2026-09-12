@@ -271,6 +271,7 @@ def card(cfg, row, profiles):
                            "value": "\n".join(chunk), "inline": row_number != 2})
     role_counts = {role: sum(len(v) for k, v in groups.items() if combat_role({"roleName": k}) == role)
                    for role in ("Tank", "Healer", "Ranged", "Melee")}
+    role_counts['Melee'] += role_counts.pop('Ranged')
     counts_line = ("\u00a0" * 5).join(emoji_text(ROLE_EMOJIS[role]).rstrip() + f" {count}"
                                     for role, count in role_counts.items())
     totals = f"**Signups: {confirmed} (+{provisional})**\n{counts_line}\n\n"
