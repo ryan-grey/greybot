@@ -45,6 +45,21 @@ class Repo:
 
 
 class MythicTests(unittest.TestCase):
+    def test_role_comes_from_selected_key_and_not_aggregate_or_latest_spec(self):
+        paladin={**PEOPLE[0],'class':'Paladin','spec':{'name':'Protection','role':'tank'}}
+        self.assertEqual(mplus.run_person(paladin)['role'],'tank')
+        self.assertIsNone(mplus.person(paladin)['role'])
+        self.assertEqual(mplus.person(PEOPLE[1])['role'],'dps')
+        best=run(1,guild=5,level=15);later=run(2,guild=5,level=10)
+        best['roster'][0]=mplus.run_person(paladin)
+        later['roster'][0]=mplus.run_person({**paladin,'spec':{'name':'Holy','role':'healer'}})
+        result=mplus.summarize([best,later],{},START,END,overall_scores=[{**best['roster'][0],'score':3000}])
+        for category in ('highest','guild_highest'):
+            self.assertEqual(next(p for p in result['boards'][category] if p['key']==KEYS[0])['role'],'tank')
+        for category in ('ten','guild_timed','overall'):
+            self.assertIsNone(next(p for p in result['boards'][category] if p['key']==KEYS[0])['role'])
+        self.assertIn('aria-label="Tank"',mplus_presentation.page(result,'Test'))
+
     def test_every_category_has_unique_positions_and_characters(self):
         scores=[{**mplus.person(p),'score':3000} for p in PEOPLE]
         summary=mplus.summarize([run(1,guild=5),run(2,guild=5,level=11)],
@@ -81,9 +96,9 @@ class MythicTests(unittest.TestCase):
         old=run(guild=2);new=run(2,guild=3,level=11)
         old['roster'][0]['name']='PreviousTank'
         body=mplus_records.payload(new,old,'https://discord.com/channels/1/2/3')
-        self.assertIn('Aster, Birch, Cedar',body['embeds'][0]['description'])
+        self.assertIn('⚔️ Aster, ⚔️ Birch, ⚔️ Cedar',body['embeds'][0]['description'])
         prior=next(f for f in body['embeds'][0]['fields'] if f['name']=='Previous guild record holders')
-        self.assertEqual(prior['value'],'PreviousTank, Birch')
+        self.assertEqual(prior['value'],'⚔️ PreviousTank, ⚔️ Birch')
         self.assertNotIn('Dawn',str(body))
 
     def test_overall_io_includes_members_without_any_guild_run_and_caps_page(self):
@@ -177,7 +192,7 @@ class MythicTests(unittest.TestCase):
         self.assertEqual(post.call_count,2)
         self.assertEqual(repo.get('RECORDS')['best'][best]['level'],11)
         payload=post.call_args.args[1]
-        self.assertIn('Aster, Birch',payload['embeds'][0]['description'])
+        self.assertIn('⚔️ Aster, ⚔️ Birch',payload['embeds'][0]['description'])
         self.assertNotIn('Cedar',payload['embeds'][0]['description'])
         self.assertEqual(payload['allowed_mentions'],{'parse':[]})
         self.assertEqual(mplus_records.timer(123456),'2:03.456')

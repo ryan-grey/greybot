@@ -30,7 +30,7 @@ def card(summary, guild):
     cells = []
     for key, title in categories(summary):
         rows = [(r["name"], r.get("class"), r.get("detail") or r.get("server"),
-                 mplus.display_value(key, r), None, None, None) for r in summary["boards"][key][:3]]
+                 mplus.display_value(key, r), r.get('role'), None, None) for r in summary["boards"][key][:3]]
         empty = "Scores unavailable" if key == 'overall' else "Baseline not available" if key == "score" and summary["score_unavailable"] else "No qualifying results"
         cells.append((title, None, rows, empty, None))
     chips = [f'{summary["timed_count"]} timed runs', f'{summary["members"]} characters',
@@ -58,7 +58,7 @@ def page(summary, guild):
                 name = f'<a href="{esc(href, quote=True)}">{name}</a>'
             color = recap_page.class_color(row.get("class", ""))
             style = (f' style="--c-dark:{color};--c-light:{recap_page.class_color_on_light(color)}"' if color else "")
-            who = f'<span class="cls"{style}>{row["rank"]}. {name}</span>'
+            who = f'<span class="cls"{style}>{row["rank"]}. {recap_page.role_icon(row.get("role"))}{name}</span>'
             who += f'<small>{esc(row.get("detail") or row.get("server") or "")}</small>'
             entries.append((who, esc(mplus.display_value(key, row))))
         empty = "No qualifying results" if key != "score" else "No positive change with comparable weekly baselines"

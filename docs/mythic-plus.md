@@ -156,3 +156,11 @@ The pin links to `/mplus/records/` on the recap site. Each record update publish
 the card and matching accessible HTML standings before updating Discord. The page
 includes dungeon run source links, class-colored names with light/dark contrast,
 and refreshes once per minute; HTML cache lifetime is 60 seconds.
+
+Role icons appear immediately before character names on cards and web standings.
+For highest-key standings and dungeon records, the icon comes from the selected
+run's roster specialization: tank, healer, or damage. Switching roles in another
+run cannot change that record's icon. Record alerts label both the new and previous
+groups using their respective runs. Aggregate IO and run-count standings do not
+infer a hybrid class's role; Mage, Rogue, Hunter, and Warlock can safely show damage
+without run-specific data. Unknown hybrid roles remain blank.

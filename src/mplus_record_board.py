@@ -12,7 +12,7 @@ import mplus
 import recap_card
 import recap_page
 
-STYLE_VERSION = 'season-title-v5'
+STYLE_VERSION = 'run-roles-v6'
 _art_cache = {}
 
 
@@ -114,7 +114,8 @@ def render(runs, guild, season, art=None):
             members = [p for p in run['roster'] if p['key'] in run['guild_members']]
             for index, person in enumerate(members):
                 color = recap_page.class_color(person.get('class', '')) or '#f0f6fc'
-                canvas.text(x+14, y+132+index*22, person['name'], canvas.font('semibold', 16), color)
+                canvas.glyph(person.get('role') or mplus.class_role(person.get('class')),x+14,y+136+index*22,14)
+                canvas.text(x+35, y+132+index*22, person['name'], canvas.font('semibold', 16), color)
         y += panel_height + 16
     canvas.text(24, y, 'Observed season records · Raider.IO · Names use WoW class colors', canvas.font('regular', 11), c.MUTED)
     output = io.BytesIO()
@@ -142,7 +143,7 @@ def page(runs, guild, season, image_url, now):
             if person['key'] in run['guild_members']:
                 color=recap_page.class_color(person.get('class','')) or '#f0f6fc'
                 light=recap_page.class_color_on_light(color)
-                members.append(f'<span class="cls" style="--c-dark:{color};--c-light:{light}">{esc(person["name"])}</span>')
+                members.append(recap_page.role_icon(person.get('role') or mplus.class_role(person.get('class')))+f'<span class="cls" style="--c-dark:{color};--c-light:{light}">{esc(person["name"])}</span>')
         url=safe_url(run['url'])
         title=esc(run['dungeon'])
         if url:title=f'<a href="{esc(url,quote=True)}">{title}</a>'

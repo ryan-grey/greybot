@@ -32,13 +32,15 @@ def payload(run, previous=None, board_url=None):
         for char in ('\\','*','_','`','~','|','[',']'):
             value=value.replace(char,'\\'+char)
         return value
-    members=', '.join(clean(p['name']) for p in run['roster'] if p['key'] in run['guild_members'])
+    def member(p):
+        return (discord.ROLE_EMOJI.get(p.get('role') or mplus.class_role(p.get('class')),'')+' '+clean(p['name'])).strip()
+    members=', '.join(member(p) for p in run['roster'] if p['key'] in run['guild_members'])
     description=f'New Record Set by **{members}**\n**{clean(run["dungeon"])} +{run["level"]}** · **{timer(run["elapsed_ms"])}**'
     fields=[{'name':'Guild members','value':f'{len(run["guild_members"])}/5','inline':True},
             {'name':'Time limit','value':timer(run['timer_ms']),'inline':True}]
     if previous:
         fields.append({'name':'Previous record','value':f'+{previous["level"]} · {timer(previous["elapsed_ms"])}','inline':True})
-        old_members=', '.join(clean(p['name']) for p in previous['roster'] if p['key'] in previous['guild_members'])
+        old_members=', '.join(member(p) for p in previous['roster'] if p['key'] in previous['guild_members'])
         fields.append({'name':'Previous guild record holders','value':old_members or 'Unavailable','inline':False})
     embed={'title':'🏆 New Record Set','description':description,'fields':fields,'color':0x4493F8,
            'timestamp':run['completed'],'footer':{'text':'greyBot · Guild Mythic+ record'}}

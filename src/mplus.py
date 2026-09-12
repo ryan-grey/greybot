@@ -68,9 +68,29 @@ def person(character):
     key = character_key(character)
     cls = character.get("class", "")
     realm = character.get("realm", "")
-    return {"key": key, "name": str(character["name"]),
+    result = {"key": key, "name": str(character["name"]),
             "class": cls.get("name", "") if isinstance(cls, dict) else cls,
             "server": realm.get("name", "") if isinstance(realm, dict) else realm}
+    result['role']=class_role(result['class'])
+    return result
+
+
+def class_role(klass):
+    """Only classes whose specializations all deal damage have a safe fallback."""
+    return 'dps' if klass in ('Mage','Rogue','Hunter','Warlock') else None
+
+
+def run_person(character):
+    result=person(character)
+    spec=character.get('spec') or {}
+    role=spec.get('role') if isinstance(spec,dict) else None
+    if role in ('tank','healer','dps'):
+        result.update(role=role,role_source='run_spec',spec=spec.get('name'))
+    return result
+
+
+def record_person(run, key):
+    return next(p for p in run['roster'] if p['key']==key)
 
 
 def normalize_run(raw, guild_members, observed_at):
@@ -80,7 +100,7 @@ def normalize_run(raw, guild_members, observed_at):
     season = str(raw.get("season", ""))
     if not re.fullmatch(r"season-[a-z0-9-]+", season):
         raise ValueError("Invalid season")
-    roster = [person(row["character"]) for row in raw.get("roster", [])]
+    roster = [run_person(row["character"]) for row in raw.get("roster", [])]
     if len(roster) != 5 or len({p["key"] for p in roster}) != 5:
         raise ValueError("Incomplete or duplicate roster")
     members = sorted({p["key"] for p in roster} & set(guild_members))
@@ -133,12 +153,12 @@ def summarize(runs, snapshots, start, end, overall_scores=None):
             if previous is None or (r["level"], -r["elapsed_ms"] / r["timer_ms"], r["id"]) > (
                     previous["level"], -previous["elapsed_ms"] / previous["timer_ms"], previous["id"]):
                 best[key] = r
-    boards["highest"] = _rank([{**people[k], "value": r["level"], "detail": r["dungeon"],
+    boards["highest"] = _rank([{**record_person(r,k), "value": r["level"], "detail": r["dungeon"],
                                 "run": r["id"], "url": r["url"]} for k, r in best.items()], "value")
     for category, selected in (("ten", [r for r in timed if r["level"] >= 10]),
                                ("guild_timed", [r for r in timed if len(r["guild_members"]) == 5])):
         counts = Counter(k for r in selected for k in r["guild_members"])
-        boards[category] = _rank([{**people[k], "value": n, "detail": "timed runs"} for k, n in counts.items()], "value")
+        boards[category] = _rank([{**people[k], "role":class_role(people[k]['class']), "value": n, "detail": "timed runs"} for k, n in counts.items()], "value")
     all_guild = [r for r in timed if len(r["guild_members"]) == 5]
     guild_best={}
     for r in all_guild:
@@ -146,7 +166,7 @@ def summarize(runs, snapshots, start, end, overall_scores=None):
             previous=guild_best.get(key)
             if previous is None or (r['level'],-r['elapsed_ms']/r['timer_ms'],r['id']) > (previous['level'],-previous['elapsed_ms']/previous['timer_ms'],previous['id']):
                 guild_best[key]=r
-    boards["guild_highest"] = _rank([{**people[key], "value":r["level"],
+    boards["guild_highest"] = _rank([{**record_person(r,key), "value":r["level"],
         "detail":r['dungeon'], "url":r["url"], "roster":r["roster"]}
         for key,r in guild_best.items()], "value")
     unavailable = 0
@@ -162,12 +182,12 @@ def summarize(runs, snapshots, start, end, overall_scores=None):
             continue
         gain = round(last - first, 1)
         if gain > 0:
-            boards["score"].append({**p, "value": gain, "detail": f"{first:,.1f} → {last:,.1f}"})
+            boards["score"].append({**p, "role":class_role(p['class']), "value": gain, "detail": f"{first:,.1f} → {last:,.1f}"})
     _rank(boards["score"], "value")
     for person in overall_scores or []:
         value=float(person['score'])
         if math.isfinite(value) and value >= 0:
-            boards['overall'].append({**person,'value':value,'detail':'Overall season IO'})
+            boards['overall'].append({**person,'role':class_role(person['class']),'value':value,'detail':'Overall season IO'})
     _rank(boards['overall'],'value')
     return {"start": start.isoformat(), "end": end.isoformat(), "boards": boards,
             "runs": sorted(eligible, key=lambda r:r["completed"], reverse=True),
