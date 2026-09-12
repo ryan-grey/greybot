@@ -262,7 +262,7 @@ def card(cfg, row, profiles):
                            "value": "\n".join(chunk) + "\n\u200b", "inline": k in status_columns})
     role_counts = {role: sum(len(v) for k, v in groups.items() if combat_role({"roleName": k}) == role)
                    for role in ("Tank", "Healer", "Ranged", "Melee")}
-    counts_line = ("\u00a0" * 5).join(emoji_text(ROLE_EMOJIS[role]).rstrip() + f"; {count}"
+    counts_line = ("\u00a0" * 5).join(emoji_text(ROLE_EMOJIS[role]).rstrip() + f" {count}"
                                     for role, count in role_counts.items())
     totals = f"**Signups: {confirmed} (+{provisional})**\n{counts_line}\n\n"
     embed = {"title": event["title"][:200], "description": totals + event.get("description", "")[:1900] +

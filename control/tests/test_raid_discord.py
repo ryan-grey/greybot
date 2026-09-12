@@ -95,7 +95,8 @@ class RaidDiscordTests(unittest.TestCase):
         embed = service.card(self.cfg, {'id':'abc','body':event}, {})['embeds'][0]
         self.assertTrue(embed['description'].startswith('**Signups: 15 (+3)**'))
         counts = embed['description'].split('\n')[1].split('\u00a0' * 5)
-        self.assertEqual([part.split('; ')[1] for part in counts],['2','4','6','3'])
+        self.assertEqual([part.rsplit(' ',1)[1] for part in counts],['2','4','6','3'])
+        self.assertNotIn(';',embed['description'].split('\n')[1])
         self.assertNotIn('confirmed',embed['description'])
         self.assertEqual(len(embed['fields']),8)
         self.assertIn('Member0\nMember1',embed['fields'][0]['value'])
