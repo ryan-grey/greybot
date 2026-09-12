@@ -26,8 +26,10 @@ No birthday information is collected.
 
 Optional year badges are enabled through the private `tenure_config` table and
 reconciled every five minutes. Members receive one cosmetic role for their completed
-years, with a small number icon (zero for members under one year). Badge colors follow
-WoW equipment quality: 0 grey, 1 white, 2 green, 3 blue, 4 purple, 5 and above orange. Roles have
+years, with a small number icon; members under one year retain a zero-year role with no
+visible icon. Badge colors follow WoW equipment quality: 1 white, 2 green, 3 blue,
+4 purple, 5 and above orange. There is no font dependency: the approved Trebuchet Bold numerals are pre-rendered PNGs, with
+vivid colors (#ffffff, #44ed3d, #2589ff, #ad4dff, #ff861f). Roles have
 zero permissions, no color, no hoisting, and cannot be mentioned. Existing roles with
 icons (including GM and Officer) take precedence and their members are skipped.
 Only role IDs recorded in `tenure_roles` are managed; all unrelated roles are preserved.

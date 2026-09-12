@@ -2,38 +2,19 @@
 import asyncio
 import base64
 import calendar
-import struct
-import zlib
+from pathlib import Path
 from datetime import datetime, timezone
 
 from .anniversaries import ZONE
 
-DIGITS = ('111101101101111','010110010010111','111001111100111',
-          '111001111001111','101101111001001','111100111001111',
-          '111100111101111','111001001001001','111101111101111','111101111001111')
-QUALITY_COLORS = ('9d9d9d','ffffff','1eff00','0070dd','a335ee','ff8000')
+BADGES = Path(__file__).resolve().parents[2] / 'assets' / 'tenure-badges'
 
 
 def icon(years):
-    """Small lossless number icon using only the standard library."""
-    chars = str(years)
-    scale = min(10, 54 // (len(chars)*4-1))
-    width = (len(chars)*4-1)*scale
-    pixels = bytearray(64*64*4)
-    color=bytes.fromhex(QUALITY_COLORS[min(years,5)])+b'\xff'
-    for index,ch in enumerate(chars):
-        for n,bit in enumerate(DIGITS[int(ch)]):
-            if bit == '0': continue
-            for dy in range(scale):
-                for dx in range(scale):
-                    x=(64-width)//2+(index*4+n%3)*scale+dx
-                    y=(64-5*scale)//2+(n//3)*scale+dy
-                    p=(y*64+x)*4
-                    pixels[p:p+4]=color
-    def chunk(kind,data):
-        return struct.pack('!I',len(data))+kind+data+struct.pack('!I',zlib.crc32(kind+data)&0xffffffff)
-    raw=b''.join(b'\0'+pixels[y*256:(y+1)*256] for y in range(64))
-    png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('!2I5B',64,64,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(raw))+chunk(b'IEND',b'')
+    """Pre-rendered Trebuchet Bold numbers; no font or renderer needed at runtime."""
+    if not isinstance(years,int) or not 1 <= years <= 99:
+        raise ValueError('Year badge must be between 1 and 99')
+    png=(BADGES / f'{years}.png').read_bytes()
     return 'data:image/png;base64,'+base64.b64encode(png).decode()
 
 
@@ -88,7 +69,7 @@ async def tick(cfg,store,api,now=None):
                 if not claimed:raise RuntimeError('Year badge creation needs reconciliation')
                 result=await api.request('POST',base+'/roles',body={
                     'name':f'{age} Year'+('s' if age!=1 else '')+' in Server',
-                    'permissions':'0','color':0,'hoist':False,'mentionable':False,'icon':icon(age)},
+                    'permissions':'0','color':0,'hoist':False,'mentionable':False,'icon':icon(age) if age else None},
                     reason='Membership anniversary badge; no channel permissions')
                 known[age]=result['id']
                 with store.connection() as db:

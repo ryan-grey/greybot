@@ -10,3 +10,5 @@
 !control/greybot_control/static/*.js
 !assets/
 !assets/greyBot-avatar-v4.png
+!assets/tenure-badges/
+!assets/tenure-badges/*.png

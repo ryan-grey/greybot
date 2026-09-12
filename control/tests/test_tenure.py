@@ -20,10 +20,11 @@ class TenureTests(unittest.TestCase):
         self.assertIsNone(t.years({**m,'user':{'bot':True}},date(2026,9,12)))
 
     def test_icons_are_png(self):
-        for years in (0,1,4,10,25):
+        for years in (1,4,10,25,99):
             raw=base64.b64decode(t.icon(years).split(',')[1])
             self.assertTrue(raw.startswith(b'\x89PNG'))
             self.assertLess(len(raw),256000)
+        with self.assertRaises(ValueError):t.icon(0)
 
     def test_reconcile_preserves_staff_and_other_roles(self):
         with tempfile.TemporaryDirectory() as d:
