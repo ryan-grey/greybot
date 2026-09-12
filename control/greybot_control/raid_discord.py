@@ -223,6 +223,7 @@ def card(cfg, row, profiles):
     leader = profiles.get(str(event["leaderId"]), {})
     opened = event["state"] == "open" and time.time() < event["closingTime"]
     groups = {}
+    names_only = {}
     choices = {(c["className"], c["specName"]): c for c in raids.choices({**event, "classes": event.get("classes", [])})}
     for signup in event["signUps"]:
         name = profiles.get(str(signup["userId"]), {}).get("name")
@@ -232,25 +233,33 @@ def card(cfg, row, profiles):
         spec = signup.get("specName", "")
         icon = signup.get("specEmoteId") or choices.get((signup.get("className"), spec), {}).get("emoji_id")
         groups.setdefault(group, []).append(emoji_text(icon) + safe(name[:45]) + (" · " + safe(spec[:25]) if spec else ""))
+        names_only.setdefault(group, []).append(safe(name[:45]))
     provisional = sum(len(v) for k, v in groups.items() if k in {"Late", "Tentative"})
     confirmed = sum(len(v) for k, v in groups.items() if k not in {"Late", "Tentative", "Absence", "Bench"})
     fields = []
-    visible_groups = list(groups.items())[:8]
-    sizes = [min(1020, len("\n".join(v[:8])) + 45) for _, v in visible_groups]
-    for index, (k, members) in enumerate(visible_groups):
-        budget = min(1020, int(2600 * sizes[index] / max(1, sum(sizes))))
-        shown = []
-        for member in members[:8]:
-            if len("\n".join(shown + [member])) > budget - 45:
-                break
-            shown.append(member)
-        value = "\n".join(shown)
-        if len(shown) < len(members):
-            value += f"\n+{len(members)-len(shown)} more — open roster"
-        # Discord trims trailing whitespace; a zero-width final line preserves
-        # the blank line before the next full-width category on mobile.
-        fields.append({"name": emoji_text(ROLE_EMOJIS.get(combat_role({"roleName": k}))) + safe(k)[:60] + f" · {len(members)}",
-                       "value": value + "\n\u200b", "inline": False})
+    # Keep every signup. Very large rosters use compact names instead of hiding
+    # members behind a link; split long categories at Discord's field limit.
+    display_groups = groups
+    if sum(len("\n".join(v)) for v in groups.values()) > 4000:
+        count = sum(map(len, names_only.values()))
+        width = max(1, 4000 // max(1, count) - 1)
+        display_groups = {k: [name[:width] for name in v] for k, v in names_only.items()}
+    status_columns = ('Absence', 'Tentative', 'Bench')
+    ordered_groups = [(k,v) for k,v in display_groups.items() if k not in status_columns]
+    ordered_groups += [(k,display_groups[k]) for k in status_columns if k in display_groups]
+    for k, members in ordered_groups:
+        chunks, chunk = [], []
+        for member in members:
+            if chunk and len("\n".join(chunk + [member])) > 1020:
+                chunks.append(chunk)
+                chunk = []
+            chunk.append(member)
+        if chunk:
+            chunks.append(chunk)
+        for index, chunk in enumerate(chunks):
+            label = safe(k)[:60] + (f" · {len(members)}" if index == 0 else " · continued")
+            fields.append({"name": emoji_text(ROLE_EMOJIS.get(combat_role({"roleName": k}))) + label,
+                           "value": "\n".join(chunk) + "\n\u200b", "inline": k in status_columns})
     role_counts = {role: sum(len(v) for k, v in groups.items() if combat_role({"roleName": k}) == role)
                    for role in ("Tank", "Healer", "Ranged", "Melee")}
     counts_line = ("\u00a0" * 5).join(emoji_text(ROLE_EMOJIS[role]).rstrip() + f"; {count}"
@@ -264,6 +273,11 @@ def card(cfg, row, profiles):
              "timestamp": datetime.fromtimestamp(event["startTime"], timezone.utc).isoformat()}
     if leader.get("avatar_url"):
         embed["author"]["icon_url"] = leader["avatar_url"]
+    fixed = len(embed['title']) + len(embed['author']['name']) + len(embed['footer']['text']) + sum(len(f['name']) + len(f['value']) for f in fields)
+    if fixed + len(embed['description']) > 5900:
+        date_line = f"\n\n<t:{int(event['startTime'])}:F> · <t:{int(event['startTime'])}:R>"
+        room = max(0, 5900 - fixed - len(totals) - len(date_line))
+        embed['description'] = totals + event.get('description', '')[:room] + date_line
     controls = []
     if opened:
         controls.append({"type": 1, "components": role_buttons(event, row["id"]) or [button("Sign up / change", "signup", row["id"])]})
