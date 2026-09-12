@@ -9,6 +9,21 @@ Start with [the consolidated architecture and build](docs/consolidation.md) and
 components with `python3 scripts/build-release.py`; private runtime data and
 credentials stay outside the repository and release artifacts.
 
+## Membership anniversaries
+
+The control worker celebrates human members annually with a text embed, their server
+display name and avatar, and a mention limited to that member. The destination is pinned
+by channel ID in the private `anniversary_config` table. Checks run every five minutes
+after 10 AM America/New_York; only today's anniversaries are eligible, with no historical
+backfill. Discord's current `joined_at` determines tenure, so leaving and rejoining resets
+it. February 29 anniversaries use February 28 in non-leap years.
+
+The private `anniversary_delivery` ledger reserves each member/year before sending and
+records the resulting message ID. Restarts cannot duplicate a celebration. An ambiguous
+delivery remains `unknown` (or `sending` after an interrupted process) for manual review,
+rather than risking a duplicate. A full-day outage skips that day's celebrations.
+No birthday information or anniversary roles are collected or assigned.
+
 ## Original raid-service reference
 
 The sections below document the raid service's development and original webhook

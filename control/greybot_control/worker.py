@@ -113,6 +113,8 @@ async def run():
     store = Store(cfg.state_dir / "control.sqlite3")
     from . import raids
     raids.install(store)
+    from . import anniversaries
+    anniversaries.install(store)
     lock = open(cfg.state_dir / "worker.lock", "a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     with store.connection() as db:
@@ -169,6 +171,7 @@ async def run():
     async def maintenance():
         next_mute_check = 0
         next_health_check = 0
+        next_anniversary_check = 0
         while not client.is_closed():
             try:
                 if time.monotonic() >= next_health_check:
@@ -191,6 +194,12 @@ async def run():
                 elif archive:
                     await asyncio.to_thread(archive.flush, store)
                 await feed.tick()
+                if time.monotonic() >= next_anniversary_check:
+                    next_anniversary_check = time.monotonic() + 300
+                    try:
+                        await anniversaries.tick(cfg, store, api)
+                    except Exception:
+                        log.error("Membership anniversary check failed; inspect anniversary_delivery for uncertain posts")
             except Exception:
                 log.error("Archive or action processing unavailable; no new action dispatched")
             await asyncio.sleep(5)
