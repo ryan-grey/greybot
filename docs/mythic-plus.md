@@ -161,6 +161,10 @@ Role icons appear immediately before character names on cards and web standings.
 For highest-key standings and dungeon records, the icon comes from the selected
 run's roster specialization: tank, healer, or damage. Switching roles in another
 run cannot change that record's icon. Record alerts label both the new and previous
-groups using their respective runs. Aggregate IO and run-count standings do not
-infer a hybrid class's role; Mage, Rogue, Hunter, and Warlock can safely show damage
-without run-specific data. Unknown hybrid roles remain blank.
+groups using their respective runs. Aggregate IO and run-count standings use the
+character's highest positive tank, healer, or damage IO score at the reporting
+cutoff. Equal scores prefer damage, then tank, then healer. Role scores are stored
+with each score observation. Without role scores, Mage, Rogue, Hunter, and Warlock
+can safely show damage; unknown hybrid roles remain blank. Historical recaps with
+no archived role breakdown may use a separately labelled current-season observation
+for icons only, without changing their historical scores or rankings.

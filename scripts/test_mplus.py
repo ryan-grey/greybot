@@ -45,6 +45,23 @@ class Repo:
 
 
 class MythicTests(unittest.TestCase):
+    def test_aggregate_highest_role_score_preserves_run_role(self):
+        r=run(guild=5);r['roster'][0].update({'class':'Paladin','role':'tank'})
+        roles={KEYS[0]:{'tank':2000,'healer':1000,'dps':3000}}
+        pairs={KEYS[0]:{'start':100,'end':200,'season_start':'a','season_end':'a'}}
+        result=mplus.summarize([r],pairs,START,END,overall_scores=[{**r['roster'][0],'score':3000}],role_scores=roles)
+        for category in ('highest','guild_highest'):
+            self.assertEqual(next(p for p in result['boards'][category] if p['key']==KEYS[0])['role'],'tank')
+        for category in ('ten','guild_timed','score','overall'):
+            self.assertEqual(next(p for p in result['boards'][category] if p['key']==KEYS[0])['role'],'dps')
+        self.assertEqual(mplus.score_role({'tank':3000,'healer':3001,'dps':2999},'Paladin'),'healer')
+        self.assertEqual(mplus.score_role({'tank':3000,'dps':3000},'Paladin'),'dps')
+        self.assertIsNone(mplus.score_role({'tank':0,'dps':float('nan')},'Paladin'))
+        previous=copy.deepcopy(r);previous['roster'][0]['role']='healer'
+        alert=mplus_records.payload(r,previous)
+        self.assertIn('🛡️ Aster',alert['embeds'][0]['description'])
+        self.assertIn('💚 Aster',next(f['value'] for f in alert['embeds'][0]['fields'] if f['name']=='Previous guild record holders'))
+
     def test_role_comes_from_selected_key_and_not_aggregate_or_latest_spec(self):
         paladin={**PEOPLE[0],'class':'Paladin','spec':{'name':'Protection','role':'tank'}}
         self.assertEqual(mplus.run_person(paladin)['role'],'tank')
@@ -118,9 +135,10 @@ class MythicTests(unittest.TestCase):
         repo.put('ROSTER',{'members':[mplus.person(p) for p in PEOPLE]})
         for i in range(3):
             repo.put(f'SCORE#{END.date()}#{KEYS[i]}',{'key':KEYS[i],'at':(END-timedelta(minutes=5 if i!=1 else 65)).isoformat(),
-                     'season':'season-test' if i!=2 else 'season-old','score':3000})
+                     'season':'season-test' if i!=2 else 'season-old','score':3000,'role_scores':{'tank':3000,'healer':1000,'dps':2000}})
         result=mplus_collect.weekly_data(repo,NOW)
         self.assertEqual([p['key'] for p in result['boards']['overall']],[KEYS[0]])
+        self.assertEqual(result['boards']['overall'][0]['role'],'tank')
 
     def test_record_page_escapes_names_and_links_actual_runs(self):
         r=run();r['roster'][0]['name']='<script>alert(1)</script>'
@@ -226,7 +244,7 @@ class MythicTests(unittest.TestCase):
              "mythic_level":12,"clear_time_ms":1000,"keystone_time_ms":2000,
              "completed_at":(NOW-timedelta(hours=1)).isoformat(),"dungeon":{"name":"Test"},
              "roster":[{"character":p} for p in PEOPLE]}
-        profile={'mythic_plus_scores_by_season':[{'season':'season-test','scores':{'all':1234}}],
+        profile={'mythic_plus_scores_by_season':[{'season':'season-test','scores':{'all':1234,'tank':100,'healer':200,'dps':1234}}],
                  'mythic_plus_recent_runs':[{'url':'https://raider.io/mythic-plus-runs/season-test/1',
                                             'completed_at':raw['completed_at']}]}
         source=Mock(side_effect=lambda path,**kw: copy.deepcopy(raw if path.endswith('run-details') else profile))
@@ -238,6 +256,7 @@ class MythicTests(unittest.TestCase):
         self.assertEqual(result['new_runs'],1)
         self.assertEqual(len(repo.prefix('RUN#')),1)
         self.assertEqual(len(repo.prefix('SCORE#')),5)
+        self.assertEqual(repo.prefix('SCORE#')[0]['role_scores'],{'tank':100,'healer':200,'dps':1234})
         self.assertEqual(sum(c.args[0].endswith('run-details') for c in source.call_args_list),1)
 
     def test_failed_profile_preserves_score_and_advances_cursor(self):

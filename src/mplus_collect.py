@@ -56,6 +56,7 @@ def collect(repo, cfg, now, budget=35, source=fetch):
                 if scores:
                     repo.put(f'SCORE#{period.date()}#{char["key"]}', {"key":char["key"],"at":now.isoformat(),
                         "season":scores[0]["season"],"score":scores[0]["scores"]["all"],
+                        "role_scores":{role:scores[0]['scores'].get(role,0) for role in ('tank','healer','dps')},
                         "source_at":profile.get("last_crawled_at")})
                 refs = {}
                 for field in ("mythic_plus_recent_runs","mythic_plus_weekly_highest_level_runs","mythic_plus_best_runs"):
@@ -141,7 +142,10 @@ def weekly_data(repo, now):
         if (key in members and season and row.get('season') == season['slug']
                 and 0 <= (end-mplus.stamp(row['at'])).total_seconds() <= 3600):
             overall.append({**members[key],'score':row['score']})
-    result = mplus.summarize(runs,snapshots,start,end,overall_scores=overall)
+    roles={key:row.get('role_scores',{}) for key,row in last.items()
+           if season and row.get('season')==season['slug']
+           and 0 <= (end-mplus.stamp(row['at'])).total_seconds() <= 3600}
+    result = mplus.summarize(runs,snapshots,start,end,overall_scores=overall,role_scores=roles)
     result['season']=season
     if archive_note:result['score_note']=archive_note+' '+result['score_note']
     meta=repo.get("COLLECTOR") or {}

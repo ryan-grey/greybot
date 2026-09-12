@@ -80,6 +80,19 @@ def class_role(klass):
     return 'dps' if klass in ('Mage','Rogue','Hunter','Warlock') else None
 
 
+def score_role(scores, klass):
+    """Highest positive role IO; ties prefer damage, tank, then healer."""
+    valid = {}
+    for role in ('dps', 'tank', 'healer'):
+        try:
+            value = float((scores or {}).get(role, 0))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value) and value > 0:
+            valid[role] = value
+    return max(valid, key=valid.get) if valid else class_role(klass)
+
+
 def run_person(character):
     result=person(character)
     spec=character.get('spec') or {}
@@ -128,7 +141,7 @@ def _rank(rows, metric):
     return rows
 
 
-def summarize(runs, snapshots, start, end, overall_scores=None):
+def summarize(runs, snapshots, start, end, overall_scores=None, role_scores=None):
     """snapshots contains explicit same-season start/end scores, not inferred zeros.
 
     Total IO delta is ranked only for characters with a qualifying guild run.
@@ -146,6 +159,8 @@ def summarize(runs, snapshots, start, end, overall_scores=None):
     timed = [r for r in eligible if r["timed"]]
     people = {p["key"]: p for r in eligible for p in r["roster"] if p["key"] in r["guild_members"]}
     boards = {key: [] for key, _ in CATEGORIES}
+    def aggregate_role(p):
+        return score_role((role_scores or {}).get(p['key']), p['class'])
     best = {}
     for r in timed:
         for key in r["guild_members"]:
@@ -158,7 +173,7 @@ def summarize(runs, snapshots, start, end, overall_scores=None):
     for category, selected in (("ten", [r for r in timed if r["level"] >= 10]),
                                ("guild_timed", [r for r in timed if len(r["guild_members"]) == 5])):
         counts = Counter(k for r in selected for k in r["guild_members"])
-        boards[category] = _rank([{**people[k], "role":class_role(people[k]['class']), "value": n, "detail": "timed runs"} for k, n in counts.items()], "value")
+        boards[category] = _rank([{**people[k], "role":aggregate_role(people[k]), "value": n, "detail": "timed runs"} for k, n in counts.items()], "value")
     all_guild = [r for r in timed if len(r["guild_members"]) == 5]
     guild_best={}
     for r in all_guild:
@@ -182,12 +197,12 @@ def summarize(runs, snapshots, start, end, overall_scores=None):
             continue
         gain = round(last - first, 1)
         if gain > 0:
-            boards["score"].append({**p, "role":class_role(p['class']), "value": gain, "detail": f"{first:,.1f} → {last:,.1f}"})
+            boards["score"].append({**p, "role":aggregate_role(p), "value": gain, "detail": f"{first:,.1f} → {last:,.1f}"})
     _rank(boards["score"], "value")
     for person in overall_scores or []:
         value=float(person['score'])
         if math.isfinite(value) and value >= 0:
-            boards['overall'].append({**person,'role':class_role(person['class']),'value':value,'detail':'Overall season IO'})
+            boards['overall'].append({**person,'role':aggregate_role(person),'value':value,'detail':'Overall season IO'})
     _rank(boards['overall'],'value')
     return {"start": start.isoformat(), "end": end.isoformat(), "boards": boards,
             "runs": sorted(eligible, key=lambda r:r["completed"], reverse=True),
