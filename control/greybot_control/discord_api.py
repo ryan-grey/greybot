@@ -1,6 +1,7 @@
 """Discord OAuth and REST access with live administrative authorization."""
 
 import asyncio
+import json
 from urllib.parse import quote
 
 import httpx
@@ -25,7 +26,7 @@ class DiscordAPI:
     async def close(self):
         await self.http.aclose()
 
-    async def request(self, method, path, *, body=None, reason=""):
+    async def request(self, method, path, *, body=None, reason="", files=None):
         headers = {"Authorization": "Bot " + self.cfg.bot_token,
                    "User-Agent": "greyBot/2.0"}
         if reason:
@@ -34,7 +35,8 @@ class DiscordAPI:
         # moderation write is ambiguous; leave the job for manual reconciliation.
         for attempt in range(3):
             try:
-                response = await self.http.request(method, API + path, json=body, headers=headers)
+                payload = {'data': {'payload_json': json.dumps(body)}, 'files': files} if files else {'json': body}
+                response = await self.http.request(method, API + path, headers=headers, **payload)
             except httpx.HTTPError:
                 raise Unavailable("Discord request did not complete") from None
             if response.status_code == 429 and attempt < 2:

@@ -75,7 +75,7 @@ class RaidDiscordTests(unittest.TestCase):
                  "closingTime": 9999999999, "state": "open", "signUps": [
                      {"userId": "4", "name": "Original nickname", "className": "Tank"}]}
         card = service.card(self.cfg, {"id": "abc", "body": event}, {"4": {"name": "Unknown member"}})
-        self.assertEqual(card["embeds"][0]["fields"][0]["value"], "→ Original nickname")
+        self.assertEqual(card["embeds"][0]["fields"][0]["value"], "1. Original nickname")
 
     def test_numbered_spec_keys_are_only_cleaned_for_display(self):
         event={'title':'Raid','leaderId':'3','startTime':9999999999,'closingTime':9999999999,'state':'open',
@@ -99,7 +99,7 @@ class RaidDiscordTests(unittest.TestCase):
         self.assertNotIn(';',embed['description'].split('\n')[1])
         self.assertNotIn('confirmed',embed['description'])
         self.assertEqual(len(embed['fields']),11)
-        self.assertIn('→ Member0\n→ Member1',embed['fields'][0]['value'])
+        self.assertIn('1. Member0\n2. Member1',embed['fields'][0]['value'])
         self.assertTrue(all('\n\n' not in f['value'] for f in embed['fields']))
         self.assertIn('Healers',embed['fields'][1]['name'])
         self.assertEqual(embed['fields'][2],{'name':'\u200b','value':'\u200b','inline':False})
@@ -122,7 +122,7 @@ class RaidDiscordTests(unittest.TestCase):
         self.assertEqual(result["allowed_mentions"], {"parse": []})
         self.assertNotIn("@everyone", json.dumps(embed))
         self.assertNotIn("open roster", json.dumps(embed))
-        self.assertTrue(all(line.startswith('→ ') for f in embed['fields'] if f['name']!='\u200b' for line in f['value'].split('\n')))
+        self.assertTrue(all(line.split('. ',1)[0].isdigit() for f in embed['fields'] if f['name']!='\u200b' for line in f['value'].split('\n')))
         self.assertEqual(sum(len(f['value'].removesuffix('\n\u200b').split('\n')) for f in embed['fields']),300)
 
     def test_ambiguous_first_post_is_not_repeated(self):
@@ -146,3 +146,27 @@ class RaidDiscordTests(unittest.TestCase):
             asyncio.run(service.deliver_one(self.cfg, self.store, api, Archive()))
         self.assertEqual(api.calls, 1)
         self.assertEqual(raids.read(self.store, "1", eid)["delivery"], "unknown")
+
+    def test_image_refresh_edits_same_message_after_revision(self):
+        event = {**service.template(self.store, '1', 'standard'), 'title':'Example', 'description':'',
+                 'leaderId':'3','channelId':'2','startTime':9999999999,'closingTime':9999999999}
+        eid=raids.create(self.store,'1','3','image-test',event)
+        calls=[]
+        class API:
+            async def request(self,method,path,**kwargs):
+                calls.append((method,path,kwargs))
+                return {'id':'99'}
+        class Archive:
+            def flush(self,store): pass
+        async def directory(*args): return {'members':[]}
+        with patch.object(self.store,'pending',return_value=[]), patch('greybot_control.directory.Directory.get',directory), patch('greybot_control.raid_card.render',side_effect=[b'first',b'second']):
+            asyncio.run(service.deliver_one(self.cfg,self.store,API(),Archive()))
+            with self.store.connection() as db:
+                db.execute('UPDATE raid_events SET revision=revision+1 WHERE id=?',(eid,))
+            asyncio.run(service.deliver_one(self.cfg,self.store,API(),Archive()))
+        self.assertEqual([c[0] for c in calls],['POST','PATCH'])
+        self.assertEqual(calls[1][1],'/channels/2/messages/99')
+        for index,(_,_,kwargs) in enumerate(calls):
+            self.assertTrue(kwargs['body']['components'])
+            self.assertNotIn('fields',kwargs['body']['embeds'][0])
+            self.assertEqual(kwargs['files']['files[0]'][1],[b'first',b'second'][index])
