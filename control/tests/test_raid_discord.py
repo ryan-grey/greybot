@@ -147,7 +147,7 @@ class RaidDiscordTests(unittest.TestCase):
         self.assertEqual(api.calls, 1)
         self.assertEqual(raids.read(self.store, "1", eid)["delivery"], "unknown")
 
-    def test_image_refresh_edits_same_message_after_revision(self):
+    def test_text_refresh_edits_same_message_and_clears_old_image(self):
         event = {**service.template(self.store, '1', 'standard'), 'title':'Example', 'description':'',
                  'leaderId':'3','channelId':'2','startTime':9999999999,'closingTime':9999999999}
         eid=raids.create(self.store,'1','3','image-test',event)
@@ -159,7 +159,7 @@ class RaidDiscordTests(unittest.TestCase):
         class Archive:
             def flush(self,store): pass
         async def directory(*args): return {'members':[]}
-        with patch.object(self.store,'pending',return_value=[]), patch('greybot_control.directory.Directory.get',directory), patch('greybot_control.raid_card.render',side_effect=[b'first',b'second']):
+        with patch.object(self.store,'pending',return_value=[]), patch('greybot_control.directory.Directory.get',directory):
             asyncio.run(service.deliver_one(self.cfg,self.store,API(),Archive()))
             with self.store.connection() as db:
                 db.execute('UPDATE raid_events SET revision=revision+1 WHERE id=?',(eid,))
@@ -168,5 +168,7 @@ class RaidDiscordTests(unittest.TestCase):
         self.assertEqual(calls[1][1],'/channels/2/messages/99')
         for index,(_,_,kwargs) in enumerate(calls):
             self.assertTrue(kwargs['body']['components'])
-            self.assertNotIn('fields',kwargs['body']['embeds'][0])
-            self.assertEqual(kwargs['files']['files[0]'][1],[b'first',b'second'][index])
+            self.assertIn('fields',kwargs['body']['embeds'][0])
+            self.assertNotIn('image',kwargs['body']['embeds'][0])
+            self.assertNotIn('files',kwargs)
+            self.assertEqual(kwargs['body']['attachments'],[])

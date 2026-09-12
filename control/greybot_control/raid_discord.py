@@ -315,27 +315,16 @@ async def deliver_one(cfg, store, api, archive):
     from .directory import Directory
     directory = await Directory(cfg, store, api).get()
     payload = card(cfg, row, {p["id"]: p for p in directory["members"]})
-    files = None
-    try:
-        from .raid_card import render
-        png = await asyncio.to_thread(render, row['body'], {p['id']:p for p in directory['members']})
-        payload['embeds'][0].pop('fields', None)
-        payload['embeds'][0]['image'] = {'url':'attachment://raid-signup.png'}
-        payload['attachments'] = [{'id':0,'filename':'raid-signup.png','description':'Raid signup roster, numbered separately by role; full accessible roster available through the event details button.'}]
-        files = {'files[0]':('raid-signup.png',png,'image/png')}
-    except Exception:
-        # Keep signups usable if image rendering temporarily fails.
-        import logging
-        logging.getLogger(__name__).warning('Raid image unavailable; using text roster')
-        payload['attachments'] = []
+    # Clear any previous image when refreshing an existing signup post.
+    payload['attachments'] = []
     with store.connection() as db:
         db.execute("UPDATE raid_events SET delivery='sending' WHERE guild=? AND id=?", (cfg.guild_id, row["id"]))
     try:
         base = f"/channels/{row['body']['channelId']}/messages"
         if row["message"]:
-            result = await api.request("PATCH", base + "/" + row["message"], body=payload, **({'files':files} if files else {}))
+            result = await api.request("PATCH", base + "/" + row["message"], body=payload)
         else:
-            result = await api.request("POST", base, body={**payload, "nonce": row["id"], "enforce_nonce": True}, **({'files':files} if files else {}))
+            result = await api.request("POST", base, body={**payload, "nonce": row["id"], "enforce_nonce": True})
     except Exception:
         with store.connection() as db:
             db.execute("UPDATE raid_events SET delivery=? WHERE guild=? AND id=?",
