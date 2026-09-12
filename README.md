@@ -22,7 +22,18 @@ The private `anniversary_delivery` ledger reserves each member/year before sendi
 records the resulting message ID. Restarts cannot duplicate a celebration. An ambiguous
 delivery remains `unknown` (or `sending` after an interrupted process) for manual review,
 rather than risking a duplicate. A full-day outage skips that day's celebrations.
-No birthday information or anniversary roles are collected or assigned.
+No birthday information is collected.
+
+Optional year badges are enabled through the private `tenure_config` table and
+reconciled every five minutes. Members receive one cosmetic role for their completed
+years, with a small number icon (zero for members under one year). Badge colors follow
+WoW equipment quality: 0 grey, 1 white, 2 green, 3 blue, 4 purple, 5 and above orange. Roles have
+zero permissions, no color, no hoisting, and cannot be mentioned. Existing roles with
+icons (including GM and Officer) take precedence and their members are skipped.
+Only role IDs recorded in `tenure_roles` are managed; all unrelated roles are preserved.
+Role creation is reserved before sending, so an uncertain create requires manual
+reconciliation rather than creating duplicate roles. Badge icons require Discord's
+ROLE_ICONS server feature.
 
 ## Original raid-service reference
 

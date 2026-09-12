@@ -115,6 +115,8 @@ async def run():
     raids.install(store)
     from . import anniversaries
     anniversaries.install(store)
+    from . import tenure
+    tenure.install(store)
     lock = open(cfg.state_dir / "worker.lock", "a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     with store.connection() as db:
@@ -172,6 +174,7 @@ async def run():
         next_mute_check = 0
         next_health_check = 0
         next_anniversary_check = 0
+        next_tenure_check = 0
         while not client.is_closed():
             try:
                 if time.monotonic() >= next_health_check:
@@ -194,6 +197,12 @@ async def run():
                 elif archive:
                     await asyncio.to_thread(archive.flush, store)
                 await feed.tick()
+                if time.monotonic() >= next_tenure_check:
+                    next_tenure_check = time.monotonic() + 300
+                    try:
+                        await tenure.tick(cfg, store, api)
+                    except Exception:
+                        log.error("Membership year badge reconciliation failed")
                 if time.monotonic() >= next_anniversary_check:
                     next_anniversary_check = time.monotonic() + 300
                     try:
