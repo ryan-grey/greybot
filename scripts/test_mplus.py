@@ -45,6 +45,15 @@ class Repo:
 
 
 class MythicTests(unittest.TestCase):
+    def test_record_alert_names_both_guild_groups(self):
+        old=run(guild=2);new=run(2,guild=3,level=11)
+        old['roster'][0]['name']='PreviousTank'
+        body=mplus_records.payload(new,old,'https://discord.com/channels/1/2/3')
+        self.assertIn('Aster, Birch, Cedar',body['embeds'][0]['description'])
+        prior=next(f for f in body['embeds'][0]['fields'] if f['name']=='Previous guild record holders')
+        self.assertEqual(prior['value'],'PreviousTank, Birch')
+        self.assertNotIn('Dawn',str(body))
+
     def test_overall_io_includes_members_without_any_guild_run_and_caps_page(self):
         scores=[{**mplus.person(PEOPLE[0]),'key':str(i),'name':f'RankedCharacter{i:02}',
                  'score':3000-i} for i in range(25)]

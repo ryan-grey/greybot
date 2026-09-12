@@ -38,6 +38,8 @@ def payload(run, previous=None, board_url=None):
             {'name':'Time limit','value':timer(run['timer_ms']),'inline':True}]
     if previous:
         fields.append({'name':'Previous record','value':f'+{previous["level"]} · {timer(previous["elapsed_ms"])}','inline':True})
+        old_members=', '.join(clean(p['name']) for p in previous['roster'] if p['key'] in previous['guild_members'])
+        fields.append({'name':'Previous guild record holders','value':old_members or 'Unavailable','inline':False})
     embed={'title':'🏆 New Record Set','description':description,'fields':fields,'color':0x4493F8,
            'timestamp':run['completed'],'footer':{'text':'greyBot · Guild Mythic+ record'}}
     url=safe_url(run['url'])
