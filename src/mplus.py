@@ -100,12 +100,11 @@ def normalize_run(raw, guild_members, observed_at):
 
 def _rank(rows, metric):
     rows.sort(key=lambda r: (-r[metric], r.get("name", "").casefold(), r["key"]))
-    prior = None
+    unique={}
+    for row in rows:unique.setdefault(row['key'],row)
+    rows[:]=unique.values()
     for i, row in enumerate(rows, 1):
-        if row[metric] != prior:
-            rank = i
-        row["rank"] = rank
-        prior = row[metric]
+        row["rank"] = i
     return rows
 
 
@@ -141,9 +140,15 @@ def summarize(runs, snapshots, start, end, overall_scores=None):
         counts = Counter(k for r in selected for k in r["guild_members"])
         boards[category] = _rank([{**people[k], "value": n, "detail": "timed runs"} for k, n in counts.items()], "value")
     all_guild = [r for r in timed if len(r["guild_members"]) == 5]
-    boards["guild_highest"] = _rank([{"key":r["id"], "name":r["dungeon"], "value":r["level"],
-        "detail": ", ".join(p["name"] for p in r["roster"]), "url":r["url"], "roster":r["roster"]}
-        for r in all_guild], "value")
+    guild_best={}
+    for r in all_guild:
+        for key in r['guild_members']:
+            previous=guild_best.get(key)
+            if previous is None or (r['level'],-r['elapsed_ms']/r['timer_ms'],r['id']) > (previous['level'],-previous['elapsed_ms']/previous['timer_ms'],previous['id']):
+                guild_best[key]=r
+    boards["guild_highest"] = _rank([{**people[key], "value":r["level"],
+        "detail":r['dungeon'], "url":r["url"], "roster":r["roster"]}
+        for key,r in guild_best.items()], "value")
     unavailable = 0
     for key, p in people.items():
         pair = snapshots.get(key, {})
@@ -170,7 +175,7 @@ def summarize(runs, snapshots, start, end, overall_scores=None):
             "score_unavailable":unavailable,
             "coverage": "Observed runs; source APIs can omit runs or update late. Guild membership is captured when a run is first collected.",
             "score_note": "Weekly IO gain requires a 2+ guild-member run and comparable weekly snapshots; includes score earned in other groups. Highest overall IO includes all guild characters with a fresh end-of-week score, regardless of group participation. Missing or cross-season scores are not ranked.",
-            "ranking_note": "Character-based standings; alts are separate. Equal values share a rank, with names ordering ties; the card shows three entries per category and the full page shows at most 20 per category."}
+            "ranking_note": "One entry per character per category; alts are separate. Positions are consecutive and unique, with names ordering equal values. The card shows three entries per category and the full page shows at most 20 per category."}
 
 
 def display_value(category, row):

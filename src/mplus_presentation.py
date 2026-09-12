@@ -8,6 +8,16 @@ import recap_card
 import recap_page
 
 
+def archived_gain(summary):
+    season=summary.get('season') or {}
+    return season.get('slug') == 'season-mn-2' and 1 <= season.get('week',0) <= 4
+
+
+def categories(summary):
+    return [(key,'Archived IO gain' if key=='score' and archived_gain(summary) else title)
+            for key,title in mplus.CATEGORIES]
+
+
 def label(summary):
     first = mplus.stamp(summary["start"]).astimezone(mplus.EASTERN)
     last = mplus.stamp(summary["end"]).astimezone(mplus.EASTERN)
@@ -18,13 +28,14 @@ def label(summary):
 
 def card(summary, guild):
     cells = []
-    for key, title in mplus.CATEGORIES:
+    for key, title in categories(summary):
         rows = [(r["name"], r.get("class"), r.get("detail") or r.get("server"),
                  mplus.display_value(key, r), None, None, None) for r in summary["boards"][key][:3]]
         empty = "Scores unavailable" if key == 'overall' else "Baseline not available" if key == "score" and summary["score_unavailable"] else "No qualifying results"
         cells.append((title, None, rows, empty, None))
     chips = [f'{summary["timed_count"]} timed runs', f'{summary["members"]} characters',
              f'{summary["guild_count"]} full-guild runs', 'Observed runs · full details on website']
+    if archived_gain(summary):chips[-1]='Archived IO gain · Approximate'
     return recap_card.render({"bossLabels":chips}, guild_name=guild, night_text=label(summary),
         raid_name=(summary.get('season') or {}).get('name','Weekly Mythic+')+' · Guild runs + overall IO',
         cells=cells, kicker="MYTHIC+ RECAP")
@@ -38,7 +49,7 @@ def safe_url(value):
 def page(summary, guild):
     esc = html.escape
     columns = []
-    for key, title in mplus.CATEGORIES:
+    for key, title in categories(summary):
         entries = []
         for row in summary["boards"][key][:20]:
             name = esc(row["name"])
@@ -51,6 +62,8 @@ def page(summary, guild):
             who += f'<small>{esc(row.get("detail") or row.get("server") or "")}</small>'
             entries.append((who, esc(mplus.display_value(key, row))))
         empty = "No qualifying results" if key != "score" else "No positive change with comparable weekly baselines"
+        if key=='score' and archived_gain(summary):
+            empty='Archived baseline unavailable' if summary['score_unavailable'] else 'No positive archived IO gain'
         columns.append(recap_page._column(esc(title), entries, empty))
     runs = []
     for run in summary["runs"]:
@@ -90,7 +103,7 @@ def discord_post(summary, guild, page_url, card_url=None):
             text = text.replace(ch, "\\" + ch)
         return text[:110]
     fields = []
-    for key, title in mplus.CATEGORIES:
+    for key, title in categories(summary):
         rows = summary["boards"][key][:3]
         text = "\n".join(f'{r["rank"]}. {clean(r["name"])} — **{mplus.display_value(key,r)}**' for r in rows)
         fields.append({"name":title, "value":text or ("Baseline unavailable" if key == "score" and summary["score_unavailable"] else "No qualifying results"), "inline":True})

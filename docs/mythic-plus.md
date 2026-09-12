@@ -30,15 +30,25 @@ Primer palette and page stylesheet. No new host is required.
 - Highest overall IO: every guild character with a fresh same-season score at the
   reporting cutoff, even without any guild-group runs that week.
 - Timed +10 runs: qualifying timed completions at level 10 or higher per character.
-- All-guild highest: highest timed runs whose entire five-character party is guild.
-  Show each complete party on the website.
+- All-guild highest: each character's best timed key whose entire five-character
+  party is guild; one row per character, with the dungeon and source run link.
 - All-guild runs: each character's timed completions in full-guild groups.
 - Alts remain separate characters; no unverified Discord/account-name matching.
-- Equal values share competition rank; deterministic name ordering breaks display
-  ties. The Discord card shows up to three entries; each website leaderboard is
+- Positions are consecutive and unique; deterministic name ordering breaks display
+  ties. Each character appears once per category. The Discord card shows up to three entries; each website leaderboard is
   capped at 20 entries, including ties (deterministic name ordering at the cutoff).
 
 ## IO calculation
+
+For Midnight Season 2 Weeks 1–4, label the gain category **Archived IO gain**.
+Weeks 1–3 use recovered addon observations where comparable; Week 1 lacks a launch
+baseline and remains unavailable. Week 4 compares the September 8 integer addon
+baseline with the fresh September 15 live cutoff score, explicitly marked
+approximate. Store imported observations under `ARCHIVED_SCORE#2026-09-08`, never
+in the live SCORE partition. Week 5 and later use **Weekly IO gain**, requiring
+fresh live observations at both weekly boundaries; no archived fallback.
+Recap HTML requires cache revalidation, and updated links carry a format version
+so browsers do not reuse a previously cached obsolete page.
 
 Overall weekly IO change and gains earned only in qualifying guild runs are not
 the same number. The approved calculation compares overall score snapshots for

@@ -117,6 +117,24 @@ def weekly_data(repo, now):
     if season:
         runs=[r for r in runs if r['season']==season['slug']]
         snapshots={k:v for k,v in snapshots.items() if v['season_end']==season['slug']}
+    archive_note=None
+    if season and season['slug']=='season-mn-2' and season['week']==4:
+        # The first collected boundary is Sep 15. Sep 8 exists only in the addon
+        # archive; keep that provenance separate from exact live SCORE records.
+        archived=repo.get('ARCHIVED_SCORE#2026-09-08') or {}
+        snapshots={}
+        if archived.get('season')==season['slug'] and archived.get('at'):
+            for key,row in last.items():
+                baseline=archived.get('scores',{}).get(key)
+                if (baseline is not None and row.get('season')==season['slug']
+                        and 0 <= (end-mplus.stamp(row['at'])).total_seconds() <= 3600):
+                    snapshots[key]={'start':baseline,'end':row['score'],
+                                    'season_start':season['slug'],'season_end':season['slug']}
+            archive_note=('Archived IO gain is approximate: integer addon scores from '+archived['at']+
+                          ' compared with our live September 15 cutoff observations; '
+                          'this is not an exact Tuesday 10am-to-10am score interval. Missing archived characters are omitted.')
+        else:
+            archive_note='Archived IO gain is unavailable because the September 8 archive baseline is missing.'
     members={p['key']:p for p in (repo.get('ROSTER') or {}).get('members',[])}
     overall=[]
     for key,row in last.items():
@@ -125,8 +143,9 @@ def weekly_data(repo, now):
             overall.append({**members[key],'score':row['score']})
     result = mplus.summarize(runs,snapshots,start,end,overall_scores=overall)
     result['season']=season
+    if archive_note:result['score_note']=archive_note+' '+result['score_note']
     meta=repo.get("COLLECTOR") or {}
     result["coverage"] += " Collection began " + str(meta.get("first_observed","not yet")) + "."
-    result["coverage"] += " Scores are the latest API observations before each boundary, within one hour; upstream updates can lag."
+    result["coverage"] += " Live score observations are taken before each boundary, within one hour; separately labelled archive scores have older timestamps and integer precision. Upstream updates can lag."
     result["collector_at"] = meta.get("at")
     return result

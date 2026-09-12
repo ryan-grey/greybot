@@ -42,7 +42,7 @@ def handle(event, cfg, now, context=None):
         return {"ok":True,"skipped":"already_claimed","state":previous["state"]}
     path = "mplus/"+key
     base = cfg["recap_page_url"].rstrip("/")
-    page_url, image_url = base+"/"+path+"/", base+"/"+path+"/card.png"
+    page_url, image_url = base+"/"+path+"/?format=io-v2", base+"/"+path+"/card.png"
     page = mplus_presentation.page(summary,cfg["guild_name"])
     image = mplus_presentation.card(summary,cfg["guild_name"])
     if not image:
@@ -52,7 +52,7 @@ def handle(event, cfg, now, context=None):
     if not repo.put("POST#"+key,{"state":"preparing","at":now.isoformat()},once=True):
         return {"ok":True,"skipped":"already_claimed"}
     try:
-        publish_bytes(cfg,path+"/index.html",page.encode(),"text/html; charset=utf-8")
+        publish_bytes(cfg,path+"/index.html",page.encode(),"text/html; charset=utf-8",cache='no-cache, max-age=0, must-revalidate')
         publish_bytes(cfg,path+"/card.png",image,"image/png")
         repo.put("POST#"+key,{"state":"sending","at":now.isoformat(),"url":page_url})
         result=discord.post_to({"bot_token":cfg["bot_token"],"channel":channel},

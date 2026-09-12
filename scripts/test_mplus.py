@@ -45,6 +45,38 @@ class Repo:
 
 
 class MythicTests(unittest.TestCase):
+    def test_every_category_has_unique_positions_and_characters(self):
+        scores=[{**mplus.person(p),'score':3000} for p in PEOPLE]
+        summary=mplus.summarize([run(1,guild=5),run(2,guild=5,level=11)],
+            {k:{'start':100,'end':200,'season_start':'a','season_end':'a'} for k in KEYS},START,END,
+            overall_scores=scores+scores)
+        for key,rows in summary['boards'].items():
+            self.assertEqual(len(rows),5,key)
+            self.assertEqual(len({r['key'] for r in rows}),5,key)
+            self.assertEqual([r['rank'] for r in rows],list(range(1,6)),key)
+        self.assertEqual([r['value'] for r in summary['boards']['guild_highest']],[11]*5)
+
+    def test_archive_gain_week_four_and_live_only_week_five(self):
+        repo=Repo();seasons=copy.deepcopy(SEASONS);seasons[0]['slug']='season-mn-2'
+        repo.put('SEASONS',{'items':seasons,'region':'us'})
+        repo.put('ROSTER',{'members':[mplus.person(p) for p in PEOPLE]})
+        r=run(completed=NOW-timedelta(days=1));r['season']='season-mn-2'
+        repo.put('RUN#2026-09-14#1',r)
+        repo.put('ARCHIVED_SCORE#2026-09-08',{'season':'season-mn-2','at':'2026-09-08T07:41:38Z','scores':{KEYS[0]:2000}})
+        repo.put('SCORE#2026-09-15#'+KEYS[0],{'key':KEYS[0],'at':(NOW-timedelta(minutes=10)).isoformat(),'score':2200.5,'season':'season-mn-2'})
+        week4=mplus_collect.weekly_data(repo,NOW)
+        self.assertEqual(week4['boards']['score'][0]['value'],200.5)
+        self.assertIn('approximate',week4['score_note'])
+        self.assertEqual(dict(mplus_presentation.categories(week4))['score'],'Archived IO gain')
+        next_week=NOW+timedelta(days=7);r=run(2);r['completed']=(next_week-timedelta(days=1)).isoformat();r['observed']=next_week.isoformat();r['season']='season-mn-2'
+        repo.put('RUN#2026-09-21#2',r)
+        repo.put('SCORE#2026-09-22#'+KEYS[0],{'key':KEYS[0],'at':(next_week-timedelta(minutes=10)).isoformat(),'score':2300.5,'season':'season-mn-2'})
+        week5=mplus_collect.weekly_data(repo,next_week)
+        self.assertEqual(week5['boards']['score'][0]['value'],100.0)
+        self.assertEqual(dict(mplus_presentation.categories(week5))['score'],'Weekly IO gain')
+        del repo.data['SCORE#2026-09-15#'+KEYS[0]]
+        self.assertEqual(mplus_collect.weekly_data(repo,next_week)['boards']['score'],[])
+
     def test_record_alert_names_both_guild_groups(self):
         old=run(guild=2);new=run(2,guild=3,level=11)
         old['roster'][0]['name']='PreviousTank'
@@ -301,7 +333,7 @@ class MythicTests(unittest.TestCase):
 
     def test_ties_keep_rank(self):
         s=mplus.summarize([run(guild=5)],{},START,END)
-        self.assertEqual([r['rank'] for r in s['boards']['ten']],[1]*5)
+        self.assertEqual([r['rank'] for r in s['boards']['ten']],list(range(1,6)))
         text=mplus_presentation.page(s,'Example Guild')
         self.assertIn('Ember',text)
         payload=mplus_presentation.discord_post(s,'Example Guild','https://example.org/recap/')
