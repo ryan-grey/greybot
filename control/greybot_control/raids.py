@@ -108,6 +108,10 @@ def validate_event(event):
 def create(store, guild, actor, action_id, event):
     """Caller must authorize creation; retries return the same created event."""
     event = copy.deepcopy(event)
+    # This raid channel always requires class/spec signup, including web-created events.
+    if str(event.get("channelId")) == "1480026658705637516" and guild == "946663011991556117":
+        from .raid_discord import template
+        event.update(template(store, guild, "wowretail1"))
     event.setdefault("state", "open")
     event.setdefault("signUps", [])
     event.setdefault("advancedSettings", {})

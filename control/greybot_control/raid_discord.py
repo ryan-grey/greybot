@@ -295,7 +295,13 @@ def card(cfg, row, profiles):
         controls.append({"type": 1, "components": [button("Status", "status", row["id"]),
                          button("Note", "note", row["id"]), button("Withdraw", "withdraw", row["id"])]})
     controls.append({"type": 1, "components": [{"type": 2, "style": 5, "label": "Full roster & event details", "url": cfg.origin + "/raids#" + row["id"]}]})
-    return {"embeds": [embed], "components": controls, "allowed_mentions": {"parse": []}}
+    payload = {"embeds": [embed], "components": controls, "allowed_mentions": {"parse": []}}
+    if cfg.guild_id == "946663011991556117" and str(event.get("channelId")) == "1480026658705637516":
+        payload["content"] = "<@&1062516636868952065>"
+        # Tag every card, but notify only when the event is first published.
+        if not row.get("message"):
+            payload["allowed_mentions"]["roles"] = ["1062516636868952065"]
+    return payload
 
 
 async def deliver_one(cfg, store, api, archive):

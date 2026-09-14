@@ -45,6 +45,10 @@ class Repo:
 
 
 class MythicTests(unittest.TestCase):
+    def setUp(self):
+        artwork = patch('mplus_records.dungeon_artwork', return_value={})
+        artwork.start()
+        self.addCleanup(artwork.stop)
     def test_aggregate_highest_role_score_preserves_run_role(self):
         r=run(guild=5);r['roster'][0].update({'class':'Paladin','role':'tank'})
         roles={KEYS[0]:{'tank':2000,'healer':1000,'dps':3000}}
@@ -59,8 +63,8 @@ class MythicTests(unittest.TestCase):
         self.assertIsNone(mplus.score_role({'tank':0,'dps':float('nan')},'Paladin'))
         previous=copy.deepcopy(r);previous['roster'][0]['role']='healer'
         alert=mplus_records.payload(r,previous)
-        self.assertIn('🛡️ Aster',alert['embeds'][0]['description'])
-        self.assertIn('💚 Aster',next(f['value'] for f in alert['embeds'][0]['fields'] if f['name']=='Previous guild record holders'))
+        self.assertIn(mplus_records.mplus_role_icons.EMOJI['tank']+' Aster',alert['embeds'][0]['description'])
+        self.assertIn(mplus_records.mplus_role_icons.EMOJI['healer']+' Aster',next(f['value'] for f in alert['embeds'][0]['fields'] if f['name']=='Previous guild record holders'))
 
     def test_role_comes_from_selected_key_and_not_aggregate_or_latest_spec(self):
         paladin={**PEOPLE[0],'class':'Paladin','spec':{'name':'Protection','role':'tank'}}
@@ -113,10 +117,25 @@ class MythicTests(unittest.TestCase):
         old=run(guild=2);new=run(2,guild=3,level=11)
         old['roster'][0]['name']='PreviousTank'
         body=mplus_records.payload(new,old,'https://discord.com/channels/1/2/3')
-        self.assertIn('⚔️ Aster, ⚔️ Birch, ⚔️ Cedar',body['embeds'][0]['description'])
+        self.assertIn(', '.join(mplus_records.mplus_role_icons.EMOJI['dps']+' '+n for n in ('Aster','Birch','Cedar')),body['embeds'][0]['description'])
         prior=next(f for f in body['embeds'][0]['fields'] if f['name']=='Previous guild record holders')
-        self.assertEqual(prior['value'],'⚔️ PreviousTank, ⚔️ Birch')
+        self.assertEqual(prior['value'],', '.join(mplus_records.mplus_role_icons.EMOJI['dps']+' '+n for n in ('PreviousTank','Birch')))
         self.assertNotIn('Dawn',str(body))
+
+    def test_record_alert_includes_refreshed_leaderboard_image(self):
+        url = 'https://raids.example.test/mplus/records/new.png'
+        body = mplus_records.payload(run(), board_url='https://discord.com/channels/1/2/3', board_image=url)
+        self.assertEqual(body['embeds'][0]['image']['url'], url)
+        self.assertIn('/1/2/3', body['content'])
+        self.assertNotIn('image', mplus_records.payload(run(), board_image='javascript:bad')['embeds'][0])
+
+    def test_record_artwork_keeps_dungeon_label_and_separate_leaderboard(self):
+        art='https://cdn.raiderio.net/images/dungeons/expansion11/base/example.jpg'
+        board='https://raids.example.test/board.png'
+        body=mplus_records.payload(run(level=17),board_url='https://discord.com/channels/1/2/3',board_image=board,dungeon_art=art)
+        self.assertIn('Test Dungeon +17',body['embeds'][0]['title'])
+        self.assertEqual(body['embeds'][0]['image']['url'],art)
+        self.assertEqual(body['embeds'][1]['image']['url'],board)
 
     def test_overall_io_includes_members_without_any_guild_run_and_caps_page(self):
         scores=[{**mplus.person(PEOPLE[0]),'key':str(i),'name':f'RankedCharacter{i:02}',
@@ -210,7 +229,7 @@ class MythicTests(unittest.TestCase):
         self.assertEqual(post.call_count,2)
         self.assertEqual(repo.get('RECORDS')['best'][best]['level'],11)
         payload=post.call_args.args[1]
-        self.assertIn('⚔️ Aster, ⚔️ Birch',payload['embeds'][0]['description'])
+        self.assertIn(', '.join(mplus_records.mplus_role_icons.EMOJI['dps']+' '+n for n in ('Aster','Birch')),payload['embeds'][0]['description'])
         self.assertNotIn('Cedar',payload['embeds'][0]['description'])
         self.assertEqual(payload['allowed_mentions'],{'parse':[]})
         self.assertEqual(mplus_records.timer(123456),'2:03.456')

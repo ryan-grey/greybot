@@ -35,6 +35,8 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 
 cp "$ROOT/src/"*.py "$OUT/"
+mkdir -p "$OUT/role-icons"
+cp "$ROOT/assets/role-icons/"*.png "$OUT/role-icons/"
 
 # PyNaCl for signature verification, Pillow for drawing the first-kill card. Both are
 # native, so both are pulled as linux/aarch64 wheels rather than whatever this laptop

@@ -601,9 +601,13 @@ two teams in Warcraft Logs would close it outright.
 
 Prog and Meer's Raid end at midnight Eastern Tuesday and Thursday nights, so their recaps
 fire Wednesday and Friday at 12:15am Eastern, 15 minutes after the scheduled end.
-The shared schedule posts to `#progbot` and `#meerbots`; Saturday Raid keeps its separate
+The shared schedule posts to `#progbot` and `#meerbot`; Saturday Raid keeps its separate
 schedule. This is a fixed clock schedule, not a detector for raids ending early or late.
 Parse scores reflect the data available at posting time and may change afterward.
+
+Channel names here are display labels. Raid delivery reads each registered tenant's
+`channelId`; Mythic+ recaps, record alerts, and the pinned board use `MPLUS_CHANNEL_ID`.
+Renaming a Discord channel does not change either destination or require a deployment.
 
 ```
 cron(15 0 ? * WED,FRI *)   timezone America/New_York
@@ -623,7 +627,7 @@ cannot be re-posted as Wednesday.
 ## A second raid team in the same server: Meer's Raid
 
 Scrambled runs more than one raid team, and the second one wanted the same bot in its
-own channel. **Meer's Raid** posts to `#meerbots`, announces first kills on **Normal and
+own channel. **Meer's Raid** posts to `#meerbot`, announces first kills on **Normal and
 Heroic**, and gets a silver *"cleared Normal"* card and a gold AOTC card, both pinging
 **Raiders**. Live since 2026-09-04.
 
@@ -681,18 +685,19 @@ safe because nobody else in the guild files a Saturday report: Meerclar's Saturd
 are personal and never appear under the guild. A guild-sourced team without raid days is
 refused by `register-team.py`, because it would be the guild announced twice.
 
-**Its recap fires at 1:00 AM Eastern on Sunday**, from its own schedule
-`ryangrey-greybot-recap-saturday-raid` (`cron(0 1 ? * SUN *)`) whose input names the team —
+**Its recap fires at 11:15 PM Eastern on Saturday**, fifteen minutes after the current
+11 PM scheduled raid end, from its own schedule
+`ryangrey-greybot-recap-saturday-raid` (`cron(15 23 ? * SAT *)`) whose input names the team —
 `{"mode":"recap","team":"saturday-raid"}` — so the guild and Meer's Raid do not run at that
-hour. It was 11:30 PM Saturday for one evening; the raid runs to 12:20–12:35 AM, so that
-would have recapped the night mid-raid and claimed it. The eighteen-hour lookback from
-1 AM reaches back to 7 AM Saturday, and the night is keyed on the report's Saturday start. The shared Wednesday/Friday schedule still runs for it and finds
+hour. The schedule uses `America/New_York` for daylight-saving changes. Its eighteen-hour
+lookback reaches back to 5:15 AM Saturday, and the night is keyed on the report's Saturday
+start. The shared Wednesday/Friday schedule still runs for it and finds
 nothing, by the raid-day filter. Its page lives under `/saturday-raid/<night>/`.
 
 ```sh
 AWS_PROFILE=infra scripts/register-team.py --table ryangrey-greybot \
     --guild us/proudmoore/Scrambled --discord-guild <server id> \
-    --team meers-raid --name "Meer's Raid" --channel <#meerbots id> \
+    --team meers-raid --name "Meer's Raid" --channel <#meerbot id> \
     --wcl-user <Warcraft Logs user id> --raid-days tue,thu \
     --difficulties normal,heroic --role <Raiders role id> --apply
 ```

@@ -4,7 +4,7 @@
     .venv/bin/python scripts/build-site-shot.py \
         --card https://raids.ryangrey.dev/cards/the-venomous-abyss/vashnik-the-malignant.png \
         --card https://raids.ryangrey.dev/cards/the-venomous-abyss/meers-raid/normal/nekzali-the-soulcoiler.png \
-        --card ~/Documents/greybot-assets/aotc-card.png \
+        --card ~/Documents/Brand/greyBot/Screenshots/aotc-card.png \
         --page recap-dark.png --out greybot-cards.png
 
 Left column: three of the bot's own drawn cards, stacked, exactly as they were posted --

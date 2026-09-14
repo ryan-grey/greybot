@@ -2,12 +2,22 @@
 import time
 import hashlib
 import os
+from urllib.parse import urlsplit
+from functools import lru_cache
 
 import discord
 import mplus
+import mplus_role_icons
 from mplus_presentation import safe_url
 
 QUEUE='RECORD_CANDIDATE#'
+
+@lru_cache(maxsize=4)
+def dungeon_artwork(season):
+    from mplus_collect import fetch
+    data = fetch('mythic-plus/static-data', expansion_id=int(os.environ.get('MPLUS_EXPANSION_ID', '11')))
+    current = next(s for s in data['seasons'] if s['slug'] == season)
+    return {d['name']: d['background_image_url'] for d in current['dungeons']}
 
 
 def record_key(run):
@@ -26,14 +36,14 @@ def timer(milliseconds):
     return f'{minutes}:{seconds:02d}.{ms:03d}'
 
 
-def payload(run, previous=None, board_url=None):
+def payload(run, previous=None, board_url=None, board_image=None, dungeon_art=None):
     def clean(value):
         value=str(value).replace('@','＠')
         for char in ('\\','*','_','`','~','|','[',']'):
             value=value.replace(char,'\\'+char)
         return value
     def member(p):
-        return (discord.ROLE_EMOJI.get(p.get('role') or mplus.class_role(p.get('class')),'')+' '+clean(p['name'])).strip()
+        return (mplus_role_icons.EMOJI.get(p.get('role') or mplus.class_role(p.get('class')),'')+' '+clean(p['name'])).strip()
     members=', '.join(member(p) for p in run['roster'] if p['key'] in run['guild_members'])
     description=f'New Record Set by **{members}**\n**{clean(run["dungeon"])} +{run["level"]}** · **{timer(run["elapsed_ms"])}**'
     fields=[{'name':'Guild members','value':f'{len(run["guild_members"])}/5','inline':True},
@@ -54,6 +64,18 @@ def payload(run, previous=None, board_url=None):
         result['content'] = f'🏆 [Updated dungeon-record card]({board_url})'
         result.setdefault('components', [{'type':1,'components':[]}])[0]['components'].insert(0,
             {'type':2,'style':5,'label':'Pinned record card','url':board_url})
+    if board_image:
+        image_url = urlsplit(board_image)
+        if image_url.scheme == 'https' and image_url.hostname and not image_url.username and not image_url.password:
+            embed['image'] = {'url': board_image}
+    if dungeon_art:
+        parsed = urlsplit(dungeon_art)
+        if parsed.scheme == 'https' and parsed.netloc == 'cdn.raiderio.net' and parsed.path.startswith('/images/dungeons/'):
+            embed['title'] = f'🏆 New Record Set · {run["dungeon"]} +{run["level"]}'
+            if embed.get('image'):
+                result['embeds'].append({'title':'Updated season leaderboard', 'url':board_url,
+                                         'color':0x4493F8, 'image':embed['image']})
+            embed['image'] = {'url':dungeon_art}
     return result
 
 
@@ -90,9 +112,11 @@ def process(repo, cfg, channel, now, budget=35, post=discord.post_to):
             if better and os.environ.get('MPLUS_RECORD_BOARD_ENABLED') == '1':
                 updated={**state,'best':{**state['best'],key:run}}
                 board_url=sync(repo,cfg,channel,updated,now)
+            art = dungeon_artwork(run['season']).get(run['dungeon']) if announce else None
             if announce and repo.put(claim,{'state':'sending','at':now.isoformat(),'run':run['id']},once=True):
                 try:
-                    result=post({'bot_token':cfg['bot_token'],'channel':channel},payload(run,previous,board_url),timeout=8,max_attempts=1)
+                    board = repo.get('RECORD_BOARD#' + channel) or {}
+                    result=post({'bot_token':cfg['bot_token'],'channel':channel},payload(run,previous,board_url,board.get('image') if board_url else None,art),timeout=8,max_attempts=1)
                     repo.put(claim,{'state':'posted','at':now.isoformat(),'run':run['id'],
                                    'message':str(getattr(result,'message_id',''))})
                     count+=1

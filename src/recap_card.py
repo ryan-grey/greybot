@@ -214,6 +214,14 @@ class _Canvas:
 
     def glyph(self, role, x, y, size):
         """One of the page's role glyphs, `size` CSS px square, top-left at (x, y)."""
+        if getattr(self, 'signup_role_icons', False):
+            from PIL import Image
+            import mplus_role_icons
+            data = mplus_role_icons.raw(role)
+            if data:
+                icon = Image.open(io.BytesIO(data)).convert('RGBA').resize((int(size*SCALE), int(size*SCALE)), Image.Resampling.LANCZOS)
+                self.image.paste(icon, (int(x*SCALE), int(y*SCALE)), icon)
+            return
         colour = _rgb(recap_page.ROLE_COLORS.get(role, "#9198a1"))
         for poly in ROLE_SHAPES.get(role, ()):
             pts = [((x + px * size / 16) * SCALE, (y + py * size / 16) * SCALE)
@@ -327,7 +335,7 @@ def _column(canvas, x, y, w, title, icon, rows, empty, badge=None):
 
 
 def render(summary, guild_name=None, night_text=None, raid_name=None, difficulty=None,
-           raiders=None, *, cells=None, kicker="RAID RECAP"):
+           raiders=None, *, cells=None, kicker="RAID RECAP", signup_role_icons=False):
     """The grid as PNG bytes, or None if anything at all went wrong."""
     try:
         from PIL import Image, ImageDraw
@@ -362,6 +370,7 @@ def render(summary, guild_name=None, night_text=None, raid_name=None, difficulty
 
         image = Image.new("RGB", (WIDTH_CSS * SCALE, int(height * SCALE)), BG)
         canvas = _Canvas(image, ImageDraw.Draw(image), {})
+        canvas.signup_role_icons = signup_role_icons
 
         # .topbar
         canvas.rect(0, 0, WIDTH_CSS, TOPBAR, fill=TOPBAR_BG)

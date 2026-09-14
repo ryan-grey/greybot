@@ -11,8 +11,9 @@ import discord
 import mplus
 import recap_card
 import recap_page
+import mplus_role_icons
 
-STYLE_VERSION = 'run-roles-v6'
+STYLE_VERSION = 'signup-role-icons-v7'
 _art_cache = {}
 
 
@@ -73,6 +74,7 @@ def render(runs, guild, season, art=None):
     height = 160 + sum(h + 16 for h in heights)
     image = Image.new('RGB', (1280, height * 2), c.BG)
     canvas = c._Canvas(image, ImageDraw.Draw(image), {})
+    canvas.signup_role_icons = True
     canvas.text(24, 18, 'GREYBOT  /  GUILD RECORDS', canvas.font('bold', 12), c.ACCENT, spacing=1)
     title=board_title(season,emoji=False)
     size=24
@@ -143,7 +145,7 @@ def page(runs, guild, season, image_url, now):
             if person['key'] in run['guild_members']:
                 color=recap_page.class_color(person.get('class','')) or '#f0f6fc'
                 light=recap_page.class_color_on_light(color)
-                members.append(recap_page.role_icon(person.get('role') or mplus.class_role(person.get('class')))+f'<span class="cls" style="--c-dark:{color};--c-light:{light}">{esc(person["name"])}</span>')
+                members.append(mplus_role_icons.html(person.get('role') or mplus.class_role(person.get('class')))+f'<span class="cls" style="--c-dark:{color};--c-light:{light}">{esc(person["name"])}</span>')
         url=safe_url(run['url'])
         title=esc(run['dungeon'])
         if url:title=f'<a href="{esc(url,quote=True)}">{title}</a>'

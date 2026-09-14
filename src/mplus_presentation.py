@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 import mplus
 import recap_card
 import recap_page
+import mplus_role_icons
 
 
 def archived_gain(summary):
@@ -38,7 +39,7 @@ def card(summary, guild):
     if archived_gain(summary):chips[-1]='Archived IO gain · Approximate'
     return recap_card.render({"bossLabels":chips}, guild_name=guild, night_text=label(summary),
         raid_name=(summary.get('season') or {}).get('name','Weekly Mythic+')+' · Guild runs + overall IO',
-        cells=cells, kicker="MYTHIC+ RECAP")
+        cells=cells, kicker="MYTHIC+ RECAP", signup_role_icons=True)
 
 
 def safe_url(value):
@@ -58,7 +59,7 @@ def page(summary, guild):
                 name = f'<a href="{esc(href, quote=True)}">{name}</a>'
             color = recap_page.class_color(row.get("class", ""))
             style = (f' style="--c-dark:{color};--c-light:{recap_page.class_color_on_light(color)}"' if color else "")
-            who = f'<span class="cls"{style}>{row["rank"]}. {recap_page.role_icon(row.get("role"))}{name}</span>'
+            who = f'<span class="cls"{style}>{row["rank"]}. {mplus_role_icons.html(row.get("role"))}{name}</span>'
             who += f'<small>{esc(row.get("detail") or row.get("server") or "")}</small>'
             entries.append((who, esc(mplus.display_value(key, row))))
         empty = "No qualifying results" if key != "score" else "No positive change with comparable weekly baselines"

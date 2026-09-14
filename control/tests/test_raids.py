@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from greybot_control import raids
 from greybot_control.discord_api import Denied
@@ -37,6 +38,34 @@ class RaidTests(unittest.TestCase):
         self.change("4", "signup", "signup", "0:0", revision=1)
         self.assertEqual(len(self.roster()), 1)
         self.assertEqual(raids.read(self.store, "1", self.id)["revision"], 2)
+
+    def test_saturday_creation_requires_class_spec_template(self):
+        event = {**self.event, "channelId": "1480026658705637516", "templateId": "standard"}
+        installed = {"templateId": "wowretail1", "classes": self.event["classes"], "roles": []}
+        with patch("greybot_control.raid_discord.template", return_value=installed) as template:
+            event_id = raids.create(self.store, "946663011991556117", "3", "saturday", event)
+            template.assert_called_once_with(self.store, "946663011991556117", "wowretail1")
+        saved = raids.read(self.store, "946663011991556117", event_id)["body"]
+        self.assertEqual(saved["templateId"], "wowretail1")
+        self.assertEqual(saved["title"], event["title"])
+        self.assertEqual(event["templateId"], "standard")
+        with patch("greybot_control.raid_discord.template") as template:
+            raids.create(self.store, "1", "3", "other-guild", event)
+            template.assert_not_called()
+
+    def test_saturday_role_notification_only_on_initial_card(self):
+        from greybot_control.raid_discord import card
+        row = raids.read(self.store, "1", self.id)
+        row["body"]["channelId"] = "1480026658705637516"
+        cfg = SimpleNamespace(guild_id="946663011991556117", origin="https://example.test")
+        initial = card(cfg, row, {})
+        self.assertEqual(initial["allowed_mentions"], {"parse": [], "roles": ["1062516636868952065"]})
+        row["message"] = "123"
+        updated = card(cfg, row, {})
+        self.assertEqual(updated["content"], initial["content"])
+        self.assertEqual(updated["allowed_mentions"], {"parse": []})
+        row["body"]["channelId"] = "2"
+        self.assertNotIn("content", card(cfg, row, {}))
 
     def test_spec_change_note_and_status_preserve_one_member(self):
         self.change("4", "first", "signup", "0:0")
