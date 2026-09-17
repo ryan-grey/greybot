@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: Admit lightweight test work
         id: admission
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           if (Get-Process ffmpeg,ffprobe -ErrorAction SilentlyContinue) {
             Write-Error 'Media work is active; refusing to contend for the PC.'
@@ -40,21 +40,21 @@ jobs:
 
       - name: Compile Python sources
         id: compile
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: >-
           & 'C:\ProgramData\pc-ai-build-server\runtime\python\python.exe'
           -m compileall -q src cdk control
 
       - name: Run offline self-test
         id: self_test
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: >-
           & 'C:\ProgramData\pc-ai-build-server\runtime\python\python.exe'
           scripts/selftest.py
 
       - name: Write bounded run receipt
         if: always()
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         env:
           RECEIPT_RUN_ID: ${{ github.run_id }}
           RECEIPT_REPOSITORY: ${{ github.repository }}
