@@ -502,6 +502,27 @@ INDEX = raiderio.RaidIndex(RAIDS)
 
 # ---------------------------------------------------------------- tests
 
+def test_date_text():
+    print("\nPortable date text")
+    from datetime import datetime, timezone
+    import handler
+
+    original_local = handler._local
+    handler._local = lambda dt: dt
+    try:
+        check("a single-digit date and midnight omit platform-specific padding",
+              handler._when_text(datetime(2026, 9, 7, 0, 5, tzinfo=timezone.utc))
+              == "September 7, 2026 at 12:05 AM UTC")
+        check("an afternoon hour remains 12-hour time",
+              handler._when_text(datetime(2026, 9, 17, 13, 45, tzinfo=timezone.utc))
+              == "September 17, 2026 at 1:45 PM UTC")
+    finally:
+        handler._local = original_local
+    check("recap dates include the weekday without zero-padding the day",
+          handler._month_day_text(datetime(2026, 9, 7), weekday=True)
+          == "Monday, September 7")
+
+
 def test_config():
     print("\nConfig from SSM")
     config._cache.clear()
@@ -3723,7 +3744,8 @@ def test_recap_end_to_end():
 
 def main():
     print("greyBot self-test")
-    for fn in (test_config, test_boss_art, test_name_normalisation, test_slug_resolution,
+    for fn in (test_date_text, test_config, test_boss_art, test_name_normalisation,
+               test_slug_resolution,
                test_seed_names, test_progress_count,
                test_tenant_keys, test_setup_command, test_tenant_fanout,
                test_dedupe, test_aotc_guard,

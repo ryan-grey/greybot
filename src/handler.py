@@ -155,9 +155,15 @@ def _local(dt):
         return dt.astimezone(timezone.utc)
 
 
+def _month_day_text(dt, weekday=False):
+    prefix = dt.strftime("%A, %B" if weekday else "%B")
+    return f"{prefix} {dt.day}"
+
+
 def _when_text(dt):
     local = _local(dt)
-    stamp = local.strftime("%B %-d, %Y at %-I:%M %p")
+    hour = local.hour % 12 or 12
+    stamp = f"{_month_day_text(local)}, {local.year} at {hour}:{local:%M %p}"
     return f"{stamp} {local.strftime('%Z')}".strip()
 
 
@@ -2334,7 +2340,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     # base URL gates.
     eligible_names = set(recap_mod.raider_keys(sources))
     rows = recap_mod.raider_rows(sources, eligible_names, night_diff)
-    night_text = night.strftime("%A, %B %-d")
+    night_text = _month_day_text(night, weekday=True)
     sources_meta = [{"code": c["meta"]["code"], "title": c["meta"].get("title"),
                      "url": report_url(c["meta"]["code"]),
                      "owner": (c["meta"].get("owner") or {}).get("name"),
