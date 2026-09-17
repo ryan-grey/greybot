@@ -24,7 +24,8 @@ jobs:
 
     steps:
       - name: Admit lightweight test work
-        shell: pwsh
+        id: admission
+        shell: powershell
         run: |
           if (Get-Process ffmpeg,ffprobe -ErrorAction SilentlyContinue) {
             Write-Error 'Media work is active; refusing to contend for the PC.'
@@ -32,14 +33,61 @@ jobs:
           }
 
       - name: Checkout trusted revision
+        id: checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Compile Python sources
-        shell: pwsh
-        run: py -3.12 -m compileall -q src cdk control
+        id: compile
+        shell: powershell
+        run: >-
+          & 'C:\ProgramData\pc-ai-build-server\runtime\python\python.exe'
+          -m compileall -q src cdk control
 
       - name: Run offline self-test
-        shell: pwsh
-        run: py -3.12 scripts/selftest.py
+        id: self_test
+        shell: powershell
+        run: >-
+          & 'C:\ProgramData\pc-ai-build-server\runtime\python\python.exe'
+          scripts/selftest.py
+
+      - name: Write bounded run receipt
+        if: always()
+        shell: powershell
+        env:
+          RECEIPT_RUN_ID: ${{ github.run_id }}
+          RECEIPT_REPOSITORY: ${{ github.repository }}
+          RECEIPT_WORKFLOW: ${{ github.workflow }}
+          RECEIPT_HEAD_SHA: ${{ github.sha }}
+          RECEIPT_REF: ${{ github.ref }}
+          RECEIPT_JOB_STATUS: ${{ job.status }}
+          RECEIPT_RUNNER_NAME: ${{ runner.name }}
+          CHECK_ADMISSION: ${{ steps.admission.outcome }}
+          CHECK_CHECKOUT: ${{ steps.checkout.outcome }}
+          CHECK_COMPILE: ${{ steps.compile.outcome }}
+          CHECK_SELF_TEST: ${{ steps.self_test.outcome }}
+        run: |
+          $receipt = [ordered]@{
+            runId = $env:RECEIPT_RUN_ID
+            repository = $env:RECEIPT_REPOSITORY
+            workflow = $env:RECEIPT_WORKFLOW
+            headSha = $env:RECEIPT_HEAD_SHA
+            ref = $env:RECEIPT_REF
+            jobStatus = $env:RECEIPT_JOB_STATUS
+            runnerName = $env:RECEIPT_RUNNER_NAME
+            completedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+            checks = @(
+              [ordered]@{ name = 'resource-admission'; status = $env:CHECK_ADMISSION }
+              [ordered]@{ name = 'checkout'; status = $env:CHECK_CHECKOUT }
+              [ordered]@{ name = 'compile'; status = $env:CHECK_COMPILE }
+              [ordered]@{ name = 'offline-self-test'; status = $env:CHECK_SELF_TEST }
+            )
+          }
+          $directory = 'C:\ProgramData\pc-ai-build-server\workflow-spool'
+          $path = Join-Path $directory "$($env:RECEIPT_RUN_ID).json"
+          $temporary = "$path.tmp"
+          New-Item -ItemType Directory -Force -Path $directory | Out-Null
+          $json = $receipt | ConvertTo-Json -Depth 4
+          [IO.File]::WriteAllText($temporary, $json, (New-Object Text.UTF8Encoding($false)))
+          Move-Item -Force $temporary $path
