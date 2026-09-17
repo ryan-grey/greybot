@@ -1,0 +1,45 @@
+name: PC greyBot offline tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pc-greybot-offline-tests
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test on NoxStellaris
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'ryan-grey/greybot' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'ryan-grey' &&
+      github.triggering_actor == 'ryan-grey'
+    runs-on: [self-hosted, Windows, X64, noxstellaris-greybot-build-isolated]
+    timeout-minutes: 20
+
+    steps:
+      - name: Admit lightweight test work
+        shell: pwsh
+        run: |
+          if (Get-Process ffmpeg,ffprobe -ErrorAction SilentlyContinue) {
+            Write-Error 'Media work is active; refusing to contend for the PC.'
+            exit 75
+          }
+
+      - name: Checkout trusted revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Compile Python sources
+        shell: pwsh
+        run: py -3.12 -m compileall -q src cdk control
+
+      - name: Run offline self-test
+        shell: pwsh
+        run: py -3.12 scripts/selftest.py
