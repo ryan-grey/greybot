@@ -2,6 +2,7 @@
 !control/
 !control/Dockerfile
 !control/requirements.txt
+!control/requirements-voice.txt
 !control/greybot_control/
 !control/greybot_control/*.py
 !control/greybot_control/static/
@@ -12,3 +13,5 @@
 !assets/greyBot-avatar-v5.png
 !assets/tenure-badges/
 !assets/tenure-badges/*.png
+!assets/voice/
+!assets/voice/*.wav

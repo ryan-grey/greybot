@@ -24,7 +24,7 @@ from .verification import execute as execute_verification
 log = logging.getLogger("greybot.control")
 
 
-async def execute_one(cfg, store, api, archive):
+async def execute_one(cfg, store, api, archive, recorder=None):
     if not cfg.enforce:
         return
     if not archive:
@@ -39,6 +39,13 @@ async def execute_one(cfg, store, api, archive):
         if job["kind"] == "raid":
             from .raid_discord import execute
             await execute(cfg, store, api, job)
+            store.finish_job(job, "completed")
+            return
+        if job["kind"].startswith("voice_"):
+            from .voice_clips import execute
+            if not recorder:
+                raise Denied("Voice listening is unavailable")
+            await execute(cfg, store, api, job, recorder)
             store.finish_job(job, "completed")
             return
         if job["kind"] == "channel_visibility":
@@ -99,14 +106,30 @@ async def execute_one(cfg, store, api, archive):
             store.append("raid-denied:" + job["id"], cfg.guild_id, "RAID_REQUEST_REJECTED", job["actor"],
                          {"actor": job["actor"], "request": job["id"], "reason": str(exc)})
         result = "denied"
-    except Exception:
+    except Exception as exc:
         # Never retry an ambiguous write: Discord may have applied it. An
         # interrupted process likewise leaves an executing job for review.
         result = "unknown"
+        # Name the failure without the job body, which can hold member-written text.
+        log.error("Job kind %s ended unknown: %s", job["kind"], type(exc).__name__,
+                  exc_info=job["kind"].startswith("voice_"))
     store.finish_job(job, result)
 
 
+def voice_logging():
+    """Voice connection progress only: these loggers name endpoints and states, never event payloads."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    for name in ("discord.voice_state", "discord.voice_client"):
+        logger = logging.getLogger(name)
+        # DEBUG on the connection state adds only its state transitions.
+        logger.setLevel(logging.DEBUG if name == "discord.voice_state" else logging.INFO)
+        logger.addHandler(handler)
+        logger.propagate = False
+
+
 async def run():
+    voice_logging()
     cfg = Config.from_env()
     if not cfg.bot_token:
         raise RuntimeError("Bot token is not configured")
@@ -158,6 +181,9 @@ async def run():
                 collector.raw(msg)
                 packet = json.loads(msg)
                 if isinstance(packet, dict):
+                    if str(packet.get("t") or "").startswith("VOICE_"):
+                        mine = str((packet.get("d") or {}).get("user_id", "")) == cfg.client_id
+                        voice_clips.TRACE.append(packet["t"] + (":greyBot" if mine else ""))
                     detector.receive(packet)
             except Exception:
                 # Do not let the library log raw event payloads on exceptions.
@@ -169,6 +195,22 @@ async def run():
 
     client = Client(intents=intents, enable_debug_events=True,
                     member_cache_flags=discord.MemberCacheFlags.none(), max_messages=None)
+    from . import voice_clips
+    voice_clips.install(store)
+    # Helper bots only hold extra voice connections: no events, no commands, no member data.
+    quiet = discord.Intents.none()
+    quiet.guilds = quiet.voice_states = True
+    helpers = [(token, discord.Client(intents=quiet, member_cache_flags=discord.MemberCacheFlags.none(), max_messages=None))
+               for token in cfg.voice_helper_tokens]
+    recorders = [voice_clips.Recorder(cfg, store, client)]
+    helper_tasks = []
+    for token, helper in helpers:
+        await helper.login(token)
+        if str(helper.user.id) in {r.user_id for r in recorders}:
+            raise RuntimeError("Voice helper tokens must belong to distinct helper bots")
+        recorders.append(voice_clips.Recorder(cfg, store, helper, str(helper.user.id)))
+        helper_tasks.append(asyncio.create_task(helper.connect(reconnect=True)))
+    recorder = voice_clips.Pool(recorders)
 
     async def maintenance():
         next_mute_check = 0
@@ -182,7 +224,7 @@ async def run():
                     health_tick(store, cfg.guild_id)
                     next_health_check = time.monotonic() + 30
                 if cfg.enforce:
-                    await execute_one(cfg, store, api, archive)
+                    await execute_one(cfg, store, api, archive, recorder)
                     from .raid_discord import enabled as raids_enabled, deliver_one
                     if raids_enabled():
                         for row in raids.list_events(store, cfg.guild_id):
@@ -197,6 +239,10 @@ async def run():
                 elif archive:
                     await asyncio.to_thread(archive.flush, store)
                 await feed.tick()
+                try:
+                    await recorder.tick(api)
+                except Exception:
+                    log.error("Voice listening status update failed")
                 if time.monotonic() >= next_tenure_check:
                     next_tenure_check = time.monotonic() + 300
                     try:
@@ -225,6 +271,11 @@ async def run():
     finally:
         maintenance_task.cancel()
         await asyncio.gather(maintenance_task, return_exceptions=True)
+        await recorder.leave()
+        for task, (_, helper) in zip(helper_tasks, helpers):
+            await helper.close()
+            task.cancel()
+        await asyncio.gather(*helper_tasks, return_exceptions=True)
         await client.close()
         await api.close()
         lock.close()

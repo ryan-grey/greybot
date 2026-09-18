@@ -13,7 +13,8 @@ def forward(raw, signature, timestamp):
     try:
         with urllib.request.urlopen(request, timeout=1.7) as response:
             body = json.loads(response.read(16384))
-            if body.get("type") not in {4, 9}:
+            # 4 message, 5 deferred message (voice clips finish through the token), 9 modal.
+            if body.get("type") not in {4, 5, 9}:
                 raise ValueError("Unexpected role response")
             return body
     except Exception as exc:

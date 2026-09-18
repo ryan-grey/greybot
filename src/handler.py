@@ -1053,8 +1053,9 @@ def handle_interaction(event, cfg, scope, now):
         return interactions.unauthorized()
 
     kind = body.get("type")
-    raid_request = (kind == 2 and body.get("data", {}).get("name") in {"create", "quickcreate", "raid"}
-                    or kind in {3, 5} and str(body.get("data", {}).get("custom_id", "")).startswith("greybot:raid:"))
+    # Raid signups and voice clips are both answered by the NAS service.
+    raid_request = (kind == 2 and body.get("data", {}).get("name") in {"create", "quickcreate", "raid", "clip"}
+                    or kind in {3, 5} and str(body.get("data", {}).get("custom_id", "")).startswith(("greybot:raid:", "greybot:clip:")))
     if raid_request:
         if body.get("guild_id") != cfg.get("discord_guild_id"):
             return interactions.unauthorized()

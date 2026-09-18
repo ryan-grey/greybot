@@ -1522,8 +1522,8 @@ def test_interactions():
                      "application_id": "1"}), cfg, pk, now)["body"])["type"]
           == interactions.CHANNEL_MESSAGE_WITH_SOURCE)
 
-    check("the registered command set includes progress, setup, poll and raid commands",
-          [c["name"] for c in interactions.COMMANDS] == ["progress", "setup", "poll", "create", "quickcreate", "raid"])
+    check("the registered command set includes progress, setup, poll, raid and voice clip commands",
+          [c["name"] for c in interactions.COMMANDS] == ["progress", "setup", "poll", "create", "quickcreate", "raid", "clip"])
 
     setup = interactions.SETUP_COMMAND
     # 0x20 is MANAGE_GUILD. Discord takes this as a STRING bitfield; an int here
@@ -1818,7 +1818,11 @@ def test_team_install():
           and handler.display_name(gcfg) == "Scrambled")
 
     # --- the raid-day filter ---------------------------------------------
-    now = datetime.now(timezone.utc)
+    # Anchored to 23:30 local yesterday, not the wall clock: the fixtures below put one raid
+    # night at 0.1-0.5 days ago, and run before local noon those straddled midnight, fell on
+    # two weekdays, and the filter under test rightly dropped half of them.
+    now = (handler._local(datetime.now(timezone.utc)).replace(hour=23, minute=30, second=0, microsecond=0)
+           - timedelta(days=1)).astimezone(timezone.utc)
     ms = lambda days_ago: int((now - timedelta(days=days_ago)).timestamp() * 1000)
     day_name = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
     raid_day = day_name[handler._local(handler._at(ms(0.5))).weekday()]

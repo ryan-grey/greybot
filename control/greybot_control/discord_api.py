@@ -50,6 +50,24 @@ class DiscordAPI:
             return response.json() if response.content else None
         raise Unavailable("Discord rate limit; retry later")
 
+    async def followup(self, token, content, components=None, attachment=None):
+        """Complete a deferred interaction. The token is a credential: never logged, never in an error."""
+        import json
+        payload = {"content": content, "components": components or [], "allowed_mentions": {"parse": []}}
+        if attachment:
+            payload["attachments"] = [{"id": 0, "filename": attachment[0]}]
+            body = {"data": {"payload_json": json.dumps(payload)},
+                    "files": {"files[0]": (attachment[0], attachment[1], "audio/mpeg")}}
+        else:
+            body = {"json": payload}
+        try:
+            response = await self.http.patch(f"{API}/webhooks/{self.cfg.client_id}/{token}/messages/@original",
+                                             headers={"User-Agent": "greyBot/2.0"}, **body)
+        except httpx.HTTPError:
+            raise Unavailable("Discord reply did not complete") from None
+        if response.status_code >= 400:
+            raise Unavailable("Discord rejected the reply")
+
     async def identity(self, code):
         if not self.cfg.client_secret:
             raise Unavailable("Dashboard OAuth is not configured")

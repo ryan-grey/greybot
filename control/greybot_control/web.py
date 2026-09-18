@@ -166,6 +166,9 @@ def create_app(cfg=None, store=None, discord=None):
             raise HTTPException(403, "Invalid request origin or CSRF token")
         return session
 
+    from . import voice_clips
+    voice_clips.install(store)
+
     @app.get("/")
     async def home(request: Request):
         if not store.get_session(request.cookies.get(cookie, "")):
@@ -201,6 +204,12 @@ def create_app(cfg=None, store=None, discord=None):
                     or str(packet.get("data", {}).get("custom_id", "")).startswith(PREFIX)):
                 try:
                     return receive_raid(cfg, store, packet)
+                except Denied as exc:
+                    return raid_reply(str(exc))
+            if (packet.get("type") == 2 and packet.get("data", {}).get("name") in voice_clips.COMMAND_NAMES
+                    or str(packet.get("data", {}).get("custom_id", "")).startswith(voice_clips.PREFIX)):
+                try:
+                    return voice_clips.receive(cfg, store, packet)
                 except Denied as exc:
                     return raid_reply(str(exc))
             if packet.get("data", {}).get("custom_id") == "greybot:verify":

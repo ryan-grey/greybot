@@ -34,6 +34,7 @@ class Config:
     archive_dir: Path | None = None
     start_channel_id: str = ""
     public_channel_ids: tuple[str, ...] = ()
+    voice_helper_tokens: tuple[str, ...] = ()
 
     @property
     def secure(self):
@@ -73,6 +74,11 @@ class Config:
         public_channels = tuple(filter(None, (v.strip() for v in os.environ.get("GREYBOT_PUBLIC_CHANNEL_IDS", "").split(","))))
         if any(not value.isdecimal() for value in (*public_channels, *((start_channel,) if start_channel else ()))):
             raise ValueError("Configured channel IDs must be numeric")
+        # Optional voice-only helper bots, one per extra simultaneous voice channel: GREYBOT_VOICE_HELPER_1_TOKEN[_SSM], _2_, ...
+        helpers = []
+        while len(helpers) < 8 and (token := secret(f"GREYBOT_VOICE_HELPER_{len(helpers) + 1}_TOKEN")):
+            helpers.append(token)
         return cls(guild, client, secret("GREYBOT_BOT_TOKEN"),
                    secret("GREYBOT_OAUTH_SECRET"), origin, state, bucket, days,
-                   os.environ.get("GREYBOT_CAPTURE_CONTENT") == "1", enforce, archive_dir, start_channel, public_channels)
+                   os.environ.get("GREYBOT_CAPTURE_CONTENT") == "1", enforce, archive_dir, start_channel, public_channels,
+                   tuple(helpers))

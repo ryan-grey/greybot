@@ -18,6 +18,11 @@ class RelayTests(unittest.TestCase):
         with patch('urllib.request.urlopen', return_value=io.BytesIO(json.dumps(reply).encode())):
             self.assertEqual(role_relay.forward(b'{}','signature','timestamp'),reply)
 
+    def test_deferred_voice_clip_reply_is_preserved(self):
+        reply={"type":5,"data":{"flags":64}}
+        with patch('urllib.request.urlopen', return_value=io.BytesIO(json.dumps(reply).encode())):
+            self.assertEqual(role_relay.forward(b'{}','signature','timestamp'),reply)
+
     def test_forwards_exact_signed_bytes_with_bot_identity(self):
         raw = b'{"token":"test-only-interaction","type":3}'
         reply = {"type": 4, "data": {"content": "Queued", "flags": 64}}
