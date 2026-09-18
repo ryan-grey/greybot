@@ -15,14 +15,14 @@ async function load(){
   document.querySelector("#activity-period").textContent=`${data.server} · ${day(data.since)} to today · ${data.afk.length?data.afk.join(", ")+" (AFK) is not counted":"no AFK channel set"}`;
   const summary=document.querySelector("#activity-summary");
   summary.replaceChildren(
-    card("Members in voice",String(data.rows.length),`${data.in_voice_now} in voice right now`),
+    card("Members ranked",String(data.rows.length),`${data.in_voice_now} in voice right now`),
     card("Hours together",String(Math.round(data.total_seconds/3600)),`since ${day(data.since)}`),
     card("Busiest channels",data.busiest.slice(0,3).map(c=>c.channel).join(", ")||"None yet",data.busiest.slice(0,3).map(c=>duration(c.seconds)).join(" · ")),
     card("Gaps in the record",String(data.gaps),"mostly seconds long; time in a gap is not counted"));
   body.replaceChildren(...data.rows.map((row,index)=>{
     const tr=element("tr"), who=element("td"), avatar=element("img");
     avatar.src=row.avatar_url; avatar.alt=""; avatar.width=avatar.height=20; avatar.className="mark"; avatar.loading="lazy";
-    who.append(avatar," ",element("span",row.name+(row.active?"":" (left the server)")));
+    const cell=element("div",undefined,"member-cell"); cell.append(avatar,element("span",row.name+(row.active?"":" (left the server)"))); who.append(cell);
     tr.append(element("td",String(index+1)),who,element("td",duration(row.seconds)),element("td",String(row.stays)),element("td",duration(row.longest)),
       element("td",row.top.map(t=>t.channel).join(", ")),element("td",row.in_voice?`In ${row.in_voice} now`:ago(row.last)));
     return tr;}));

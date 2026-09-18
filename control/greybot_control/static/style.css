@@ -26,6 +26,8 @@ body { padding-bottom:60px; }
 table { border-collapse:collapse; width:100%; }
 td,th { padding:12px 16px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
 th { color:var(--muted); font-weight:500; }
+.member-cell { display:flex; align-items:center; gap:10px; }
+.member-cell .mark { width:24px; height:24px; flex:none; }
 body { margin: 0; background: var(--bg); color: var(--text); }
 a { color: var(--accent); text-decoration: none; }
 button, .button {

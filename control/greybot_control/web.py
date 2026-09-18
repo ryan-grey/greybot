@@ -245,7 +245,7 @@ def create_app(cfg=None, store=None, discord=None):
     async def asset(name: str):
         if name == "avatar.png":
             return FileResponse(Path(__file__).resolve().parents[2] / "assets" / "greyBot-avatar-v5.png", headers={"Cache-Control": "no-cache"})
-        if name not in {"app.js", "style.css", "verify.js", "channels.js", "event-labels.js", "raids.js"}:
+        if name not in {"app.js", "style.css", "verify.js", "channels.js", "event-labels.js", "raids.js", "activity.js"}:
             raise HTTPException(404)
         return FileResponse(static / name)
 

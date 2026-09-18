@@ -73,6 +73,20 @@ class ActivityWebTests(Base):
         self.login("6")
         self.assertEqual(self.client.get("/api/activity").status_code, 403)
 
+    def test_every_script_and_stylesheet_the_page_asks_for_is_actually_served(self):
+        import re
+        page = self.client.get("/activity").text
+        assets = re.findall(r'(?:src|href)="(/assets/[^"]+)"', page)
+        self.assertIn("/assets/activity.js", assets)
+        for path in assets:
+            self.assertEqual(self.client.get(path).status_code, 200, path)
+        # The allowlist in web.py is separate from the files, so check every page, not just this one.
+        from pathlib import Path
+        import greybot_control
+        for html in (Path(greybot_control.__file__).parent / "static").glob("*.html"):
+            for path in re.findall(r'(?:src|href)="(/assets/[^"]+)"', html.read_text()):
+                self.assertEqual(self.client.get(path).status_code, 200, f"{html.name} asks for {path}")
+
     def test_bots_cannot_read_it_and_a_member_session_opens_no_admin_data(self):
         self.login("9")
         self.assertEqual(self.client.get("/api/activity").status_code, 403)
