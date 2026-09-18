@@ -754,16 +754,18 @@ means hosting it somewhere; the obvious somewhere is `ryangrey.dev`, which is de
 zero-external-request single-file site. Setting it once sidesteps that entirely and keeps
 the announcement payloads clean.
 
-`assets/greyBot-avatar.png` is the canonical asset, version controlled alongside the code:
-1024×1024 RGBA, `#12151A` field, `#8DBCEB` highlight outline with glow, `#6AA8E0` accent.
+`assets/greyBot-avatar.png` is the canonical web and webhook export, version controlled
+alongside the code. It is a deterministic 1024×1024 RGB downscale of Ryan's approved
+cloud-g master: a blue lowercase `g` with a white cloud on the approved black field.
 Discord never renders a webhook avatar above 128px and has historically rejected oversized
-data URIs, so the script downscales to 256px for the upload (328 KiB → 47 KiB) and leaves
-the master untouched.
+data URIs, so the script downscales to 256px for the upload (469 KiB → 33 KiB) and leaves
+the canonical export untouched.
 
 `assets/greyBot-avatar-256.png` is that downscale, committed rather than generated on the
 fly. The script downscales with `sips`, which exists on macOS and not in CloudShell — and
 CloudShell is where this runs, because the deploy user cannot read the webhook from SSM.
-Pass it with `--avatar` there. Regenerate it from the master with:
+Pass it with `--avatar` there. Both committed sizes are lossless Lanczos exports from the
+approved 1254px `assets/greyBot-avatar-v5.png` master.
 
 ```sh
 sips -Z 256 assets/greyBot-avatar.png --out assets/greyBot-avatar-256.png
@@ -973,7 +975,7 @@ src/discord.py       webhook payloads and retries
 src/health.py        can the bot still speak in the server — kick, ban, timeout, webhook
 src/notify.py        publish one alert to the ryangrey-dev-alerts topic
 src/interactions.py  slash commands: Ed25519 verification, PING/PONG, /progress
-assets/              greyBot-avatar.png — the canonical icon, 1024x1024
+assets/              greyBot-avatar.png — approved cloud-g canonical export, 1024x1024
 scripts/selftest.py  the gate; no AWS, no boto3, no network
 scripts/fixtures/report-recap.json  a REAL Warcraft Logs response, trimmed
 scripts/introspect-wcl.py  ask the API what its schema is, before writing a query
