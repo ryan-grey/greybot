@@ -79,7 +79,12 @@ class MythicTests(unittest.TestCase):
             self.assertEqual(next(p for p in result['boards'][category] if p['key']==KEYS[0])['role'],'tank')
         for category in ('ten','guild_timed','overall'):
             self.assertIsNone(next(p for p in result['boards'][category] if p['key']==KEYS[0])['role'])
-        self.assertIn('aria-label="Tank"',mplus_presentation.page(result,'Test'))
+        page=mplus_presentation.page(result,'Test')
+        self.assertIn('aria-label="Tank"',page)
+        # The site answers img-src 'self' data:, so artwork fetched from anywhere else shows as a broken image.
+        self.assertNotIn('<img',page)
+        self.assertNotIn('cdn.discordapp.com',page)
+        self.assertEqual(page.count('url(data:image/png;base64,'),3)
 
     def test_every_category_has_unique_positions_and_characters(self):
         scores=[{**mplus.person(p),'score':3000} for p in PEOPLE]

@@ -87,6 +87,7 @@ def page(summary, guild):
 <title>{title} · Mythic+ recap</title><style>{recap_page.STYLE}
 .who small {{display:block;color:var(--muted);font-size:12px;white-space:normal}}
 .sources li {{padding:10px 0}} .sources small {{color:var(--muted)}}
+{mplus_role_icons.style()}
 </style></head><body><header class="topbar"><a class="tb-brand" href="https://ryangrey.dev">ryangrey.dev</a><span class="lede">greyBot</span></header>
 <main class="wrap"><p class="kicker">Mythic+ recap</p><h1>{title}</h1>
 <p class="lede">{season_text}Tuesday 10am to Tuesday 10am Eastern · {summary["timed_count"]} observed timed runs · {summary["members"]} characters</p>
