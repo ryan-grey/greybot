@@ -19,6 +19,13 @@ def secret(name):
     return value
 
 
+def dm_owner(value):
+    # The one person who receives DMs sent to greyBot and may answer as it. Unset turns the relay off.
+    if value and not value.isdecimal():
+        raise ValueError("GREYBOT_DM_OWNER_ID must be a numeric user ID")
+    return value
+
+
 @dataclass(frozen=True)
 class Config:
     guild_id: str
@@ -35,6 +42,7 @@ class Config:
     start_channel_id: str = ""
     public_channel_ids: tuple[str, ...] = ()
     voice_helper_tokens: tuple[str, ...] = ()
+    dm_owner_id: str = ""
 
     @property
     def secure(self):
@@ -81,4 +89,4 @@ class Config:
         return cls(guild, client, secret("GREYBOT_BOT_TOKEN"),
                    secret("GREYBOT_OAUTH_SECRET"), origin, state, bucket, days,
                    os.environ.get("GREYBOT_CAPTURE_CONTENT") == "1", enforce, archive_dir, start_channel, public_channels,
-                   tuple(helpers))
+                   tuple(helpers), dm_owner(os.environ.get("GREYBOT_DM_OWNER_ID", "").strip()))

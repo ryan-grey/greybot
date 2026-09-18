@@ -191,7 +191,7 @@ class Store:
         return True
 
     def oauth_state(self, purpose="admin"):
-        if purpose not in {"admin", "verify", "channels", "raids"}:
+        if purpose not in {"admin", "verify", "channels", "raids", "activity"}:
             raise ValueError("Invalid login purpose")
         state = purpose + "." + secrets.token_urlsafe(32)
         with self.connection() as db:

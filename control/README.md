@@ -147,6 +147,29 @@ Verified in production that day: join with the spoken intro, clip, earlier, nami
 (a 5.04 s 48 kHz MP3 on Discord's CDN) and a returning speaker. Simultaneous channels with
 the helper bots have only been exercised in tests.
 
+## Voice activity
+
+`/activity` is a live, members-only page: who is in voice and for how long, ranked, with
+who is in voice right now. It uses the same member OAuth session pattern as `/raids` and
+`/channels`, checks current human membership on every request, grants no admin access and
+is marked `noindex`. `voice_activity.compute` walks the journal's `VOICE_STATE_UPDATE`
+events. The server's AFK channel never counts, a stay is one unbroken visit of at least a
+minute, and mute or deafen updates do not split a stay. An observation gap ends every open
+stay where the gap began, so time is never invented across an outage and the totals run a
+little low. The report is cached for five minutes and the page refreshes itself.
+
+## Direct messages
+
+With `GREYBOT_DM_OWNER_ID` set, the worker subscribes to direct messages and `dm_relay`
+passes any member's DM to that one person's own DM with greyBot. The owner answers as
+greyBot by using Discord's Reply on the forwarded message; greyBot delivers it and ticks
+the owner's message, or crosses it and says so when the member's DMs are closed. Nothing is
+resent automatically. A member is told once a day that a person reads these messages.
+Message text is relayed and never stored: `dm_forwards` holds only which forwarded message
+belongs to which member for 30 days, and the journal gets contentless `DM_FORWARDED` and
+`DM_REPLIED` entries. The collector already ignores events outside the server, so DMs never
+reach the message index. Unset, the intent is not requested and DMs are ignored as before.
+
 ## Run locally
 
 Create a Python environment outside the checkout and install `requirements.txt`, then

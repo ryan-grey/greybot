@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>greyBot · Voice activity</title><link rel="stylesheet" href="/assets/style.css"><script src="/assets/activity.js" defer></script></head>
+<body><header class="global-header"><a class="brand" href="/about"><img class="mark" src="/assets/avatar.png" alt="" width="32" height="32">greyBot</a><span class="slash">/</span><span>Voice activity</span></header>
+<main class="workspace"><div class="page-heading"><div><h1>Who is in voice, and for how long</h1><p class="muted" id="activity-period">Live from greyBot's record of people joining, leaving and switching voice channels.</p></div><button id="activity-refresh">Refresh</button></div>
+<a id="activity-login" class="button primary" href="/auth/login?destination=activity" hidden>Sign in with Discord</a>
+<div id="activity-notice" role="status" aria-live="polite"></div>
+<section id="activity-summary" class="dashboard-cards" hidden></section>
+<section class="box" id="activity-board" hidden><div class="box-header"><strong>Everyone, by time in voice</strong><span class="muted" id="activity-updated"></span></div>
+<div class="table-scroll"><table id="activity-table"><thead><tr><th>#</th><th>Member</th><th>Time in voice</th><th>Stays</th><th>Longest stay</th><th>Mostly in</th><th>Last seen in voice</th></tr></thead><tbody></tbody></table></div></section>
+<p class="muted" id="activity-method" hidden>A stay is one unbroken visit of at least a minute. The AFK channel never counts. Totals run a little low: time is not counted while greyBot was disconnected or its server was down, and anyone already in voice when it came back is not counted until they next join, leave or switch. Bots are left out. Only server members can open this page.</p>
+</main></body></html>

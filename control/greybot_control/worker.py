@@ -165,6 +165,10 @@ async def run():
     intents.invites = intents.voice_states = intents.emojis_and_stickers = True
     intents.auto_moderation_execution = True
     intents.message_content = cfg.capture_content
+    # DMs to greyBot are relayed to one person, never journaled: the collector only records this server's events.
+    intents.dm_messages = bool(cfg.dm_owner_id)
+    from . import dm_relay
+    dm_relay.install(store)
 
     class Client(discord.Client):
         async def on_resumed(self):
@@ -189,6 +193,18 @@ async def run():
                 # Do not let the library log raw event payloads on exceptions.
                 log.error("Event persistence failed; collector stopping")
                 await self.close()
+
+        async def on_message(self, message):
+            if message.guild is not None or not cfg.dm_owner_id:
+                return
+            try:
+                await dm_relay.receive(cfg, store, api, {
+                    "id": str(message.id), "channel": str(message.channel.id), "author": str(message.author.id),
+                    "bot": bool(message.author.bot), "content": message.content,
+                    "attachments": [a.url for a in message.attachments],
+                    "reference": str(message.reference.message_id) if message.reference and message.reference.message_id else ""})
+            except Exception as exc:
+                log.error("Direct message relay failed: %s", type(exc).__name__)
 
         async def on_error(self, event, *args, **kwargs):
             log.error("Gateway event handler failed")

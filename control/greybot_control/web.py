@@ -112,6 +112,8 @@ def create_app(cfg=None, store=None, discord=None):
     install_choices(app, cfg, store, discord, cookie, static)
     from .raid_web import install as install_raids
     install_raids(app, cfg, store, discord, cookie, static, directory)
+    from .voice_activity import install as install_activity
+    install_activity(app, cfg, store, discord, cookie, static, directory)
 
     @app.middleware("http")
     async def security_headers(request, call_next):
@@ -251,7 +253,7 @@ def create_app(cfg=None, store=None, discord=None):
     async def login(destination: str = "admin"):
         if not cfg.client_secret or not cfg.bot_token:
             raise HTTPException(503, "Dashboard login is not configured")
-        if destination not in {"admin", "verify", "channels", "raids"}:
+        if destination not in {"admin", "verify", "channels", "raids", "activity"}:
             raise HTTPException(400, "Invalid login destination")
         if destination == "verify" and not (verification_configured() and store.settings(cfg.guild_id)["values"].get("verification_enabled")):
             raise HTTPException(503, "Member verification is not enabled yet")
@@ -271,7 +273,7 @@ def create_app(cfg=None, store=None, discord=None):
         if not code or len(code) > 1024:
             raise HTTPException(400, "Missing login code")
         user = await discord.identity(code)
-        if state.startswith(("verify.", "channels.", "raids.")):
+        if state.startswith(("verify.", "channels.", "raids.", "activity.")):
             destination = state.split(".", 1)[0]
             member = await discord.request("GET", f"/guilds/{cfg.guild_id}/members/{user}")
             if member.get("user", {}).get("bot"):
