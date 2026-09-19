@@ -55,6 +55,7 @@ import kill_card
 import recap_card
 import recap_page
 import low_parses
+import low_parse_card
 import rollcall
 import keys
 import store
@@ -1811,13 +1812,17 @@ def low_parse_report(cfg, sources, eligible_names, night_diff, tier, difficulty,
     Split from the sending so a dry run can show exactly what would go out.
     """
     rows = recap_mod.parse_rows(sources, eligible_names, night_diff)
+    threshold = cfg.get("low_parse_max", 25.0)
     entries = low_parses.collect(rows, (tier.get("meta") or {}).get("encounters"),
-                                 threshold=cfg.get("low_parse_max", 25.0))
-    payload = low_parses.message(
-        entries, team_name=cfg.get("team_name") or cfg.get("guild_name") or "",
-        difficulty=difficulty, raid=tier.get("label") or "", night_text=night_text,
-        threshold=cfg.get("low_parse_max", 25.0), page_url=page_url)
-    return entries, payload
+                                 threshold=threshold)
+    where = {"team_name": cfg.get("team_name") or cfg.get("guild_name") or "",
+             "difficulty": difficulty, "raid": tier.get("label") or "",
+             "night_text": night_text, "threshold": threshold}
+    card = low_parse_card.render(entries, **where) if entries else None
+    if entries and not card:
+        log("low_parse_card_failed", note="sending the list as text instead")
+    payload, attachment = low_parses.message(entries, page_url=page_url, card=card, **where)
+    return entries, payload, attachment
 
 
 def send_low_parses(cfg, sources, eligible_names, night_diff, tier, difficulty,
@@ -1826,13 +1831,13 @@ def send_low_parses(cfg, sources, eligible_names, night_diff, tier, difficulty,
     who = cfg.get("low_parse_dm")
     if not who:
         return False
-    entries, payload = low_parse_report(cfg, sources, eligible_names, night_diff, tier,
-                                        difficulty, night_text, page_url)
+    entries, payload, attachment = low_parse_report(cfg, sources, eligible_names, night_diff,
+                                                    tier, difficulty, night_text, page_url)
     if not payload:
         log("low_parse_none", threshold=cfg.get("low_parse_max"),
             note="nobody parsed grey — nothing sent")
         return False
-    discord.dm_to(cfg.get("bot_token"), who, payload)
+    discord.dm_to(cfg.get("bot_token"), who, payload, attachment=attachment)
     # The count and the threshold, never the names: this log is not the place for them.
     log("low_parse_dm_sent", parses=len(entries),
         raiders=len({e["name"] for e in entries}), threshold=cfg.get("low_parse_max"))
@@ -2544,14 +2549,16 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
             missingSections=summary["missing"], ilvlScale=ilvl_scale,
             posted=False, stateWritten=False,
             note="DRY RUN — nothing posted, no night claimed")
-        grey, grey_payload = low_parse_report(cfg, sources, eligible_names, night_diff,
-                                              tier, diff_label, night_text, page_url or "")
+        grey, grey_payload, grey_card = low_parse_report(cfg, sources, eligible_names,
+                                                         night_diff, tier, diff_label,
+                                                         night_text, page_url or "")
         return {"ok": True, "night": night_key, "posted": False, "dry": True,
                 "payload": payload, "summary": summary, "recapPageRows": rows,
                 "recapPageHtml": page_html, "recapPageUrl": page_url,
                 "sources": sources_meta,
                 # What the private DM would carry, so a dry run shows it without sending it.
                 "lowParses": grey, "lowParsePayload": grey_payload,
+                "lowParseCardBytes": len(grey_card[1]) if grey_card else 0,
                 "lowParseWouldSend": bool(grey_payload and cfg.get("low_parse_dm"))}
 
     try:

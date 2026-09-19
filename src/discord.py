@@ -17,6 +17,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 BRAND_NAVY = 0x0E1B2C
 BRAND_ACCENT = 0x5CA8F0     # the mark's neon rim; used for ordinary kill cards
@@ -142,29 +143,39 @@ def _post_json(url, payload, headers=None, timeout=10, sleep=time.sleep, max_att
     guessed at on the other is the kind of difference that only shows up under
     load, which is exactly when it matters.
     """
-    body = json.dumps(payload).encode("utf-8")
+    return _post_raw(url, json.dumps(payload).encode("utf-8"), "application/json",
+                     headers=headers, timeout=timeout, sleep=sleep, max_attempts=max_attempts)
+
+
+def _post_raw(url, body, content_type, headers=None, timeout=10, sleep=time.sleep,
+              max_attempts=MAX_ATTEMPTS):
+    """The retry loop itself, over bytes the caller has already encoded.
+
+    Split out so a multipart upload gets exactly the same rate-limit and 5xx handling as
+    every JSON post, rather than a second, subtly different one.
+    """
     last = None
     for attempt in range(1, max_attempts + 1):
         req = urllib.request.Request(
             url, data=body, method="POST",
-            headers={"Content-Type": "application/json",
+            headers={"Content-Type": content_type,
                      "User-Agent": "scrambled-raid-bot/1.0",
                      **(headers or {})})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as res:
                 raw = res.read().decode("utf-8", "replace")
                 try:
-                    body = json.loads(raw) if raw.strip() else {}
+                    answer = json.loads(raw) if raw.strip() else {}
                 except ValueError:
-                    body = {}
+                    answer = {}
                 # The status is what every existing caller reads, so it stays the return
                 # value and the message rides along as an attribute. A 204 with no body
                 # still returns cleanly -- posting must not start failing because the
                 # bookkeeping around it could not read an id.
                 out = _Posted(res.status)
-                if isinstance(body, dict):
-                    out.message_id = body.get("id")
-                    out.channel_id = body.get("channel_id")
+                if isinstance(answer, dict):
+                    out.message_id = answer.get("id")
+                    out.channel_id = answer.get("channel_id")
                 return out
         except urllib.error.HTTPError as exc:
             text = exc.read().decode("utf-8", "replace")[:300]
@@ -553,7 +564,27 @@ CHANNEL_API = "https://discord.com/api/v10/channels"
 DM_API = "https://discord.com/api/v10/users/@me/channels"
 
 
-def dm_to(bot_token, user_id, payload, timeout=10, sleep=time.sleep, max_attempts=1):
+def _multipart(payload, filename, blob):
+    """One file alongside the JSON, as Discord's attachment upload wants it.
+
+    Built by hand rather than with a library: this package is vendored into a Lambda zip
+    and the whole point of it is to have no dependencies. `attachments[0]` must name the
+    same index as the `files[0]` part, and the embed refers to it as `attachment://name`.
+    """
+    boundary = "greybot" + uuid.uuid4().hex
+    body = {**payload, "attachments": [{"id": 0, "filename": filename}]}
+    parts = [
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n"
+        f"Content-Type: application/json\r\n\r\n{json.dumps(body)}\r\n".encode(),
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"files[0]\"; "
+        f"filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n".encode(),
+        blob, f"\r\n--{boundary}--\r\n".encode(),
+    ]
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+def dm_to(bot_token, user_id, payload, attachment=None, timeout=10, sleep=time.sleep,
+          max_attempts=1):
     """POST one direct message to a single person.
 
     Two calls, because Discord has no "send to user" endpoint: open the DM channel, then
@@ -572,7 +603,15 @@ def dm_to(bot_token, user_id, payload, timeout=10, sleep=time.sleep, max_attempt
     channel = getattr(opened, "message_id", None)     # the opened channel's own id
     if not channel:
         raise DiscordError("Discord did not return a DM channel")
-    return _post_json(f"{CHANNEL_API}/{channel}/messages", payload, headers=headers,
+    url = f"{CHANNEL_API}/{channel}/messages"
+    if attachment:
+        # Uploaded into the conversation rather than linked from anywhere. A card that
+        # names people is not something to leave sitting on a public bucket.
+        filename, blob = attachment
+        data, content_type = _multipart(payload, filename, blob)
+        return _post_raw(url, data, content_type, headers=headers, timeout=timeout,
+                         sleep=sleep, max_attempts=max_attempts)
+    return _post_json(url, payload, headers=headers,
                       timeout=timeout, sleep=sleep, max_attempts=max_attempts)
 
 

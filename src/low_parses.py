@@ -21,6 +21,7 @@ list does not name keeps its name and loses only its number.
 
 MAX_LINES = 40          # a DM is 2000 characters; a pathological night is truncated, not lost
 COLOR = 0x9198A1        # Primer's muted grey, the colour of the parses it is reporting
+CARD_NAME = "grey-parses.png"
 
 
 def boss_numbers(encounters):
@@ -70,21 +71,31 @@ def lines(entries):
 
 
 def message(entries, *, team_name, difficulty, raid, night_text, threshold=25.0,
-            page_url=""):
-    """The Discord payload, or None when nobody was grey -- which is the good night, and
-    the recap says nothing extra about it."""
+            page_url="", card=None):
+    """(payload, attachment) for the DM, or (None, None) when nobody was grey -- which is
+    the good night, and the recap says nothing extra about it.
+
+    With a card, the embed is the card: spec icon, role glyph and a class-coloured name are
+    things a drawn image can show and Discord text cannot. Without one -- Pillow missing, a
+    draw that failed -- the same list goes as text rather than nothing at all, which is the
+    rule the other cards in this bot follow.
+    """
     if not entries:
-        return None
+        return None, None
     people = len({e["name"] for e in entries})
     title = f"Grey parses · {night_text}" if night_text else "Grey parses"
     where = " · ".join(s for s in (team_name, difficulty, raid) if s)
-    description = (f"{len(entries)} parse{'s' if len(entries) != 1 else ''} under "
-                   f"{threshold:g}% from {people} raider{'s' if people != 1 else ''}."
-                   f"\n{where}" if where else "")
-    embed = {"title": title, "description": description + "\n" + lines(entries),
-             "color": COLOR,
+    summary = (f"{len(entries)} parse{'s' if len(entries) != 1 else ''} under "
+               f"{threshold:g}% from {people} raider{'s' if people != 1 else ''}."
+               + (f"\n{where}" if where else ""))
+    embed = {"title": title, "color": COLOR,
              "footer": {"text": "greyBot · sent only to you · rankPercent, the number raiders "
                                 "mean by \"parse\""}}
     if page_url:
         embed["url"] = page_url
-    return {"embeds": [embed], "allowed_mentions": {"parse": []}}
+    if card:
+        embed["description"] = summary
+        embed["image"] = {"url": f"attachment://{CARD_NAME}"}
+        return {"embeds": [embed], "allowed_mentions": {"parse": []}}, (CARD_NAME, card)
+    embed["description"] = summary + "\n" + lines(entries)
+    return {"embeds": [embed], "allowed_mentions": {"parse": []}}, None

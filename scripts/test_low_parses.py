@@ -1,11 +1,17 @@
 """Offline tests for the private grey-parse DM: what counts, how it is ordered, and that
 it stays quiet and private."""
+import base64
+import io
 import json
 import os
 import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+# The smallest valid PNG, so icon fetching can be exercised without a network or a fixture.
+PIXEL = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -64,13 +70,16 @@ class CollectTests(unittest.TestCase):
 class MessageTests(unittest.TestCase):
     def build(self, rows, **kw):
         entries = low_parses.collect(rows, ENCOUNTERS)
-        return entries, low_parses.message(entries, team_name="Scrambled", difficulty="Heroic",
-                                           raid="The Venomous Abyss", night_text="Thursday Sept 17",
-                                           page_url="https://raids.example/x/", **kw)
+        payload, attachment = low_parses.message(
+            entries, team_name="Scrambled", difficulty="Heroic", raid="The Venomous Abyss",
+            night_text="Thursday Sept 17", page_url="https://raids.example/x/", **kw)
+        self.attachment = attachment
+        return entries, payload
 
     def test_a_good_night_sends_nothing_at_all(self):
         _entries, payload = self.build([row("A", "The Twin Fangs", 80.0)])
         self.assertIsNone(payload)
+        self.assertIsNone(self.attachment)
 
     def test_the_message_carries_every_field_asked_for(self):
         rows = [row("Deathbrewst", "The Coiled Altar", 8.0, spec="Frost", cls="DeathKnight"),
@@ -104,13 +113,85 @@ class MessageTests(unittest.TestCase):
         self.assertEqual(payload["allowed_mentions"], {"parse": []})
 
 
+class CardTests(unittest.TestCase):
+    """The drawn card: the three things Discord text cannot show."""
+    def test_the_card_draws_and_asks_only_for_the_specs_on_it(self):
+        import low_parse_card
+        from PIL import Image
+        rows = [row("Deathbrewst", "The Coiled Altar", 8.0, spec="Frost", cls="DeathKnight"),
+                row("Kelsi", "The Coiled Altar", 11.0, spec="Mistweaver", cls="Monk"),
+                row("Twin", "The Twin Fangs", 4.0, spec="Frost", cls="DeathKnight")]
+        entries = low_parses.collect(rows, ENCOUNTERS)
+        asked = []
+
+        class Answer(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        def opener(request, timeout):
+            asked.append(request.full_url)
+            return Answer(PIXEL)
+
+        icons = low_parse_card.fetch_icons(entries, opener=opener)
+        self.assertEqual(len(asked), 2)          # two distinct specs, three rows
+        png = low_parse_card.render(entries, team_name="Scrambled", difficulty="Heroic",
+                                    raid="The Venomous Abyss", night_text="Thursday Sept 17",
+                                    icons=icons)
+        self.assertEqual(Image.open(io.BytesIO(png)).size[0], low_parse_card.WIDTH * 2)
+
+    def test_an_icon_that_will_not_load_costs_a_row_nothing(self):
+        import low_parse_card
+        entries = low_parses.collect([row("A", "The Twin Fangs", 5.0)], ENCOUNTERS)
+        self.assertTrue(low_parse_card.render(entries, icons={("Warrior", "Fury"): b"not a png"}))
+        self.assertTrue(low_parse_card.render(entries, icons={}))
+
+    def test_a_card_never_raises_and_an_empty_night_draws_nothing(self):
+        import low_parse_card
+        self.assertIsNone(low_parse_card.render([]))
+        self.assertIsNone(low_parse_card.render([{"bad": "shape"}]))
+
+    def test_every_class_and_spec_the_raid_can_field_has_artwork(self):
+        import spec_icons
+        self.assertEqual(len({k.split("|")[0] for k in spec_icons.ICONS}), 13)
+        # Warcraft Logs' spelling, the template's abbreviations, and the disambiguating
+        # digits all have to land on the same icon.
+        self.assertTrue(spec_icons.emoji_id("DeathKnight", "Frost"))
+        self.assertTrue(spec_icons.emoji_id("DK", "Frost1"))
+        self.assertTrue(spec_icons.emoji_id("demonhunter", "havoc"))
+        self.assertTrue(spec_icons.emoji_id("Hunter", "Beast Mastery"))
+        self.assertNotEqual(spec_icons.emoji_id("Mage", "Frost"),
+                            spec_icons.emoji_id("DeathKnight", "Frost"))
+        self.assertIsNone(spec_icons.emoji_id("Warrior", ""))
+        self.assertIsNone(spec_icons.emoji_id("Tinker", "Sprocket"))
+        self.assertTrue(spec_icons.url("Warrior", "Fury").startswith("https://cdn.discordapp.com/emojis/"))
+
+    def test_the_card_is_attached_to_the_message_not_linked_from_a_public_bucket(self):
+        entries = low_parses.collect([row("A", "The Twin Fangs", 5.0)], ENCOUNTERS)
+        payload, attachment = low_parses.message(
+            entries, team_name="Scrambled", difficulty="Heroic", raid="R",
+            night_text="Thursday", card=b"\x89PNG-pretend")
+        self.assertEqual(attachment, (low_parses.CARD_NAME, b"\x89PNG-pretend"))
+        self.assertEqual(payload["embeds"][0]["image"]["url"], "attachment://" + low_parses.CARD_NAME)
+        self.assertNotIn("raids.ryangrey.dev", json.dumps(payload))
+        self.assertNotIn("s3", json.dumps(payload).lower())
+
+    def test_without_a_card_the_same_list_still_goes_as_text(self):
+        entries = low_parses.collect([row("A", "The Twin Fangs", 5.0)], ENCOUNTERS)
+        payload, attachment = low_parses.message(entries, team_name="S", difficulty="Heroic",
+                                                 raid="R", night_text="Thursday", card=None)
+        self.assertIsNone(attachment)
+        self.assertIn("A", payload["embeds"][0]["description"])
+        self.assertNotIn("image", payload["embeds"][0])
+
+
 class WiringTests(unittest.TestCase):
     """The handler's side: off by default, quiet on a good night, and private."""
     TIER = {"meta": {"encounters": ENCOUNTERS}, "label": "The Venomous Abyss"}
 
-    def call(self, cfg, rows):
+    def call(self, cfg, rows, card=b"\x89PNG"):
         import handler
         with patch.object(handler.recap_mod, "parse_rows", return_value=rows), \
+             patch.object(handler.low_parse_card, "render", return_value=card), \
              patch.object(handler.discord, "dm_to") as dm:
             sent = handler.send_low_parses(cfg, [], set(), "heroic", self.TIER, "Heroic",
                                            "Thursday Sept 17", "https://raids.example/x/")
@@ -132,8 +213,29 @@ class WiringTests(unittest.TestCase):
         self.assertTrue(sent)
         token, who, payload = dm.call_args[0]
         self.assertEqual((token, who), ("t", "42"))
+        self.assertEqual(dm.call_args[1]["attachment"], (low_parses.CARD_NAME, b"\x89PNG"))
         # There is no channel anywhere in this path.
         self.assertNotIn("channel", json.dumps(payload).lower())
+
+    def test_a_card_that_would_not_draw_still_sends_the_list(self):
+        sent, dm = self.call({"bot_token": "t", "low_parse_dm": "42", "low_parse_max": 25.0},
+                             [row("A", "The Twin Fangs", 2.0)], card=None)
+        self.assertTrue(sent)
+        self.assertIsNone(dm.call_args[1]["attachment"])
+        self.assertIn("A", dm.call_args[0][2]["embeds"][0]["description"])
+
+
+class UploadTests(unittest.TestCase):
+    def test_the_multipart_body_names_the_same_file_the_embed_points_at(self):
+        import discord as dis
+        payload = {"embeds": [{"image": {"url": "attachment://grey-parses.png"}}]}
+        body, content_type = dis._multipart(payload, "grey-parses.png", b"\x89PNGbytes")
+        self.assertTrue(content_type.startswith("multipart/form-data; boundary="))
+        boundary = content_type.split("boundary=")[1]
+        self.assertIn(b'name="files[0]"; filename="grey-parses.png"', body)
+        self.assertIn(b'"attachments": [{"id": 0, "filename": "grey-parses.png"}]', body)
+        self.assertIn(b"\x89PNGbytes", body)
+        self.assertTrue(body.endswith(f"--{boundary}--\r\n".encode()))
 
 
 if __name__ == "__main__":

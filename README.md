@@ -633,10 +633,28 @@ that, louder. So the grey parses go to **one person, by direct message**, with t
 form of it to point anywhere by accident. `/greybot/recap/low_parse_max` is what counts as
 grey, defaulting to Warcraft Logs' own 25.
 
-The list is grouped by boss, bosses in Raider.IO's tier order — so "Boss 4 · The Coiled
-Altar" says how deep in the raid it is — and worst first within each boss, with the
-character, spec and `rankPercent`. Nobody grey means nothing is sent; a good night is
-silent rather than congratulated.
+The list is a **drawn card**, grouped by boss, bosses in Raider.IO's tier order — so
+"Boss 7 · The Coiled Altar" says how deep in the raid it is — and worst first within each
+boss. Each row carries the spec's icon, the role glyph and the character's name in its
+class colour. Discord renders an emoji inside an embed but will not colour a word, and the
+class colour is what makes a list of names readable at a glance; once a card is being drawn
+for that, the icons may as well be real artwork. Nobody grey means nothing is sent; a good
+night is silent rather than congratulated.
+
+**The card is uploaded into the DM, not published.** Every other card this bot draws goes
+to S3 and is linked from a public page; this one names people's worst nights, so
+`raids.ryangrey.dev` gets no copy and there is no URL to forward. `discord.dm_to` takes an
+optional attachment and builds the multipart body by hand, because this package is vendored
+into a Lambda zip and has no dependencies. If the card cannot be drawn at all, the same list
+goes as text rather than nothing.
+
+**Spec artwork is referenced, never committed.** `src/spec_icons.py` holds forty
+`class|spec → application emoji id` pairs and no images: `recap_page` already refuses to
+redistribute Blizzard's role textures, and forty spec icons in a public repository would be
+a larger version of the same thing. The card fetches them from Discord's CDN at render
+time, the way the roll call card fetches member avatars, and an icon that will not load
+costs a row nothing. The table was generated from the raid signup template's
+`classes[].specs[]`, which already pairs a spec with the emoji it was imported with.
 
 It reads `parse_rows`, one row per character per kill, and NOT the page's `raider_rows`,
 which carries a mean. A mean hides the grey: 8 on one boss and 60 on three averages to a
