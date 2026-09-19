@@ -375,9 +375,9 @@ after quietly establishing an initial baseline.
 See [Mythic+ rules and rollout](docs/mythic-plus.md) for calculation, scheduling,
 collection, first-week limitations and deployment controls.
 
-## The morning-after recap, and the two-teams problem
+## The post-raid recap, and the two-teams problem
 
-The morning after raid night a second card goes up in `#bots`: a two-by-three grid of top
+Fifteen minutes after raid night ends a second card goes up in `#bots`: a two-by-three grid of top
 damage, top heals, damage taken, most deaths, best parses (top three, one per person) and
 item level (top three, read across kills and wipes), plus the pull count on the progression
 boss and what died. One embed, no ping.
@@ -623,6 +623,28 @@ The kill poller has never had this problem and does not need the fix: it runs on
 A raid that runs past midnight is still one night. The exactly-once key is the local date
 the report **started**, so a Tuesday raid ending at 12:40am is claimed as Tuesday and
 cannot be re-posted as Wednesday.
+
+### The night's grey parses, privately
+
+`show_worst_parse` has been opt-in since this was written, and the reason is in the config:
+parse-shaming starts arguments. Naming several people's bad nights in a channel would be
+that, louder. So the grey parses go to **one person, by direct message**, with the recap.
+`/greybot/recap/low_parse_dm` is a Discord user id and empty is off; there is no channel
+form of it to point anywhere by accident. `/greybot/recap/low_parse_max` is what counts as
+grey, defaulting to Warcraft Logs' own 25.
+
+The list is grouped by boss, bosses in Raider.IO's tier order — so "Boss 4 · The Coiled
+Altar" says how deep in the raid it is — and worst first within each boss, with the
+character, spec and `rankPercent`. Nobody grey means nothing is sent; a good night is
+silent rather than congratulated.
+
+It reads `parse_rows`, one row per character per kill, and NOT the page's `raider_rows`,
+which carries a mean. A mean hides the grey: 8 on one boss and 60 on three averages to a
+respectable 47 and would never appear, which is exactly the night worth knowing about. The
+rows are the ones the card already built, so the two can never disagree about whose parses
+counted, and it costs no extra Warcraft Logs query. A failed DM is logged and never costs
+the recap. `{"mode":"recap","dry":true}` returns `lowParses` and `lowParsePayload` so the
+list can be read without sending it.
 
 ## A second raid team in the same server: Meer's Raid
 
@@ -985,7 +1007,7 @@ scripts/set-webhook-identity.py   name + avatar on the announcing webhook
 infra/iam-setup.sh   one-time admin setup (1 of 2): table, execution + scheduler roles
 infra/create-schedule.sh   admin setup (2 of 2): the 15-minute poll, created last
 infra/grant-recap-config.sh       widen the role for the recap, create its parameters
-infra/create-recap-schedule.sh    the Wed/Fri morning recap schedule
+infra/create-recap-schedule.sh    the Wed/Fri post-raid recap schedule
 infra/create-interactions-api.sh  the HTTPS endpoint Discord posts interactions to
 infra/grant-interactions.sh       widen the role for slash commands
 infra/grant-alerts.sh             health alerts: the parameter + sns:Publish on the role

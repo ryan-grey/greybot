@@ -54,6 +54,7 @@ import recap as recap_mod
 import kill_card
 import recap_card
 import recap_page
+import low_parses
 import rollcall
 import keys
 import store
@@ -1798,6 +1799,46 @@ def poll_one(event, cfg, scope, now, now_iso, started):
     return {"ok": True, "kills": len(kills), "announced": announced}
 
 
+def low_parse_report(cfg, sources, eligible_names, night_diff, tier, difficulty,
+                     night_text, page_url=""):
+    """(entries, payload) for this night's grey parses, or (entries, None) to send nothing.
+
+    Reads `parse_rows` — one row per character per kill — not the page's `raider_rows`,
+    which is one row per person carrying a MEAN parse. A mean hides the grey: a raider who
+    parsed 8 on one boss and 60 on three averages to a respectable 47 and would never
+    appear, which is exactly the night worth knowing about.
+
+    Split from the sending so a dry run can show exactly what would go out.
+    """
+    rows = recap_mod.parse_rows(sources, eligible_names, night_diff)
+    entries = low_parses.collect(rows, (tier.get("meta") or {}).get("encounters"),
+                                 threshold=cfg.get("low_parse_max", 25.0))
+    payload = low_parses.message(
+        entries, team_name=cfg.get("team_name") or cfg.get("guild_name") or "",
+        difficulty=difficulty, raid=tier.get("label") or "", night_text=night_text,
+        threshold=cfg.get("low_parse_max", 25.0), page_url=page_url)
+    return entries, payload
+
+
+def send_low_parses(cfg, sources, eligible_names, night_diff, tier, difficulty,
+                    night_text, page_url=""):
+    """DM the night's grey parses. Silent when unconfigured, and silent on a good night."""
+    who = cfg.get("low_parse_dm")
+    if not who:
+        return False
+    entries, payload = low_parse_report(cfg, sources, eligible_names, night_diff, tier,
+                                        difficulty, night_text, page_url)
+    if not payload:
+        log("low_parse_none", threshold=cfg.get("low_parse_max"),
+            note="nobody parsed grey — nothing sent")
+        return False
+    discord.dm_to(cfg.get("bot_token"), who, payload)
+    # The count and the threshold, never the names: this log is not the place for them.
+    log("low_parse_dm_sent", parses=len(entries),
+        raiders=len({e["name"] for e in entries}), threshold=cfg.get("low_parse_max"))
+    return True
+
+
 def rollcall_setup(event, cfg, now_iso):
     """`{"admin":"rollcall_setup","team":"meers-raid"|null,"voice_channel":"…","label":"…",
     "members":{"<discord id>":["Character", …]}}` -- tell one install which voice channel is
@@ -2503,10 +2544,15 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
             missingSections=summary["missing"], ilvlScale=ilvl_scale,
             posted=False, stateWritten=False,
             note="DRY RUN — nothing posted, no night claimed")
+        grey, grey_payload = low_parse_report(cfg, sources, eligible_names, night_diff,
+                                              tier, diff_label, night_text, page_url or "")
         return {"ok": True, "night": night_key, "posted": False, "dry": True,
                 "payload": payload, "summary": summary, "recapPageRows": rows,
                 "recapPageHtml": page_html, "recapPageUrl": page_url,
-                "sources": sources_meta}
+                "sources": sources_meta,
+                # What the private DM would carry, so a dry run shows it without sending it.
+                "lowParses": grey, "lowParsePayload": grey_payload,
+                "lowParseWouldSend": bool(grey_payload and cfg.get("low_parse_dm"))}
 
     try:
         sent = discord.post_to(destination(cfg), payload)
@@ -2517,6 +2563,15 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         log("recap_failed", night=night_key, error=str(exc))
         return {"ok": False, "night": night_key, "posted": False}
     _remember_post(scope, sent, "recap", now_iso)
+
+    # The night's grey parses, privately, to the one person who asked for them. After the
+    # card is posted and wrapped, because a failed DM must never cost the recap: the card
+    # is the thing the raid reads, and this is a note to one person.
+    try:
+        send_low_parses(cfg, sources, eligible_names, night_diff, tier, diff_label,
+                        night_text, page_url or "")
+    except Exception as exc:                                   # noqa: BLE001
+        log("low_parse_dm_failed", error=repr(exc))
 
     log("recap_posted", night=night_key, manual=bool(manual), team=scope.team,
         card=bool(card_url),

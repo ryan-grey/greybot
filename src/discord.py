@@ -550,6 +550,32 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
 CHANNEL_API = "https://discord.com/api/v10/channels"
 
 
+DM_API = "https://discord.com/api/v10/users/@me/channels"
+
+
+def dm_to(bot_token, user_id, payload, timeout=10, sleep=time.sleep, max_attempts=1):
+    """POST one direct message to a single person.
+
+    Two calls, because Discord has no "send to user" endpoint: open the DM channel, then
+    post to it like any other channel. Opening one that already exists returns the same
+    channel, so this is safe to do on every send rather than caching a channel id.
+
+    `max_attempts=1` by default. Everything that reaches here is a private notice to one
+    person, and a duplicate of those is worse than a missing one -- a retry after an
+    ambiguous timeout is how somebody gets the same list twice.
+    """
+    if not bot_token or not str(user_id).isdecimal():
+        raise DiscordError("a direct message needs a bot token and a numeric user id")
+    headers = {"Authorization": f"Bot {bot_token}"}
+    opened = _post_json(DM_API, {"recipient_id": str(user_id)}, headers=headers,
+                        timeout=timeout, sleep=sleep, max_attempts=max_attempts)
+    channel = getattr(opened, "message_id", None)     # the opened channel's own id
+    if not channel:
+        raise DiscordError("Discord did not return a DM channel")
+    return _post_json(f"{CHANNEL_API}/{channel}/messages", payload, headers=headers,
+                      timeout=timeout, sleep=sleep, max_attempts=max_attempts)
+
+
 def post_to(destination, payload, timeout=10, sleep=time.sleep, max_attempts=MAX_ATTEMPTS):
     """POST one announcement to wherever this install posts.
 

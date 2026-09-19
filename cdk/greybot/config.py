@@ -89,6 +89,9 @@ class StageConfig:
         "alerts/sns_topic_arn",
         # Signs the roll call's one question to the NAS service. Empty is OFF.
         "rollcall/secret",
+        # Who privately gets the night's grey parses, and what counts as grey. Empty is OFF.
+        "recap/low_parse_dm",
+        "recap/low_parse_max",
     ))
 
     @property

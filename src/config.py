@@ -93,12 +93,21 @@ ALERT_TOPIC_ARN = f"{PREFIX}/alerts/sns_topic_arn"
 # boss died"). Empty is OFF: no secret, no question, no roll call, and nothing else changes.
 ROLLCALL_SECRET = f"{PREFIX}/rollcall/secret"
 
+# Who privately receives the night's grey parses with the recap, as a Discord user id.
+# EMPTY IS OFF, and off is the default, for the same reason `show_worst_parse` is opt-in:
+# naming people's bad nights is not something to switch on by accident. There is no
+# channel form of this -- it goes to one person or nowhere.
+LOW_PARSE_DM = f"{PREFIX}/recap/low_parse_dm"
+# What counts as grey. Configuration rather than a constant so the line can move without
+# a deploy; 25 is Warcraft Logs' own grey band.
+LOW_PARSE_MAX = f"{PREFIX}/recap/low_parse_max"
+
 OPTIONAL_NAMES = [BLIZZARD_CLIENT_ID, BLIZZARD_CLIENT_SECRET,
                   DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID,
                   RECAP_ENABLED, RECAP_WORST_PARSE, RECAP_SCHEDULE,
                   TEAM_ROSTER_MIN_PCT, TEAM_OVERLAP_HIGH, TEAM_OVERLAP_LOW,
                   TEAM_PROG_TAG, RECAP_PAGE_URL, RECAP_PAGE_BUCKET,
-                  ALERT_TOPIC_ARN, ROLLCALL_SECRET]
+                  ALERT_TOPIC_ARN, ROLLCALL_SECRET, LOW_PARSE_DM, LOW_PARSE_MAX]
 
 # Defaults for everything the recap reads. A missing parameter is a configured default,
 # not a failure -- the thresholds especially, because they are tuning knobs that only
@@ -120,6 +129,8 @@ DEFAULTS = {
     RECAP_PAGE_BUCKET: "",
     ALERT_TOPIC_ARN: "",
     ROLLCALL_SECRET: "",
+    LOW_PARSE_DM: "",
+    LOW_PARSE_MAX: "25",
 }
 
 
@@ -227,6 +238,8 @@ def load(now=None):
         "alert_topic_arn": got.get(ALERT_TOPIC_ARN,
                                    DEFAULTS[ALERT_TOPIC_ARN]).strip(),
         "rollcall_secret": got.get(ROLLCALL_SECRET, DEFAULTS[ROLLCALL_SECRET]).strip(),
+        "low_parse_dm": got.get(LOW_PARSE_DM, DEFAULTS[LOW_PARSE_DM]).strip(),
+        "low_parse_max": _number(got.get(LOW_PARSE_MAX), DEFAULTS[LOW_PARSE_MAX]),
     })
     return _cache
 
@@ -242,6 +255,9 @@ def redacted(cfg):
             "botTokenSet": bool(cfg.get("bot_token")),
             "recapEnabled": bool(cfg.get("recap_enabled")),
             "recapWorstParse": bool(cfg.get("recap_worst_parse")),
+            # Whether it is on, never who receives it.
+            "lowParseDmEnabled": bool(cfg.get("low_parse_dm")),
+            "lowParseMax": cfg.get("low_parse_max"),
             "rosterMinPct": cfg.get("roster_min_pct"),
             "overlapHigh": cfg.get("overlap_high"),
             "overlapLow": cfg.get("overlap_low"),
