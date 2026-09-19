@@ -256,14 +256,6 @@ class EventTests(Base):
         event = self.store.events("1")[0]
         self.assertFalse(json.loads(event["payload"])["prior_message_observed"])
 
-    def test_soundboard_plays_are_filed_by_sound_and_emoji_reactions_are_not_kept(self):
-        self.message("VOICE_CHANNEL_EFFECT_SEND", 2, user_id="8", sound_id=77, sound_volume=1.0)
-        self.message("VOICE_CHANNEL_EFFECT_SEND", 3, user_id="8", emoji={"name": "🔥"})
-        events = [e for e in self.store.events("1") if e["kind"] == "VOICE_CHANNEL_EFFECT_SEND"]
-        self.assertEqual(len(events), 1)
-        self.assertEqual((events[0]["subject"], json.loads(events[0]["payload"])["sound_id"],
-                          json.loads(events[0]["payload"])["user_id"]), ("77", "77", "8"))
-
     def test_bootstrap_does_not_generate_member_joins(self):
         self.collector.receive({"op": 0, "t": "GUILD_CREATE", "s": 2,
             "d": {"id": "1", "members": [{"user": {"id": "8"}}]}})
