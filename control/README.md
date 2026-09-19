@@ -170,6 +170,34 @@ belongs to which member for 30 days, and the journal gets contentless `DM_FORWAR
 `DM_REPLIED` entries. The collector already ignores events outside the server, so DMs never
 reach the message index. Unset, the intent is not requested and DMs are ignored as before.
 
+## Raid roll call
+
+When a raid team's first boss of the night dies, the Lambda posts an attendance card to that
+team's bot channel, once per night: the raid as Warcraft Logs recorded it, grouped tank /
+healer / damage, each row a Discord member, an arrow and the character they played. What
+could not be paired is listed underneath as "In kill but not in Discord" and "In Discord but
+not in kill". The members come from the team's voice channel at the second of the kill; the
+card and the post say "Discord" and nothing more specific, and a test holds them to that.
+The Lambda draws and posts it (`src/rollcall.py`, `src/rollcall_card.py`); this service
+answers the one thing only it knows.
+
+`POST /internal/roll-call` takes `{"channel_id", "at"}` and returns the human members the
+journal places in that channel at that moment, with display names and picture links. It is
+not a member route: the caller signs the body with `GREYBOT_ROLLCALL_SECRET[_SSM]`
+(`X-Greybot-Signature: t=<unix>,v1=<hmac-sha256 of "t.body">`, five-minute window), and
+without the secret the route is not registered at all. A stay cut by a fresh gateway session
+or a host outage is not counted, so nobody is reported present through a real gap; a bare
+disconnect that the gateway then resumes loses nothing and is ignored.
+
+Each install's voice channel, card label and member-to-character map live in its DynamoDB
+`ROLLCALL#SETUP` row, written by the `rollcall_setup` admin invoke with `live` off by default.
+With `review` set to a Discord user id, a live card is held (`ROLLCALL#PENDING#<night>`) and
+sent to that person's DMs with Post and Skip; only they can press either, the held payload is
+what gets posted, and a night settles once.
+`{"mode":"rollcall","team":…,"dry":true,"hours":72}` draws a past night under
+`rollcall/preview/` without claiming or posting, which is how a mapping is checked before
+`live` is set. Members nobody has mapped are matched to the kill's names by spelling.
+
 ## Run locally
 
 Create a Python environment outside the checkout and install `requirements.txt`, then

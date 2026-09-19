@@ -87,6 +87,8 @@ class StageConfig:
         "recap/page_url",
         "recap/page_bucket",
         "alerts/sns_topic_arn",
+        # Signs the roll call's one question to the NAS service. Empty is OFF.
+        "rollcall/secret",
     ))
 
     @property

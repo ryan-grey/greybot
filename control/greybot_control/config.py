@@ -43,6 +43,7 @@ class Config:
     public_channel_ids: tuple[str, ...] = ()
     voice_helper_tokens: tuple[str, ...] = ()
     dm_owner_id: str = ""
+    rollcall_secret: str = ""
 
     @property
     def secure(self):
@@ -89,4 +90,6 @@ class Config:
         return cls(guild, client, secret("GREYBOT_BOT_TOKEN"),
                    secret("GREYBOT_OAUTH_SECRET"), origin, state, bucket, days,
                    os.environ.get("GREYBOT_CAPTURE_CONTENT") == "1", enforce, archive_dir, start_channel, public_channels,
-                   tuple(helpers), dm_owner(os.environ.get("GREYBOT_DM_OWNER_ID", "").strip()))
+                   tuple(helpers), dm_owner(os.environ.get("GREYBOT_DM_OWNER_ID", "").strip()),
+                   # Shared with the Lambda so it can ask who was in voice at a kill. Unset turns the route off.
+                   secret("GREYBOT_ROLLCALL_SECRET"))

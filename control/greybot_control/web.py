@@ -114,6 +114,8 @@ def create_app(cfg=None, store=None, discord=None):
     install_raids(app, cfg, store, discord, cookie, static, directory)
     from .voice_activity import install as install_activity
     install_activity(app, cfg, store, discord, cookie, static, directory)
+    from .roll_call import install as install_roll_call
+    install_roll_call(app, cfg, store, directory)
 
     @app.middleware("http")
     async def security_headers(request, call_next):

@@ -54,6 +54,7 @@ import recap as recap_mod
 import kill_card
 import recap_card
 import recap_page
+import rollcall
 import keys
 import store
 import team
@@ -1069,6 +1070,10 @@ def handle_interaction(event, cfg, scope, now):
         import role_relay
         return interactions.http(200, role_relay.forward(body_bytes,
             headers.get("x-signature-ed25519"), headers.get("x-signature-timestamp")))
+    if kind == 3 and str(body.get("data", {}).get("custom_id", "")).startswith(rollcall.CLICK):
+        # Pressed in a DM, so there is no guild on it; the custom_id names the install and
+        # rollcall_click checks the presser against that install's reviewer.
+        return rollcall_click(body, cfg)
     if kind == interactions.PING:
         log("interaction_ping")
         return interactions.http(200, {"type": interactions.PONG})
@@ -1483,6 +1488,8 @@ def handle_admin(event, cfg, scope, now, now_iso):
         # for something to actually go wrong.
         return {"ok": True, "health": run_health_check(cfg, scope, now, now_iso,
                                                        forced=bool(event.get("notify")))}
+    if action == "rollcall_setup":
+        return rollcall_setup(event, cfg, now_iso)
     if action != "register_commands":
         raise RuntimeError(f"unknown admin action: {action}")
     if not cfg.get("bot_token"):
@@ -1698,6 +1705,13 @@ def poll_one(event, cfg, scope, now, now_iso, started):
         by_difficulty.append((difficulty, found))
     kills = [k for _d, found in by_difficulty for k in found]
 
+    # A hand-run roll call: `{"mode":"rollcall","team":...,"dry":true,"hours":72}` draws the
+    # card for a past night and returns where it was published, claiming and posting nothing.
+    if isinstance(event, dict) and str(event.get("mode") or "").lower() == "rollcall":
+        return {"ok": True, "rollcall": roll_call(cfg, scope, token, by_difficulty, now,
+                                                  dry=bool(event.get("dry", True)),
+                                                  hours=event.get("hours"))}
+
     if not kills:
         # No kills is two completely different situations wearing the same face, and the
         # bot spent eighteen hours unable to tell them apart. A guild that has not raided
@@ -1772,9 +1786,105 @@ def poll_one(event, cfg, scope, now, now_iso, started):
             # A snapshot is a convenience for /progress. Losing it must not fail a poll.
             log("snapshot_write_failed", error=repr(exc))
 
+    # After the announcements, so a first kill's own card always lands above its roll call,
+    # and wrapped because attendance is never allowed to cost a kill announcement.
+    try:
+        roll_call(cfg, scope, token, by_difficulty, now)
+    except Exception as exc:                                   # noqa: BLE001
+        log("rollcall_error", error=repr(exc))
+
     log("poll_done", kills=len(kills), announced=announced, tiers=tiers,
         points=rate, ms=int((time.time() - started) * 1000))
     return {"ok": True, "kills": len(kills), "announced": announced}
+
+
+def rollcall_setup(event, cfg, now_iso):
+    """`{"admin":"rollcall_setup","team":"meers-raid"|null,"voice_channel":"…","label":"…",
+    "members":{"<discord id>":["Character", …]}}` -- tell one install which voice channel is
+    its team's and who plays whom. Replaces the row whole; read it back before editing."""
+    wanted = event.get("team") or None
+    pairs = [(s, c) for s, c in tenant_configs(cfg) if (s.team or None) == wanted]
+    if not pairs:
+        raise RuntimeError(f"no registered install with team {wanted!r}")
+    voice, members = str(event.get("voice_channel") or ""), event.get("members") or {}
+    if not voice.isdecimal():
+        raise RuntimeError("voice_channel must be a channel id")
+    if not isinstance(members, dict) or not all(
+            str(k).isdecimal() and isinstance(v, list) and all(isinstance(c, str) for c in v)
+            for k, v in members.items()):
+        raise RuntimeError("members must map a Discord user id to a list of character names")
+    live = event.get("live") is True
+    reviewer = str(event.get("review") or "")
+    if reviewer and not reviewer.isdecimal():
+        raise RuntimeError("review must be a Discord user id")
+    store.put_rollcall_setup(pairs[0][0], voice, members, now_iso,
+                             label=str(event.get("label") or ""), live=live, review=reviewer)
+    log("rollcall_setup_saved", team=wanted, members=len(members), live=live,
+        reviewed=bool(reviewer))
+    return {"ok": True, "team": wanted, "members": len(members), "live": live,
+            "reviewed": bool(reviewer)}
+
+
+def rollcall_click(body, cfg):
+    """Post or Skip on a held roll call. Only the install's reviewer may press either, the held
+    payload is what gets posted (never anything from the click), and it settles exactly once."""
+    def answer(text):
+        return interactions.http(200, {"type": 7, "data": {"content": text, "components": [],
+                                                           "allowed_mentions": {"parse": []}}})
+    try:
+        verb, team_slug, night = str(body["data"]["custom_id"])[len(rollcall.CLICK):].split(":", 2)
+    except (KeyError, ValueError):
+        return interactions.unauthorized()
+    wanted = None if team_slug == "-" else team_slug
+    clicker = ((body.get("user") or (body.get("member") or {}).get("user")) or {}).get("id")
+    pairs = [(s, c) for s, c in tenant_configs(cfg) if (s.team or None) == wanted]
+    setup = store.get_rollcall_setup(pairs[0][0]) if pairs else None
+    if verb not in ("post", "skip") or not setup or not clicker or setup.get("review") != clicker:
+        log("rollcall_click_denied", team=wanted, night=night)
+        return interactions.http(200, {"type": 4, "data": {
+            "content": "Only this team's roll call reviewer can do that.", "flags": 64}})
+    scope, tcfg = pairs[0]
+    held = store.get_rollcall_pending(scope, night)
+    if not held or held["state"] != "pending":
+        return answer(f"Already {held['state'] if held else 'gone'}. Nothing was sent just now.")
+    if not store.settle_rollcall_pending(scope, night, "posted" if verb == "post" else "skipped"):
+        return answer("Already handled from another click. Nothing was sent just now.")
+    if verb == "skip":
+        log("rollcall_skipped", team=wanted, night=night)
+        return answer("Skipped. Nothing was posted for this night.")
+    try:
+        discord.post_to(destination(tcfg), held["payload"], max_attempts=1)
+    except Exception as exc:                                   # noqa: BLE001
+        log("rollcall_review_post_failed", team=wanted, night=night, error=repr(exc))
+        return answer("Discord did not confirm the post. Check the channel before doing anything else; "
+                      "it will not be retried.")
+    log("rollcall_posted", team=wanted, night=night, reviewed=True)
+    return answer(f"Posted to <#{tcfg.get('channel_id')}>.")
+
+
+def roll_call(cfg, scope, token, by_difficulty, now, dry=False, hours=None):
+    """rollcall.run with this install's name, channel and publisher filled in."""
+    def publish(key, body):
+        publish_bytes(cfg, key, body, "image/png")
+        return f'{cfg["recap_page_url"]}/{key}'
+
+    def post(where, payload):
+        return discord.post_to(where, payload, max_attempts=1)
+
+    def review(user_id, payload):
+        # A DM is a channel like any other once it has been opened; opening one that already
+        # exists returns the same channel, so this is safe to do every time.
+        headers = {"Authorization": f'Bot {cfg["bot_token"]}'}
+        opened = discord._post_json("https://discord.com/api/v10/users/@me/channels",
+                                    {"recipient_id": str(user_id)}, headers=headers, max_attempts=1)
+        return discord._post_json(f"{discord.CHANNEL_API}/{opened.message_id}/messages", payload,
+                                  headers=headers, max_attempts=1)
+
+    return rollcall.run(cfg, scope, token, by_difficulty, now, ANNOUNCE_TZ,
+                        team_name=cfg.get("team_name") or "",
+                        destination=None if dry else destination(cfg),
+                        publish=publish, post=post, review=review, dry=dry,
+                        max_age_hours=float(hours) if hours else rollcall.MAX_AGE_HOURS)
 
 
 def announce_difficulty(token, gid, cfg, scope, profile, index, expansions, kills,

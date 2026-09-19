@@ -644,6 +644,106 @@ def release_recap(scope, night_key):
                     ExpressionAttributeValues={":b": {"SS": [night_key]}})
 
 
+# The roll call: one card per raid night, posted when the night's first boss dies. Two rows
+# per install. ROLLCALL holds the claimed nights, exactly as RECAPS does. ROLLCALL#SETUP holds
+# what the operator told the bot: which voice channel is this team's, and which characters
+# each Discord member plays. No setup row means no roll call for that install.
+ROLLCALL_SK = "ROLLCALL"
+ROLLCALL_SETUP_SK = "ROLLCALL#SETUP"
+
+
+def claim_rollcall(scope, night_key):
+    """Atomically claim one night's roll call. Same discipline as claim_recap."""
+    try:
+        ddb.update_item(
+            TableName=TABLE, Key={"pk": _s(scope.tenant), "sk": _s(ROLLCALL_SK)},
+            UpdateExpression="ADD posted :b",
+            ConditionExpression="attribute_not_exists(posted) OR NOT contains(posted, :k)",
+            ExpressionAttributeValues={":b": {"SS": [night_key]}, ":k": _s(night_key)})
+        return True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def release_rollcall(scope, night_key):
+    """Hand the night back when nothing reached Discord, so the next poll retries it."""
+    ddb.update_item(TableName=TABLE, Key={"pk": _s(scope.tenant), "sk": _s(ROLLCALL_SK)},
+                    UpdateExpression="DELETE posted :b",
+                    ExpressionAttributeValues={":b": {"SS": [night_key]}})
+
+
+def get_rollcall_setup(scope):
+    """{"voice_channel": id, "members": {discord_id: [character, ...]}} or None."""
+    res = ddb.get_item(TableName=TABLE,
+                       Key={"pk": _s(scope.tenant), "sk": _s(ROLLCALL_SETUP_SK)})
+    item = res.get("Item")
+    if not item or not (item.get("voiceChannel") or {}).get("S"):
+        return None
+    try:
+        members = json.loads((item.get("members") or {}).get("S") or "{}")
+    except ValueError:
+        members = {}
+    return {"voice_channel": item["voiceChannel"]["S"], "members": members,
+            "label": (item.get("label") or {}).get("S") or "",
+            "live": bool((item.get("live") or {}).get("BOOL")),
+            "review": (item.get("review") or {}).get("S") or ""}
+
+
+def _pending_sk(night_key):
+    return f"ROLLCALL#PENDING#{night_key}"
+
+
+def put_rollcall_pending(scope, night_key, payload, now_iso):
+    """Hold a drawn roll call until its reviewer says post or skip."""
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(scope.tenant), "sk": _s(_pending_sk(night_key)), "state": _s("pending"),
+        "payload": _s(json.dumps(payload, ensure_ascii=False)), "createdAt": _s(now_iso)})
+
+
+def get_rollcall_pending(scope, night_key):
+    item = ddb.get_item(TableName=TABLE, ConsistentRead=True,
+                        Key={"pk": _s(scope.tenant), "sk": _s(_pending_sk(night_key))}).get("Item")
+    if not item:
+        return None
+    return {"state": item["state"]["S"], "payload": json.loads(item["payload"]["S"])}
+
+
+def settle_rollcall_pending(scope, night_key, state):
+    """pending -> posted | skipped, exactly once. False when someone (a double click, a second
+    device) got there first. The role has no DeleteItem, so the row stays and says what happened."""
+    try:
+        ddb.update_item(
+            TableName=TABLE, Key={"pk": _s(scope.tenant), "sk": _s(_pending_sk(night_key))},
+            UpdateExpression="SET #s = :new", ConditionExpression="#s = :old",
+            ExpressionAttributeNames={"#s": "state"},
+            ExpressionAttributeValues={":new": _s(state), ":old": _s("pending")})
+        return True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def put_rollcall_setup(scope, voice_channel, members, now_iso, label="", live=False, review=""):
+    """`label` is what the card calls the team. The server-wide install has no team name of
+    its own, and its raiders do not call themselves by the guild's.
+
+    `live` is the difference between a setup that can be previewed and one that posts. It
+    defaults to off so a mapping can be saved, drawn against a real night and looked at before
+    the first card reaches a channel.
+
+    `review` is a Discord user id. When set, a live roll call goes to that person's DMs with
+    Post and Skip buttons instead of to the channel, and reaches the channel only on Post."""
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(scope.tenant), "sk": _s(ROLLCALL_SETUP_SK),
+        "voiceChannel": _s(str(voice_channel)), "label": _s(label or ""),
+        "live": {"BOOL": bool(live)}, "review": _s(str(review or "")),
+        "members": _s(json.dumps(members, ensure_ascii=False, sort_keys=True)),
+        "updatedAt": _s(now_iso)})
+
+
 HEALTH_SK = "HEALTH"
 
 

@@ -89,12 +89,16 @@ RECAP_PAGE_BUCKET = f"{PREFIX}/recap/page_bucket"
 # where a half-wired alert either crashes the poll or sends mail nobody expected.
 ALERT_TOPIC_ARN = f"{PREFIX}/alerts/sns_topic_arn"
 
+# Signs the roll call's question to the NAS service ("who was in this voice channel when the
+# boss died"). Empty is OFF: no secret, no question, no roll call, and nothing else changes.
+ROLLCALL_SECRET = f"{PREFIX}/rollcall/secret"
+
 OPTIONAL_NAMES = [BLIZZARD_CLIENT_ID, BLIZZARD_CLIENT_SECRET,
                   DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID,
                   RECAP_ENABLED, RECAP_WORST_PARSE, RECAP_SCHEDULE,
                   TEAM_ROSTER_MIN_PCT, TEAM_OVERLAP_HIGH, TEAM_OVERLAP_LOW,
                   TEAM_PROG_TAG, RECAP_PAGE_URL, RECAP_PAGE_BUCKET,
-                  ALERT_TOPIC_ARN]
+                  ALERT_TOPIC_ARN, ROLLCALL_SECRET]
 
 # Defaults for everything the recap reads. A missing parameter is a configured default,
 # not a failure -- the thresholds especially, because they are tuning knobs that only
@@ -115,6 +119,7 @@ DEFAULTS = {
     RECAP_PAGE_URL: "",
     RECAP_PAGE_BUCKET: "",
     ALERT_TOPIC_ARN: "",
+    ROLLCALL_SECRET: "",
 }
 
 
@@ -221,6 +226,7 @@ def load(now=None):
                                      DEFAULTS[RECAP_PAGE_BUCKET]).strip(),
         "alert_topic_arn": got.get(ALERT_TOPIC_ARN,
                                    DEFAULTS[ALERT_TOPIC_ARN]).strip(),
+        "rollcall_secret": got.get(ROLLCALL_SECRET, DEFAULTS[ROLLCALL_SECRET]).strip(),
     })
     return _cache
 

@@ -445,3 +445,36 @@ def kill_participants(token, code, encounter_id, difficulty=HEROIC):
                 seen.add(pid)
                 people.append(actors[pid])
     return people, rate_limit(data)
+
+
+# ------------------------------------------------------------------ roll call
+#
+# playerDetails is the only place a report says what ROLE each raider filled, and it wants
+# fight IDs, which a kill from REPORTS_Q does not carry. So: the kill fights first (the query
+# the first-kill roster already uses), then the details for the earliest of them.
+LINEUP_Q = """
+query($code: String!, $ids: [Int]!) {
+  %s
+  reportData { report(code: $code) { playerDetails(fightIDs: $ids) } }
+}
+""" % RATE
+
+
+def kill_lineup(token, code, encounter_id, difficulty=HEROIC):
+    """The raid as it stood for one kill: [{"name", "class", "server", "role"}], tanks then
+    healers then damage, in the order the report lists them. [] when the report has no such
+    kill, which is a late-arriving log rather than an error."""
+    data = query(token, KILL_ROSTER_Q, {"code": code, "encounterID": int(encounter_id),
+                                        "difficulty": int(difficulty)})
+    fights = sorted(_report(data).get("fights") or [], key=lambda f: f.get("startTime") or 0)
+    if not fights:
+        return [], rate_limit(data)
+    data = query(token, LINEUP_Q, {"code": code, "ids": [int(fights[0]["id"])]})
+    details = ((_report(data).get("playerDetails") or {}).get("data") or {}).get("playerDetails") or {}
+    people = []
+    for role, group in (("tank", "tanks"), ("healer", "healers"), ("dps", "dps")):
+        for p in details.get(group) or []:
+            if p.get("name"):
+                people.append({"name": p["name"], "class": p.get("type") or "",
+                               "server": p.get("server") or "", "role": role})
+    return people, rate_limit(data)
