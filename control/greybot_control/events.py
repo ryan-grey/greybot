@@ -18,6 +18,7 @@ EVENTS = {
     "MESSAGE_CREATE", "MESSAGE_UPDATE", "MESSAGE_DELETE", "MESSAGE_DELETE_BULK",
     "MESSAGE_REACTION_ADD", "MESSAGE_REACTION_REMOVE",
     "INVITE_CREATE", "INVITE_DELETE", "VOICE_STATE_UPDATE",
+    "VOICE_CHANNEL_EFFECT_SEND",
     "GUILD_AUDIT_LOG_ENTRY_CREATE", "AUTO_MODERATION_ACTION_EXECUTION",
 }
 
@@ -83,6 +84,11 @@ class Collector:
             self.voice[subject] = after
             if before:
                 payload["previous_channel_id"] = before
+        if kind == "VOICE_CHANNEL_EFFECT_SEND":
+            if not data.get("sound_id"):
+                return
+            subject = str(data["sound_id"])
+            payload["sound_id"] = str(data["sound_id"])
         if user:
             payload["user_id"] = user.get("id", "")
         if kind.startswith("GUILD_ROLE_") and data.get("role"):
