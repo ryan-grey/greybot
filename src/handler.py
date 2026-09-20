@@ -220,6 +220,16 @@ def uses_team_recap(cfg):
     return is_team(cfg) and not cfg.get("preserve_prog_recap")
 
 
+def is_active_raid(cfg, slug):
+    """Whether this source may announce this tier.
+
+    A configured active slug is a fail-closed cutover boundary: existing rows remain
+    available for audit and dedupe, but an old farm tier cannot create or retry a post.
+    """
+    active = str(cfg.get("active_raid_slug") or "").strip()
+    return not active or active == slug
+
+
 def display_name(cfg):
     """Who the card credits: the team's own name, or the guild's."""
     return cfg.get("team_name") or cfg["guild_name"]
@@ -810,6 +820,9 @@ def announce_aotc(cfg, scope, slug, raid_label, state, when, thumb=None, profile
                   difficulty=keys.HEROIC):
     """The tier-clear card: AOTC on Heroic, "cleared Normal" on Normal. One claim per
     difficulty per tier, and the only card that pings a role."""
+    if not is_active_raid(cfg, slug):
+        log("aotc_inactive_tier", slug=slug, difficulty=difficulty)
+        return False
     if difficulty == keys.HEROIC:
         # Only this atomic new claim creates an event. Old/seeded claims have no
         # event and can never be recruited by a later farm kill.
@@ -862,6 +875,9 @@ def announce_aotc(cfg, scope, slug, raid_label, state, when, thumb=None, profile
 
 
 def deliver_aotc_event(cfg, scope, slug, target):
+    if not is_active_raid(cfg, slug):
+        log("aotc_delivery_inactive_tier", slug=slug, target=target)
+        return False
     event = store.load_aotc_event(scope, slug)
     if not event or (target == "General" and not event["context"].get("general")):
         return False
@@ -932,6 +948,9 @@ def announce_aotc_general(cfg, scope, slug, raid_label=None, when=None, thumb=No
 
 def retry_aotc_events(cfg, scope):
     for slug in store.aotc_event_slugs(scope):
+        if not is_active_raid(cfg, slug):
+            log("aotc_retry_inactive_tier", slug=slug)
+            continue
         deliver_aotc_event(cfg, scope, slug, "Group")
         announce_aotc_general(cfg, scope, slug)
 
@@ -2108,6 +2127,9 @@ def announce_difficulty(token, gid, cfg, scope, profile, index, expansions, kill
                                                 index)
         if not slug:
             log("unresolved_raid", boss=k["name"], zone=k.get("zoneName"))
+            continue
+        if not is_active_raid(cfg, slug):
+            log("skip_inactive_tier", slug=slug, boss=k["name"], report=k.get("reportCode"))
             continue
         k["_how"] = how
         label = (meta or {}).get("name") or k.get("zoneName") or slug

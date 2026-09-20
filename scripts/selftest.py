@@ -2122,6 +2122,11 @@ def test_team_install():
           [k["name"] for k in handler.on_source_reports(title_kills, sourced)] == ["prog"])
     check("a title source cannot use the guild state partition",
           sourced["wcl_report_title"] and not handler.is_team(sourced))
+    check("an active-tier cutover rejects only explicitly older tiers",
+          handler.is_active_raid(dict(gcfg, active_raid_slug="the-venomous-abyss"),
+                                 "the-venomous-abyss")
+          and not handler.is_active_raid(dict(gcfg, active_raid_slug="the-venomous-abyss"),
+                                            "tier-mn-1"))
 
     # --- the two sources -------------------------------------------------
     # Every seven days lands on the same weekday, so history on 7.5 and 14.5 days ago is
