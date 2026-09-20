@@ -2113,6 +2113,14 @@ def test_team_install():
           [k["name"] for k in on] == ["a"], on)
     check("no raid days means no filter",
           len(handler.on_raid_days([kill("a", 0.5), kill("b", 1.5)], gcfg)) == 2)
+    sourced = dict(gcfg, wcl_report_title="Prog Raid")
+    title_kills = [dict(kill("prog", 0.5), reportTitle="Prog Raid"),
+                   dict(kill("sat", 0.5), reportTitle="Saturday Raid"),
+                   dict(kill("unknown", 0.5), reportTitle="")]
+    check("an exact report title excludes other and untitled reports",
+          [k["name"] for k in handler.on_source_reports(title_kills, sourced)] == ["prog"])
+    check("a title source cannot use the guild state partition",
+          sourced["wcl_report_title"] and not handler.is_team(sourced))
 
     # --- the two sources -------------------------------------------------
     # Every seven days lands on the same weekday, so history on 7.5 and 14.5 days ago is

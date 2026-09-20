@@ -262,6 +262,24 @@ def on_raid_days(kills, cfg):
     return kept
 
 
+def on_source_reports(kills, cfg):
+    """Keep only the configured exact Warcraft Logs report title, if any.
+
+    A partial match could make a title such as ``Prog Raid Alt`` join Prog's permanent
+    first-kill state. Missing titles are also excluded while scoped: uncertainty delays
+    a post instead of attributing another group's kill.
+    """
+    wanted = str(cfg.get("wcl_report_title") or "").strip()
+    if not wanted:
+        return kills
+    key = wanted.casefold()
+    kept = [k for k in kills if str(k.get("reportTitle") or "").strip().casefold() == key]
+    if len(kept) != len(kills):
+        log("kills_off_source_title", dropped=len(kills) - len(kept), title=wanted,
+            note="a report title outside this install's explicit Warcraft Logs source")
+    return kept
+
+
 def fetch_kills(token, gid, cfg, since_ms, limit, difficulty=keys.HEROIC, max_pages=1):
     """Kills at one difficulty from this install's source, on this install's raid days.
 
@@ -269,12 +287,19 @@ def fetch_kills(token, gid, cfg, since_ms, limit, difficulty=keys.HEROIC, max_pa
     added when the install has one -- so the server-wide install's query, and the tests
     that double it, are untouched.
     """
+    if cfg.get("wcl_report_title") and not is_team(cfg):
+        # A title identifies a team within a guild, so it MUST have a separate state
+        # partition. Reusing the guild partition could combine old guild-wide claims with
+        # a newly filtered report and manufacture a full-clear card.
+        log("source_scope_required", title=cfg["wcl_report_title"],
+            note="waiting for this explicit report source to receive its team scope")
+        return [], None
     kwargs = {"limit": int(limit), "max_pages": int(max_pages),
               "difficulty": wcl.DIFFICULTY_IDS[difficulty]}
     if cfg.get("wcl_user_id"):
         kwargs["user_id"] = int(cfg["wcl_user_id"])
     kills, rate = wcl.heroic_kills_since(token, gid, since_ms, **kwargs)
-    return on_raid_days(kills, cfg), rate
+    return on_source_reports(on_raid_days(kills, cfg), cfg), rate
 
 
 def team_progress(cfg, profile, slug, difficulty):
@@ -2376,6 +2401,10 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     claim, not the derived roster, not a rollover seed -- so it is safe to run repeatedly
     against production while deciding whether to switch the feature on.
     """
+    if cfg.get("wcl_report_title") and not is_team(cfg):
+        log("recap_source_scope_required", title=cfg["wcl_report_title"],
+            note="waiting for this explicit report source to receive its team scope")
+        return {"ok": True, "skipped": "source_scope_required"}
     if dry:
         log("recap_dry_run_start",
             note="rendering from real data — will not post and will not claim the night")
@@ -2416,6 +2445,10 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     extra = ({"user_id": int(cfg["wcl_user_id"])} if cfg.get("wcl_user_id") else {})
     reports, rate = wcl.reports_in_window(token, gid, start_ms, end_ms,
                                           limit=RECAP_MAX_REPORTS, **extra)
+    title = str(cfg.get("wcl_report_title") or "").strip()
+    if title:
+        reports = [r for r in reports
+                   if str(r.get("title") or "").strip().casefold() == title.casefold()]
     if raid_days(cfg):
         # The same uploader logs another team's Saturday. Same rule as the announcer:
         # a report filed outside the team's raid days is not the team's.

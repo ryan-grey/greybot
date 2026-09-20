@@ -936,6 +936,7 @@ def get_config(tenant):
         "team_slug": text("teamSlug"),
         "team_name": text("teamName"),
         "wcl_user_id": text("wclUserId"),
+        "wcl_report_title": text("wclReportTitle"),
         "raid_days": text("raidDays"),
         "difficulties": text("difficulties"),
     }
@@ -968,6 +969,7 @@ def put_config(tenant, region, realm, name, channel_id, now_iso,
             "teamSlug": _s(keys.team_slug(team["slug"])),
             "teamName": _s(team.get("name") or team["slug"]),
             "wclUserId": _s(str(team.get("wcl_user_id") or "")),
+            "wclReportTitle": _s(str(team.get("wcl_report_title") or "")),
             "raidDays": _s(team.get("raid_days") or ""),
             "difficulties": _s(team.get("difficulties") or keys.HEROIC)})
     ddb.put_item(TableName=TABLE, Item=item)
