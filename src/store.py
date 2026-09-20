@@ -54,6 +54,8 @@ punctuation drift between the two APIs cannot split one boss into two members.
 
 import json
 import os
+import time
+import uuid
 
 import boto3
 from botocore.config import Config
@@ -260,18 +262,23 @@ def release_boss(scope, slug, boss_key, difficulty=keys.HEROIC):
                     ExpressionAttributeValues={":b": {"SS": [boss_key]}})
 
 
-def claim_aotc(scope, slug, difficulty=keys.HEROIC):
+def claim_aotc(scope, slug, difficulty=keys.HEROIC, event=None):
     """Claim the one-and-only clear announcement for this tier at this difficulty -- AOTC
     on Heroic, "Normal cleared" on Normal. The guard is the whole point: the final boss
     gets re-killed every week for the rest of the tier, and every one of those re-kills
     satisfies 'kills == total bosses'."""
     try:
+        vals = {":t": {"BOOL": True}, ":f": {"BOOL": False}}
+        update = "SET aotcAnnounced = :t"
+        if difficulty == keys.HEROIC and event is not None:
+            vals.update({":event": _s(json.dumps(event)), ":pending": _s("pending")})
+            update += ", aotcEvent = :event, aotcGroupStatus = :pending, aotcGeneralStatus = :pending"
         ddb.update_item(
             TableName=TABLE, Key=_ann_key(scope, slug, difficulty),
-            UpdateExpression="SET aotcAnnounced = :t",
+            UpdateExpression=update,
             ConditionExpression=("attribute_exists(pk) AND "
                                  "(attribute_not_exists(aotcAnnounced) OR aotcAnnounced = :f)"),
-            ExpressionAttributeValues={":t": {"BOOL": True}, ":f": {"BOOL": False}})
+            ExpressionAttributeValues=vals)
         return True
     except ClientError as exc:
         if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
@@ -282,7 +289,78 @@ def claim_aotc(scope, slug, difficulty=keys.HEROIC):
 def release_aotc(scope, slug, difficulty=keys.HEROIC):
     ddb.update_item(TableName=TABLE, Key=_ann_key(scope, slug, difficulty),
                     UpdateExpression="SET aotcAnnounced = :f",
+                    ConditionExpression="attribute_not_exists(aotcEvent)",
                     ExpressionAttributeValues={":f": {"BOOL": False}})
+
+
+def load_aotc_event(scope, slug):
+    row = ddb.get_item(TableName=TABLE, Key=_ann_key(scope, slug), ConsistentRead=True).get("Item") or {}
+    if not row.get("aotcEvent"):
+        return None
+    return {"context": json.loads(row["aotcEvent"]["S"]),
+            "payload": json.loads(row["aotcPayload"]["S"]) if row.get("aotcPayload") else None,
+            "group": (row.get("aotcGroupStatus") or {}).get("S"),
+            "general": (row.get("aotcGeneralStatus") or {}).get("S")}
+
+
+def aotc_event_slugs(scope):
+    """Retry recorded events without depending on later kills; never enroll legacy rows."""
+    page = {}
+    while True:
+        response = ddb.query(TableName=TABLE,
+            KeyConditionExpression="pk = :pk AND begins_with(sk, :prefix)",
+            ExpressionAttributeValues={":pk": _s(scope.tenant), ":prefix": _s("ANNOUNCED#")},
+            ConsistentRead=True, **page)
+        for row in response.get("Items", []):
+            if row.get("aotcEvent"):
+                context = json.loads(row["aotcEvent"]["S"])
+                target = "aotcGeneralStatus" if context.get("general") else "aotcGroupStatus"
+                if (row.get(target) or {}).get("S") != "delivered":
+                    yield context["slug"]
+        if not response.get("LastEvaluatedKey"):
+            break
+        page = {"ExclusiveStartKey": response["LastEvaluatedKey"]}
+
+
+def claim_aotc_delivery(scope, slug, target):
+    """Lease preparation only. A possibly sent HTTP request is never auto-reclaimed."""
+    assert target in ("Group", "General")
+    prefix, token, now = "aotc" + target, uuid.uuid4().hex, int(time.time())
+    vals = {":pending": _s("pending"), ":preparing": _s("preparing"),
+            ":token": _s(token), ":now": _n(now), ":lease": _n(now + 300)}
+    condition = ("attribute_exists(aotcEvent) AND "
+                 f"({prefix}Status = :pending OR ({prefix}Status = :preparing AND {prefix}Lease < :now))")
+    if target == "General":
+        condition += " AND aotcGroupStatus = :delivered"
+        vals[":delivered"] = _s("delivered")
+    try:
+        ddb.update_item(
+            TableName=TABLE, Key=_ann_key(scope, slug),
+            UpdateExpression=f"SET {prefix}Status = :preparing, {prefix}Owner = :token, {prefix}Lease = :lease",
+            ConditionExpression=condition, ExpressionAttributeValues=vals)
+        return token
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def finish_aotc_delivery(scope, slug, target, token, previous, status, payload=None):
+    prefix = "aotc" + target
+    vals = {":token": _s(token), ":previous": _s(previous), ":status": _s(status)}
+    update = f"SET {prefix}Status = :status"
+    if payload is not None:
+        vals[":payload"] = _s(json.dumps(payload))
+        update += ", aotcPayload = :payload"
+    try:
+        ddb.update_item(TableName=TABLE, Key=_ann_key(scope, slug), UpdateExpression=update,
+            ConditionExpression=f"attribute_exists(aotcEvent) AND {prefix}Owner = :token AND {prefix}Status = :previous",
+            ExpressionAttributeValues=vals)
+        return True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
 
 
 def touch(scope, slug, now_iso, raid_name=None):

@@ -206,9 +206,11 @@ def render(boss_name, headline, lines, art_url=None, accent=ACCENT):
         return None
 
 
-def render_clear(boss_name, headline, lines, art_url=None, accent=GOLD):
+def render_clear(boss_name, headline, lines, art_url=None, accent=GOLD, achievement=False):
     """The looping GIF used only for Normal and Heroic full-raid clear cards."""
     try:
+        if achievement:
+            return render_achievement(headline, boss_name, lines)
         art = _card_art(art_url)
         frames = [_render_frame(boss_name, headline, lines, art, accent, frame=i)
                   for i in range(24)]
@@ -217,4 +219,76 @@ def render_clear(boss_name, headline, lines, art_url=None, accent=GOLD):
                        duration=100, loop=0, optimize=True, disposal=2)
         return out.getvalue()
     except Exception:                                          # noqa: BLE001
+        return None
+
+
+def render_achievement(headline, difficulty, lines):
+    """Canvas dragon-frame Heroic clear animation; Normal remains render_clear's card."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        here = os.path.dirname(os.path.abspath(__file__))
+        asset = next((p for p in (os.path.join(here, "aotc-golden-dragon-frame.png"),
+                                  os.path.join(os.path.dirname(here), "assets", "aotc-golden-dragon-frame.png"))
+                      if os.path.isfile(p)), "")
+        border = Image.open(asset).convert("RGBA")
+        regular = ImageFont.truetype(os.path.join(FONT_DIR, "DejaVuSans.ttf"), 28)
+        big = ImageFont.truetype(os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"), 62)
+        head = ImageFont.truetype(os.path.join(FONT_DIR, "DejaVuSans.ttf"), 31)
+        frames=[]
+        for i in range(24):
+            card=Image.new("RGBA", border.size, NAVY+(255,)); draw=ImageDraw.Draw(card)
+            for cx,cy,phase in ((380,180,.15),(820,180,.55),(600,120,.82)):
+                age=(i/24+phase)%1; radius=15+age*90
+                for ray in range(16):
+                    angle=math.tau*ray/16; x=cx+math.cos(angle)*radius; y=cy+math.sin(angle)*radius
+                    draw.ellipse((x-2,y-2,x+2,y+2),fill=(235,177,56,int(80*(1-age))))
+            card.alpha_composite(border)
+            def label(text,y,font,fill):
+                box=draw.textbbox((0,0),text,font=font); draw.text(((1200-(box[2]-box[0]))/2,y),text,font=font,fill=fill)
+            label(headline,118,head,MUTED+(255,)); label(difficulty,154,big,GOLD+(255,)); label(lines[0],228,regular,INK+(255,)); label(lines[1],268,regular,INK+(255,))
+            frames.append(card.convert("P",palette=Image.Palette.ADAPTIVE))
+        out=io.BytesIO(); frames[0].save(out,format="GIF",save_all=True,append_images=frames[1:],duration=100,loop=0,optimize=True,disposal=2); return out.getvalue()
+    except Exception:
+        return None
+
+# Approved AOTC achievement treatment: a full-frame gold halo, moving sheen, and fireworks.
+def render_achievement(headline, difficulty, lines):
+    try:
+        from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+        import random
+        W, H, ox, oy = 1280, 500, 40, 40
+        here = os.path.dirname(os.path.abspath(__file__))
+        asset = next(p for p in (os.path.join(here, "aotc-golden-dragon-frame.png"),
+                                  os.path.join(os.path.dirname(here), "assets", "aotc-golden-dragon-frame.png")) if os.path.isfile(p))
+        art = Image.open(asset).convert("RGBA").resize((1200, 420), Image.LANCZOS)
+        frame = Image.new("RGBA", (W, H)); frame.alpha_composite(art, (ox, oy))
+        mask = Image.new("L", (W, H)); src, dst = frame.load(), mask.load()
+        for y in range(H):
+            for x in range(W):
+                r,g,b,a = src[x,y]; dst[x,y] = max(0, min(255, int((r+g-1.25*b)*.95))) if a > 10 and r >= 55 and g >= 32 and r >= b*1.15 else 0
+        regular = ImageFont.truetype(os.path.join(FONT_DIR,"DejaVuSans.ttf"),31)
+        datefont = ImageFont.truetype(os.path.join(FONT_DIR,"DejaVuSans.ttf"),24)
+        bold = ImageFont.truetype(os.path.join(FONT_DIR,"DejaVuSans-Bold.ttf"),66)
+        frames=[]
+        for i in range(24):
+            t=i/24; canvas=Image.new("RGBA",(W,H),(10,19,35,255)); draw=ImageDraw.Draw(canvas,"RGBA")
+            for cx,cy,phase,seed in ((413,191,.06,11),(873,205,.4,17),(724,164,.72,23)):
+                age=(t+phase)%1; radius=20+100*age; rng=random.Random(seed)
+                for ray in range(28):
+                    a=math.tau*ray/28+rng.uniform(-.04,.04); x=cx+math.cos(a)*radius; y=cy+math.sin(a)*radius*.72
+                    draw.line((cx,cy,x,y),fill=(255,170,28,int(150*(1-age))),width=2)
+                    draw.ellipse((x-2,y-2,x+2,y+2),fill=(255,218,90,int(210*(1-age))))
+            canvas.alpha_composite(frame)
+            pulse=.56+.44*(.5+.5*math.sin(t*math.tau))
+            for blur,col,opacity in ((27,(255,139,8),.74),(15,(255,181,23),.88),(5,(255,219,76),.82)):
+                layer=Image.new("RGBA",(W,H),col+(0,)); layer.putalpha(mask.filter(ImageFilter.GaussianBlur(blur)).point(lambda v:int(v*opacity*pulse))); canvas.alpha_composite(layer)
+            per=Image.new("L",(W,H)); ImageDraw.Draw(per).rounded_rectangle((254,122,1026,372),radius=24,outline=255,width=7)
+            layer=Image.new("RGBA",(W,H),(255,190,25,0)); layer.putalpha(per.filter(ImageFilter.GaussianBlur(13)).point(lambda v:int(v*.92*pulse))); canvas.alpha_composite(layer)
+            sweep=Image.new("L",(W,H)); c=-260+(W+520)*((t+.08)%1); ImageDraw.Draw(sweep).polygon([(c-155,-20),(c-65,-20),(c+155,H+20),(c+65,H+20)],fill=255); sheen=ImageChops.multiply(mask,sweep.filter(ImageFilter.GaussianBlur(12))); layer=Image.new("RGBA",(W,H),(255,249,201,0)); layer.putalpha(sheen.point(lambda v:int(v*.94))); canvas.alpha_composite(layer)
+            d=ImageDraw.Draw(canvas)
+            for text,y,font,color in ((headline,172,regular,(238,244,255)),(difficulty,201,bold,(255,183,36)),(lines[0],277,regular,(238,244,255)),(lines[1],318,datefont,(238,244,255))):
+                b=d.textbbox((0,0),text,font=font); x=(W-(b[2]-b[0]))//2; d.text((x,y),text,font=font,fill=(3,8,16,220),stroke_width=3,stroke_fill=(3,8,16,220)); d.text((x,y),text,font=font,fill=color)
+            frames.append(canvas.convert("P",palette=Image.Palette.ADAPTIVE))
+        out=io.BytesIO(); frames[0].save(out,format="GIF",save_all=True,append_images=frames[1:],duration=80,loop=0,disposal=2,optimize=False); return out.getvalue()
+    except Exception:
         return None

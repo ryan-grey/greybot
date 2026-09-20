@@ -89,6 +89,47 @@ class FakeDynamo:
         item = self.items.get(self._k(Key))
         return {"Item": dict(item)} if item else {}
 
+    def query(self, TableName, KeyConditionExpression, ExpressionAttributeValues,
+              ConsistentRead=False, **kwargs):
+        assert KeyConditionExpression == "pk = :pk AND begins_with(sk, :prefix)"
+        pk = ExpressionAttributeValues[":pk"]["S"]
+        prefix = ExpressionAttributeValues[":prefix"]["S"]
+        return {"Items": [dict(v) for (p, s), v in self.items.items()
+                          if p == pk and s.startswith(prefix)]}
+
+    @staticmethod
+    def _event_condition(expression, item, vals):
+        """Evaluate the real event guards, including nested lease and owner fences."""
+        expression = expression.strip()
+        depth = 0
+        for i, char in enumerate(expression):
+            depth += (char == "(") - (char == ")")
+            if depth == 0 and i < len(expression) - 1 and expression.startswith("("):
+                break
+        else:
+            if expression.startswith("(") and expression.endswith(")"):
+                return FakeDynamo._event_condition(expression[1:-1], item, vals)
+        for operator in (" OR ", " AND "):
+            depth = 0
+            for i, char in enumerate(expression):
+                depth += (char == "(") - (char == ")")
+                if depth == 0 and expression.startswith(operator, i):
+                    a = FakeDynamo._event_condition(expression[:i], item, vals)
+                    b = FakeDynamo._event_condition(expression[i + len(operator):], item, vals)
+                    return (a or b) if operator == " OR " else (a and b)
+        match = re.fullmatch(r"attribute_(not_)?exists\((\w+)\)", expression)
+        if match:
+            exists = match[2] in (item or {})
+            return not exists if match[1] else exists
+        match = re.fullmatch(r"(\w+) (=|<) (:\w+)", expression)
+        assert match, expression
+        left, right = (item or {}).get(match[1]), vals[match[3]]
+        if left is None:
+            return False
+        if match[2] == "=":
+            return left == right
+        return float(left["N"]) < float(right["N"])
+
     def put_item(self, TableName, Item, ConditionExpression=None):
         k = self._k(Item)
         if ConditionExpression == "attribute_not_exists(pk)" and k in self.items:
@@ -104,6 +145,9 @@ class FakeDynamo:
         vals = ExpressionAttributeValues or {}
 
         if ConditionExpression:
+            if "aotcEvent" in ConditionExpression:
+                if not self._event_condition(ConditionExpression, item, vals):
+                    raise _conditional_failure()
             if "attribute_exists(pk)" in ConditionExpression and item is None:
                 raise _conditional_failure()
             # Set-membership guards, over whichever set attribute the caller named:
@@ -1150,26 +1194,225 @@ def test_dedupe():
 
 
 def test_aotc_guard():
-    print("\nAOTC fires once")
+    print("\nAOTC original-event delivery and independent retries")
+    import handler
+    from datetime import datetime, timezone
     FAKE_DDB.items.clear()
-    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
     slug = "the-venomous-abyss"
-    store.seed_tier(pk, slug, {"a"}, 1, "The Venomous Abyss", "now")
+    when = datetime(2026, 9, 19, 23, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 9, 26, 23, 0, tzinfo=timezone.utc)
+    cfg = {"discord_guild_id": handler.SOCIAL_GENERAL_GUILD, "bot_token": "test-token",
+           "channel_id": "900000000000000002", "role_id": "900000000000000003",
+           "guild_name": "Scrambled", "guild_realm": "proudmoore", "guild_region": "us",
+           "recap_page_url": "https://raids", "recap_page_bucket": "test-media"}
+    original = handler.kill_card_url, discord.post_to, discord.aotc_payload
+    posted, attempts, renders = [], [], []
+    failing = {}
+    def card(*args, **kwargs):
+        renders.append((args, kwargs))
+        return "https://raids/cards/original-aotc.gif"
+    def post(dest, payload, **kwargs):
+        assert kwargs.get("max_attempts", 1) == 1
+        attempts.append((dict(dest), json.loads(json.dumps(payload))))
+        if failing.get(dest["channel"]):
+            raise discord.DiscordError(failing[dest["channel"]])
+        posted.append(attempts[-1])
+    def seed(scope, raid=slug, difficulty=keys.HEROIC, done=False):
+        store.seed_tier(scope, raid, {"a"}, 1, "The Venomous Abyss", "now",
+                        aotc_already=done, difficulty=difficulty)
+    def start(scope, config=cfg, raid=slug, at=when):
+        return handler.announce_aotc(config, scope, raid, "The Venomous Abyss",
+                                     store.load_tier(scope, raid), at)
+    handler.kill_card_url, discord.post_to = card, post
+    try:
+        scopes = [keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT, team=t)
+                  for t in ("saturday-raid", "meers-raid", None)]
+        check("Saturday, Meer and Prog have three distinct dedupe partitions",
+              len({s.tenant for s in scopes}) == 3)
+        for scope, name in zip(scopes, ("Saturday Raid", "Meer's Raid", "Prog Raid")):
+            config = dict(cfg, team_name=name)
+            seed(scope)
+            before = len(posted)
+            check(name + " first Heroic sends its group", start(scope, config))
+            check(name + " General follows confirmed group",
+                  handler.announce_aotc_general(config, scope, slug))
+            group, general = posted[-2:]
+            check(name + " exact original GIF and embed; General cannot ping",
+                  group[0]["channel"] == cfg["channel_id"]
+                  and general[0]["channel"] == handler.SOCIAL_GENERAL_CHANNEL
+                  and general[1]["embeds"] == group[1]["embeds"]
+                  and "content" not in general[1]
+                  and general[1]["allowed_mentions"] == {"parse": []}
+                  and "original-aotc.gif" in json.dumps(general[1])
+                  and name in renders[-1][0][4])
+            check(name + " duplicate and farm kill do not repost",
+                  not start(scope, config, at=later)
+                  and not handler.announce_aotc_general(config, scope, slug)
+                  and len(posted) == before + 2)
+        scope = scopes[0]
+        for raid in ("seeded", "legacy"):
+            seed(scope, raid, done=raid == "seeded")
+            if raid == "legacy":
+                store.claim_aotc(scope, raid)
+            check(raid + " flag cannot enroll in General",
+                  not start(scope, raid=raid)
+                  and not handler.announce_aotc_general(cfg, scope, raid)
+                  and store.load_aotc_event(scope, raid) is None)
+        seed(scope, "normal", difficulty=keys.NORMAL)
+        check("Normal retains its own clear announcement",
+              handler.announce_aotc(cfg, scope, "normal", "Normal Raid",
+                store.load_tier(scope, "normal", difficulty=keys.NORMAL), when,
+                difficulty=keys.NORMAL))
+        check("Normal cannot create a General event",
+              store.load_aotc_event(scope, "normal") is None
+              and not handler.announce_aotc_general(cfg, scope, "normal"))
 
-    check("AOTC can be claimed once", store.claim_aotc(pk, slug))
-    check("a re-kill of the final boss does not re-fire it",
-          store.claim_aotc(pk, slug) is False)
-    check("the flag survives a reload", store.load_tier(pk, slug)["aotcAnnounced"])
+        for mode in ("render-exception", "render-none", "payload"):
+            seed(scope, mode)
+            def broken(*a, **kw):
+                raise ValueError("test preparation failure")
+            handler.kill_card_url = broken if mode == "render-exception" else (
+                (lambda *a, **kw: None) if mode == "render-none" else card)
+            discord.aotc_payload = broken if mode == "payload" else original[2]
+            before = len(posted)
+            check(mode + " leaves original event pending without a post",
+                  not start(scope, raid=mode)
+                  and store.load_aotc_event(scope, mode)["group"] == "pending"
+                  and not handler.announce_aotc_general(cfg, scope, mode)
+                  and len(posted) == before)
+            handler.kill_card_url, discord.aotc_payload = card, original[2]
+            handler.retry_aotc_events(cfg, scope)
+            check(mode + " retries original timestamp without a new kill",
+                  store.load_aotc_event(scope, mode)["general"] == "delivered"
+                  and store.load_aotc_event(scope, mode)["context"]["when"] == handler._iso(when))
 
-    store.release_aotc(pk, slug)
-    check("a failed webhook lets AOTC retry", store.claim_aotc(pk, slug))
+        seed(scope, "group-reject")
+        failing[cfg["channel_id"]] = "HTTP 400: rejected"
+        before = len(posted)
+        check("known group rejection preserves pending event",
+              not start(scope, raid="group-reject")
+              and store.load_aotc_event(scope, "group-reject")["group"] == "pending")
+        check("General cannot overtake rejected group",
+              not handler.announce_aotc_general(cfg, scope, "group-reject")
+              and len(posted) == before)
+        saved = store.load_aotc_event(scope, "group-reject")["payload"]
+        failing.clear()
+        renders_before = len(renders)
+        handler.retry_aotc_events(cfg, scope)
+        check("group retry uses saved payload without rendering or duplicate group",
+              posted[-2][1] == saved and len(renders) == renders_before
+              and len(posted) == before + 2)
 
-    FAKE_DDB.items.clear()
-    store.seed_tier(pk, "tier-mn-1", {"a"}, 9, "MN Tier 1", "now", aotc_already=True)
-    check("seeding a finished tier pre-sets the AOTC flag",
-          store.load_tier(pk, "tier-mn-1")["aotcAnnounced"])
-    check("so no retroactive AOTC is possible",
-          store.claim_aotc(pk, "tier-mn-1") is False)
+        seed(scope, "general-reject")
+        check("group succeeds before General failure", start(scope, raid="general-reject"))
+        saved = store.load_aotc_event(scope, "general-reject")["payload"]
+        failing[handler.SOCIAL_GENERAL_CHANNEL] = "HTTP 403: rejected"
+        check("General rejection is independently retryable",
+              not handler.announce_aotc_general(cfg, scope, "general-reject"))
+        group_count = sum(d["channel"] == cfg["channel_id"] for d, p in posted)
+        renders_before = len(renders)
+        failing.clear()
+        check("later farm cannot replace original event", not start(scope, raid="general-reject", at=later))
+        check("General retry ignores later date and raid arguments",
+              handler.announce_aotc_general(cfg, scope, "general-reject", "Wrong raid", later))
+        check("General retry preserves original timestamp/team/GIF and no group duplicate",
+              posted[-1][1]["embeds"] == saved["embeds"]
+              and len(renders) == renders_before
+              and sum(d["channel"] == cfg["channel_id"] for d, p in posted) == group_count)
+
+        for target in ("Group", "General"):
+            raid = "uncertain-" + target
+            seed(scope, raid)
+            if target == "General":
+                start(scope, raid=raid)
+            channel = cfg["channel_id"] if target == "Group" else handler.SOCIAL_GENERAL_CHANNEL
+            failing[channel] = "gave up after 1 attempts: timed out"
+            if target == "Group":
+                start(scope, raid=raid)
+            else:
+                handler.announce_aotc_general(cfg, scope, raid)
+            before = len(attempts)
+            failing.clear()
+            handler.retry_aotc_events(cfg, scope)
+            check(target + " ambiguous HTTP result holds instead of duplicating",
+                  store.load_aotc_event(scope, raid)[target.lower()] == "uncertain"
+                  and len(attempts) == before)
+
+        seed(scope, "lease")
+        context = dict(store.load_aotc_event(scope, slug)["context"], slug="lease")
+        store.claim_aotc(scope, "lease", event=context)
+        first = store.claim_aotc_delivery(scope, "lease", "Group")
+        check("overlapping poll cannot claim preparation or premature General",
+              first and not store.claim_aotc_delivery(scope, "lease", "Group")
+              and not store.claim_aotc_delivery(scope, "lease", "General"))
+        row = FAKE_DDB.items[FAKE_DDB._k(store._ann_key(scope, "lease"))]
+        row["aotcGroupLease"] = {"N": "0"}
+        second = store.claim_aotc_delivery(scope, "lease", "Group")
+        check("expired preparation can recover but old owner cannot send",
+              second and second != first
+              and not store.finish_aotc_delivery(scope, "lease", "Group", first,
+                                                  "preparing", "sending"))
+        check("new owner can fence sending exactly once",
+              store.finish_aotc_delivery(scope, "lease", "Group", second, "preparing", "sending")
+              and not store.finish_aotc_delivery(scope, "lease", "Group", second, "preparing", "sending"))
+        row["aotcGroupLease"] = {"N": "0"}
+        check("possibly sent request is never reclaimed by lease expiry",
+              not store.claim_aotc_delivery(scope, "lease", "Group"))
+        seed(scope, "other-guild")
+        other = dict(cfg, discord_guild_id=TEST_TENANT)
+        start(scope, config=other, raid="other-guild")
+        check("other guild group completion does not stay in retry iterator",
+              "other-guild" not in list(store.aotc_event_slugs(scope))
+              and not handler.announce_aotc_general(other, scope, "other-guild"))
+
+        seed(scope, "missing-token")
+        check("missing channel credentials leave preparation retryable",
+              not start(scope, config=dict(cfg, bot_token=""), raid="missing-token")
+              and store.load_aotc_event(scope, "missing-token")["group"] == "pending")
+        handler.retry_aotc_events(cfg, scope)
+        check("restored credentials recover the same event",
+              store.load_aotc_event(scope, "missing-token")["general"] == "delivered")
+
+        seed(scope, "no-media")
+        handler.kill_card_url = lambda *a, **kw: None
+        check("deployments without media retain their plain embed fallback",
+              start(scope, config=dict(cfg, recap_page_url="", recap_page_bucket=""), raid="no-media")
+              and "image" not in posted[-1][1]["embeds"][0])
+        handler.kill_card_url = card
+
+        seed(scope, "server-error")
+        failing[cfg["channel_id"]] = "gave up after 1 attempts: HTTP 500: upstream HTTP 400: text"
+        check("a server error containing 400 text remains ambiguous",
+              not start(scope, raid="server-error")
+              and store.load_aotc_event(scope, "server-error")["group"] == "uncertain")
+        failing.clear()
+
+        seed(scope, "receipt-failure")
+        real_finish = store.finish_aotc_delivery
+        def fail_receipt(*args, **kwargs):
+            if args[5] == "delivered":
+                raise RuntimeError("test lost DynamoDB receipt")
+            return real_finish(*args, **kwargs)
+        store.finish_aotc_delivery = fail_receipt
+        try:
+            try:
+                start(scope, raid="receipt-failure")
+                check("receipt failure must surface", False)
+            except RuntimeError:
+                check("HTTP success with failed receipt stays unresolved",
+                      store.load_aotc_event(scope, "receipt-failure")["group"] == "sending")
+        finally:
+            store.finish_aotc_delivery = real_finish
+        before = len(attempts)
+        check("lost receipt neither duplicates group nor unlocks General",
+              not handler.deliver_aotc_event(cfg, scope, "receipt-failure", "Group")
+              and not handler.announce_aotc_general(cfg, scope, "receipt-failure")
+              and len(attempts) == before)
+        check("all Heroic render requests request achievement animation",
+              all(k["achievement"] and k["animated"] for a, k in renders
+                  if k["difficulty"] == keys.HEROIC))
+    finally:
+        handler.kill_card_url, discord.post_to, discord.aotc_payload = original
 
 
 def test_discord_payloads():
@@ -1608,6 +1851,8 @@ def test_end_to_end():
     handler.raiderio.guild_profile = lambda *a, **kw: profile
     handler.raiderio.static_raids = lambda exp: {11: RAIDS, 10: PREV_RAIDS}.get(exp, [])
     handler.discord.post = lambda hook, payload, **kw: posts.append(payload) or 204
+    real_post_json = handler.discord._post_json
+    handler.discord._post_json = lambda url, payload, **kw: posts.append(payload) or 204
 
     pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
 
@@ -1695,6 +1940,17 @@ def test_end_to_end():
     check("re-killing the final boss announces nothing and no second AOTC",
           posts == [], f"{len(posts)} posts")
 
+    # A pending original clear must survive an entirely empty WCL lookback.
+    scope = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
+    store.seed_tier(scope, "pending-idle", {"a"}, 1, "Idle Raid", "now")
+    context = dict(store.load_aotc_event(scope, "the-venomous-abyss")["context"],
+                   slug="pending-idle", raid="Idle Raid")
+    store.claim_aotc(scope, "pending-idle", event=context)
+    window = []
+    handler.handler({}, None)
+    check("real idle poll resumes the persisted first clear without new kills",
+          len(posts) == 1 and store.load_aotc_event(scope, "pending-idle")["group"] == "delivered")
+
     # --- next patch: a tier that did not exist at bootstrap ------------------
     posts.clear()
     profile["raid_progression"]["a-brand-new-raid"] = {
@@ -1744,6 +2000,7 @@ def test_end_to_end():
           res["boss"] == ABYSS[0], res["boss"])
     check("the preview never fires AOTC", not any(
         "AOTC" in p["embeds"][0]["title"] for p in posts))
+    handler.discord._post_json = real_post_json
 
 
 def test_team_install():

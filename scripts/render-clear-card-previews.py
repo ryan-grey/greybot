@@ -15,7 +15,7 @@ import kill_card  # noqa: E402
 
 CASES = (
     ("Saturday Raid", "Normal"), ("Saturday Raid", "Heroic"),
-    ("Meer's Raid", "Normal"), ("Meer's Raid", "Heroic"),
+    ("Meer’s Raid", "Normal"), ("Meer’s Raid", "Heroic"),
     ("Prog Raid", "Normal"), ("Prog Raid", "Heroic"),
 )
 

@@ -36,8 +36,10 @@ announce immediately and live with a stale RANK rather than sit on the news. The
 gets no such licence -- see store.progress_count.
 """
 
+import hashlib
 import json
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -68,6 +70,8 @@ ANNOUNCE_TZ = os.environ.get("ANNOUNCE_TZ", "America/New_York")
 # Credited on the AOTC card only. Empty means no credit line at all, which is what should
 # happen until the repository is actually public rather than a link that 404s.
 REPO_URL = os.environ.get("REPO_URL", "")
+SOCIAL_GENERAL_GUILD = "946663011991556117"
+SOCIAL_GENERAL_CHANNEL = "1028060694693822515"
 # /progress answers from the poller's snapshot when it is fresher than this, and defers to
 # a live fetch when it is not. An hour is generous: the poller refreshes every fifteen
 # minutes, so falling through means something has already gone quiet.
@@ -546,7 +550,7 @@ def card_prefix(team=None, difficulty=keys.HEROIC):
 
 
 def kill_card_url(cfg, slug, boss_key, boss_name, headline, lines, art_url, accent=None,
-                  team=None, difficulty=keys.HEROIC, animated=False):
+                  team=None, difficulty=keys.HEROIC, animated=False, achievement=False):
     """Draw an announcement card and publish it, or return None and let the embed do it.
 
     Published to the same bucket as the recap page, under cards/, because it needs a URL
@@ -568,7 +572,7 @@ def kill_card_url(cfg, slug, boss_key, boss_name, headline, lines, art_url, acce
         if not cfg.get("recap_page_url") or not cfg.get("recap_page_bucket"):
             return None
         image = (kill_card.render_clear(boss_name, headline, lines, art_url=art_url,
-                                        accent=accent or kill_card.ACCENT)
+                                        accent=accent or kill_card.ACCENT, achievement=achievement)
                  if animated else
                  kill_card.render(boss_name, headline, lines, art_url=art_url,
                                   accent=accent or kill_card.ACCENT))
@@ -764,6 +768,21 @@ def announce_aotc(cfg, scope, slug, raid_label, state, when, thumb=None, profile
                   difficulty=keys.HEROIC):
     """The tier-clear card: AOTC on Heroic, "cleared Normal" on Normal. One claim per
     difficulty per tier, and the only card that pings a role."""
+    if difficulty == keys.HEROIC:
+        # Only this atomic new claim creates an event. Old/seeded claims have no
+        # event and can never be recruited by a later farm kill.
+        context = {"slug": slug, "raid": raid_label, "team": scope.team,
+                   "who": clear_display_name(cfg, scope), "when": _iso(when),
+                   "when_text": _when_text(when), "thumb": thumb,
+                   "role": cfg.get("role_id", ""), "channel": cfg.get("channel_id"),
+                   "media_required": bool(cfg.get("recap_page_url") and cfg.get("recap_page_bucket")),
+                   "general": str(cfg.get("discord_guild_id")) == SOCIAL_GENERAL_GUILD,
+                   "guild_label": raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
+                   "guild_url": raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"], cfg["guild_name"])}
+        if not store.claim_aotc(scope, slug, difficulty=difficulty, event=context):
+            return False
+        state["aotcAnnounced"] = True  # Reservation, not proof of delivery.
+        return deliver_aotc_event(cfg, scope, slug, "Group")
     if not store.claim_aotc(scope, slug, difficulty=difficulty):
         log("skip_aotc_already", slug=slug, difficulty=difficulty)
         return False
@@ -778,7 +797,7 @@ def announce_aotc(cfg, scope, slug, raid_label, state, when, thumb=None, profile
     card = kill_card_url(cfg, slug, "aotc" if heroic else "cleared",
                          copy["difficulty"], copy["headline"], copy["lines"], thumb,
                          accent=kill_card.GOLD if heroic else kill_card.SILVER,
-                         team=scope.team, difficulty=difficulty, animated=True)
+                         team=scope.team, difficulty=difficulty, animated=True, achievement=heroic)
 
     payload = discord.aotc_payload(
         who, raid_label, when_text, cfg["role_id"],
@@ -798,6 +817,81 @@ def announce_aotc(cfg, scope, slug, raid_label, state, when, thumb=None, profile
         team=scope.team, when=_iso(when), rolePinged=bool(cfg["role_id"]),
         card=bool(card))
     return True
+
+
+def deliver_aotc_event(cfg, scope, slug, target):
+    event = store.load_aotc_event(scope, slug)
+    if not event or (target == "General" and not event["context"].get("general")):
+        return False
+    token = store.claim_aotc_delivery(scope, slug, target)
+    if not token:
+        return False
+    context = event["context"]
+    try:
+        # A previous owner may have saved its payload between our read and claim.
+        event = store.load_aotc_event(scope, slug)
+        payload = event["payload"]
+        if target == "Group" and payload is None:
+            copy = discord.clear_card_copy(context["who"], context["raid"], context["when_text"], "Heroic")
+            card = kill_card_url(cfg, slug, "aotc", copy["difficulty"], copy["headline"],
+                                 copy["lines"], context["thumb"], accent=kill_card.GOLD,
+                                 team=context["team"], difficulty=keys.HEROIC, animated=True, achievement=True)
+            if not card and context.get("media_required"):
+                raise ValueError("achievement media unavailable")
+            payload = discord.aotc_payload(context["who"], context["raid"], context["when_text"],
+                context["role"], iso_ts=context["when"], thumbnail_url=context["thumb"],
+                repo_url=REPO_URL, guild_label=context["guild_label"], guild_url=context["guild_url"],
+                card_url=card, difficulty="Heroic")
+        if payload is None:
+            raise ValueError("confirmed group payload missing")
+        if target == "General":
+            payload = json.loads(json.dumps(payload))
+            payload.pop("content", None)
+            payload["allowed_mentions"] = {"parse": []}
+            dest = {"bot_token": cfg["bot_token"], "channel": SOCIAL_GENERAL_CHANNEL}
+            if not dest["bot_token"]:
+                raise ValueError("bot token unavailable")
+        else:
+            dest = destination(dict(cfg, channel_id=context["channel"]))
+    except Exception as exc:
+        store.finish_aotc_delivery(scope, slug, target, token, "preparing", "pending")
+        log("aotc_prepare_failed", slug=slug, target=target, error=type(exc).__name__)
+        return False
+    # Persist the exact original payload before any HTTP side effect; fencing
+    # stops a renderer whose preparation lease was taken over by a later poll.
+    if not store.finish_aotc_delivery(scope, slug, target, token, "preparing", "sending",
+                                      payload=payload if target == "Group" else None):
+        return False
+    try:
+        if dest.get("webhook"):
+            sep = "&" if "?" in dest["webhook"] else "?"
+            discord._post_json(dest["webhook"] + sep + "wait=true", payload, max_attempts=1)
+        else:
+            discord.post_to(dest, payload, max_attempts=1)
+    except Exception as exc:
+        # With one HTTP attempt, explicit rejection is retryable. Timeout/5xx
+        # may have delivered: hold as uncertain, never blindly send it again.
+        text = str(exc)
+        rejected = isinstance(exc, discord.DiscordError) and bool(re.match(
+            r"^(?:gave up after 1 attempts: )?HTTP (400|401|403|404|405|413|429):", text))
+        status = "pending" if rejected else "uncertain"
+        store.finish_aotc_delivery(scope, slug, target, token, "sending", status)
+        log("aotc_delivery_failed", slug=slug, target=target, status=status)
+        return False
+    # If this write fails after HTTP success, leave 'sending' in place. That is
+    # explicitly unresolved delivery, not permission for a duplicate retry.
+    return store.finish_aotc_delivery(scope, slug, target, token, "sending", "delivered")
+
+
+def announce_aotc_general(cfg, scope, slug, raid_label=None, when=None, thumb=None, profile=None):
+    """Only a confirmed group delivery's stored card can reach General."""
+    return deliver_aotc_event(cfg, scope, slug, "General")
+
+
+def retry_aotc_events(cfg, scope):
+    for slug in store.aotc_event_slugs(scope):
+        deliver_aotc_event(cfg, scope, slug, "Group")
+        announce_aotc_general(cfg, scope, slug)
 
 
 def preview(spec, cfg, token, gid, profile, index):
@@ -1730,6 +1824,9 @@ def poll_one(event, cfg, scope, now, now_iso, started):
                                                   dry=bool(event.get("dry", True)),
                                                   hours=event.get("hours"))}
 
+    # Recorded first clears retry even after their kills leave the lookback window.
+    retry_aotc_events(cfg, scope)
+
     if not kills:
         # No kills is two completely different situations wearing the same face, and the
         # bot spent eighteen hours unable to tell them apart. A guild that has not raided
@@ -2005,8 +2102,8 @@ def announce_difficulty(token, gid, cfg, scope, profile, index, expansions, kill
         # A world boss is 1 of 1 the moment it dies, and that is not a tier clear. The
         # kill card already says "world boss"; a gold AOTC card for it would be a joke
         # in the wrong channel.
-        if (total and count >= total and not state.get("aotcAnnounced")
-                and not raiderio.is_world_boss(profile, slug)):
+        full_clear = total and count >= total and not raiderio.is_world_boss(profile, slug)
+        if full_clear and not state.get("aotcAnnounced"):
             # Date it by the kill that finished the tier. Falling back to the newest kill
             # in the window would date AOTC by a re-kill on a later farm night, in the case
             # where Raider.IO only caught up after the real clear.
@@ -2021,6 +2118,10 @@ def announce_difficulty(token, gid, cfg, scope, profile, index, expansions, kill
             art = boss_art(cfg, finisher["name"], now_iso)
             announce_aotc(cfg, scope, slug, raid_label, state, _at(when_ms),
                           thumb=art, profile=profile, difficulty=difficulty)
+        # A team card is the announcement. Social/general gets one quiet extra copy only
+        # after that first Heroic success, with its own durable retry claim.
+        if difficulty == keys.HEROIC and state.get("aotcAnnounced"):
+            announce_aotc_general(cfg, scope, slug)
 
         store.touch(scope, slug, now_iso, raid_name=raid_label)
         # Leave the display values behind for /progress. Written for the tier of the most

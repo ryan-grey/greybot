@@ -35,6 +35,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 
 cp "$ROOT/src/"*.py "$OUT/"
+cp "$ROOT/assets/aotc-golden-dragon-frame.png" "$OUT/"
 mkdir -p "$OUT/role-icons"
 cp "$ROOT/assets/role-icons/"*.png "$OUT/role-icons/"
 
@@ -75,6 +76,7 @@ assert (out / "nacl").is_dir(), "PyNaCl did not vendor into the package"
 assert (out / "PIL").is_dir(), "Pillow did not vendor into the package"
 assert (out / "fonts" / "DejaVuSans-Bold.ttf").is_file(), "the card fonts are missing"
 assert (out / "handler.py").is_file(), "handler.py is missing from the package"
+assert (out / "aotc-golden-dragon-frame.png").is_file(), "the AOTC frame is missing"
 size = sum(f.stat().st_size for f in out.rglob("*") if f.is_file())
 print(f"    package: {size // 1024} KB  (stdlib + boto3 from the runtime, + PyNaCl, Pillow, fonts)")
 PY
