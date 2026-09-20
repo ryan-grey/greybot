@@ -152,6 +152,16 @@ class GreybotStack(Stack):
                 resources=[f"arn:aws:dynamodb:{Aws.REGION}:{Aws.ACCOUNT_ID}:"
                            f"table/{cfg.table_name}"],
             ),
+            # Durable AOTC delivery retries enumerate only this install's own
+            # ANNOUNCED rows. Query is constrained to tenant partitions; it cannot
+            # read guild facts, configuration, or another table's records.
+            iam.PolicyStatement(
+                actions=["dynamodb:Query"],
+                resources=[f"arn:aws:dynamodb:{Aws.REGION}:{Aws.ACCOUNT_ID}:"
+                           f"table/{cfg.table_name}"],
+                conditions={"ForAllValues:StringLike": {
+                    "dynamodb:LeadingKeys": ["TENANT#*"]}},
+            ),
             iam.PolicyStatement(
                 actions=["ssm:GetParameter", "ssm:GetParameters"],
                 resources=[
