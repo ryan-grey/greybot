@@ -211,6 +211,15 @@ def is_team(cfg):
     return bool(cfg.get("team_slug"))
 
 
+def uses_team_recap(cfg):
+    """Whether a team uses the relaxed team-recap roster policy.
+
+    Prog has a source-specific state partition but retains its established guild report
+    classifier and pug exclusion. Meer's and Saturday remain ordinary team installs.
+    """
+    return is_team(cfg) and not cfg.get("preserve_prog_recap")
+
+
 def display_name(cfg):
     """Who the card credits: the team's own name, or the guild's."""
     return cfg.get("team_name") or cfg["guild_name"]
@@ -270,13 +279,20 @@ def on_source_reports(kills, cfg):
     a post instead of attributing another group's kill.
     """
     wanted = str(cfg.get("wcl_report_title") or "").strip()
-    if not wanted:
+    owner = str(cfg.get("wcl_report_owner_id") or "").strip()
+    if not wanted and not owner:
         return kills
+    if not wanted or not owner:
+        log("source_identity_incomplete", title=bool(wanted), owner=bool(owner),
+            note="both an exact Warcraft Logs title and verified owner are required")
+        return []
     key = wanted.casefold()
-    kept = [k for k in kills if str(k.get("reportTitle") or "").strip().casefold() == key]
+    kept = [k for k in kills
+            if str(k.get("reportTitle") or "").strip().casefold() == key
+            and str(k.get("reportOwnerID") or "") == owner]
     if len(kept) != len(kills):
-        log("kills_off_source_title", dropped=len(kills) - len(kept), title=wanted,
-            note="a report title outside this install's explicit Warcraft Logs source")
+        log("kills_off_source_identity", dropped=len(kills) - len(kept), title=wanted,
+            note="a report outside this install's verified Warcraft Logs source")
     return kept
 
 
@@ -287,7 +303,7 @@ def fetch_kills(token, gid, cfg, since_ms, limit, difficulty=keys.HEROIC, max_pa
     added when the install has one -- so the server-wide install's query, and the tests
     that double it, are untouched.
     """
-    if cfg.get("wcl_report_title") and not is_team(cfg):
+    if (cfg.get("wcl_report_title") or cfg.get("wcl_report_owner_id")) and not is_team(cfg):
         # A title identifies a team within a guild, so it MUST have a separate state
         # partition. Reusing the guild partition could combine old guild-wide claims with
         # a newly filtered report and manufacture a full-clear card.
@@ -461,7 +477,8 @@ def bootstrap(token, gid, scope, cfg, profile, index, now_iso):
                 killed = None
             names, basis = raiderio.seed_names(meta, killed, total, seen)
             done = len(names) if is_team(cfg) else killed
-            aotc_already = bool(total and done is not None and done >= total)
+            aotc_already = bool(cfg.get("suppress_existing_aotc")) or bool(
+                total and done is not None and done >= total)
             label = (meta or {}).get("name") or slug
             # A baseline above the boss total is arithmetically impossible and is exactly
             # what manufactures a premature "8 of 8". Clamp it rather than trusting the
@@ -2401,7 +2418,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     claim, not the derived roster, not a rollover seed -- so it is safe to run repeatedly
     against production while deciding whether to switch the feature on.
     """
-    if cfg.get("wcl_report_title") and not is_team(cfg):
+    if (cfg.get("wcl_report_title") or cfg.get("wcl_report_owner_id")) and not is_team(cfg):
         log("recap_source_scope_required", title=cfg["wcl_report_title"],
             note="waiting for this explicit report source to receive its team scope")
         return {"ok": True, "skipped": "source_scope_required"}
@@ -2446,9 +2463,14 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     reports, rate = wcl.reports_in_window(token, gid, start_ms, end_ms,
                                           limit=RECAP_MAX_REPORTS, **extra)
     title = str(cfg.get("wcl_report_title") or "").strip()
+    owner = str(cfg.get("wcl_report_owner_id") or "").strip()
+    if bool(title) != bool(owner):
+        log("recap_source_identity_incomplete", title=bool(title), owner=bool(owner))
+        return {"ok": True, "reports": 0, "skipped": "source_identity_incomplete"}
     if title:
         reports = [r for r in reports
-                   if str(r.get("title") or "").strip().casefold() == title.casefold()]
+                   if str(r.get("title") or "").strip().casefold() == title.casefold()
+                   and str(((r.get("owner") or {}).get("id")) or "") == owner]
     if raid_days(cfg):
         # The same uploader logs another team's Saturday. Same rule as the announcer:
         # a report filed outside the team's raid days is not the team's.
@@ -2523,7 +2545,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         # is always None and the two signals do the work -- but the day somebody tags the
         # B team's reports, the guess stops being a guess with no code change.
         tag = (detail.get("guildTag") or {}).get("name")
-        if is_team(cfg):
+        if uses_team_recap(cfg):
             # Every report from the team's own uploader on the team's own raid night IS
             # the team's. There is no second team in this source to tell apart, so the
             # two-signal classifier has nothing to decide.
@@ -2615,7 +2637,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     # an occasional guest.
     roster = tier.get("roster") or set()
     seeded, roster_info = tier.get("seeded"), tier.get("rosterInfo") or {"source": "none"}
-    if is_team(cfg):
+    if uses_team_recap(cfg):
         # No pug filter for a team. The roster intersection exists to keep the OTHER
         # team's players off the prog team's board, and a team install's source is the
         # team itself -- everyone in its log raided with it that night. A twelve-person
@@ -2663,7 +2685,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         raiders=summary.get("raiders"), canonical=page_url,
         region=cfg.get("guild_region"),
         world_bosses=summary.get("worldBosses"), difficulty=diff_label,
-        raiders_heading="Raiders" if is_team(cfg) else "Prog Raiders",
+        raiders_heading="Raiders" if uses_team_recap(cfg) else "Prog Raiders",
         ilvl_scale=ilvl_scale, pulls=summary.get("pulls"))
 
     # Published BEFORE the card is posted, and the link is dropped if the put fails. A card

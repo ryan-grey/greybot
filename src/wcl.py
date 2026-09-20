@@ -110,6 +110,7 @@ query($guildID: Int!, $start: Float!, $limit: Int!, $difficulty: Int!, $page: In
       data {
         code
         title
+        owner { id }
         startTime
         endTime
         zone { id name }
@@ -217,6 +218,7 @@ def heroic_kills_since(token, guild_id, since_ms, limit=12, difficulty=HEROIC,
                 "zoneName": zone.get("name") or "",
                 "reportCode": rep.get("code"),
                 "reportTitle": rep.get("title") or "",
+                "reportOwnerID": int(((rep.get("owner") or {}).get("id")) or 0),
                 "reportStartMs": int(base),
                 # fight times are offsets from the report start; see the module docstring
                 "killedAtMs": int(base + (f.get("endTime") or f.get("startTime") or 0)),

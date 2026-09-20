@@ -937,6 +937,9 @@ def get_config(tenant):
         "team_name": text("teamName"),
         "wcl_user_id": text("wclUserId"),
         "wcl_report_title": text("wclReportTitle"),
+        "wcl_report_owner_id": text("wclReportOwnerId"),
+        "preserve_prog_recap": text("preserveProgRecap"),
+        "suppress_existing_aotc": text("suppressExistingAotc"),
         "raid_days": text("raidDays"),
         "difficulties": text("difficulties"),
     }
@@ -970,6 +973,9 @@ def put_config(tenant, region, realm, name, channel_id, now_iso,
             "teamName": _s(team.get("name") or team["slug"]),
             "wclUserId": _s(str(team.get("wcl_user_id") or "")),
             "wclReportTitle": _s(str(team.get("wcl_report_title") or "")),
+            "wclReportOwnerId": _s(str(team.get("wcl_report_owner_id") or "")),
+            "preserveProgRecap": _s(str(team.get("preserve_prog_recap") or "")),
+            "suppressExistingAotc": _s(str(team.get("suppress_existing_aotc") or "")),
             "raidDays": _s(team.get("raid_days") or ""),
             "difficulties": _s(team.get("difficulties") or keys.HEROIC)})
     ddb.put_item(TableName=TABLE, Item=item)
