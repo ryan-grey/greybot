@@ -28,6 +28,7 @@ goes out looking like it did last week.
 
 import io
 import os
+import math
 import urllib.request
 
 def _font_dir():
@@ -97,6 +98,88 @@ def _fit(text, path, draw, limit, size, floor):
     return (text + "…") if text else "", font
 
 
+def _draw_fireworks(draw, frame, accent):
+    """Paint a quiet, deterministic burst field behind a clear card's foreground.
+
+    It is deliberately geometry rather than downloaded GIF art: cards keep working in
+    Lambda without a new network dependency, and the same event renders identically on
+    retries.  The dark, low-alpha-looking colours keep the raid name readable while the
+    changing particle radius makes the animation visibly celebrate a tier clear.
+    """
+    progress = frame / 24
+    bursts = ((390, 95, 0.92), (725, 75, 0.68), (875, 210, 0.48))
+    for cx, cy, phase in bursts:
+        age = (progress + phase) % 1.0
+        radius = 14 + age * 118
+        # A brief bright core and fading trails: enough movement to read as fireworks,
+        # never enough opaque colour to fight the foreground typography.
+        for ray in range(18):
+            angle = (math.tau * ray / 18) + phase * 3
+            inner = max(4, radius - 25)
+            outer = radius
+            x1 = cx + math.cos(angle) * inner
+            y1 = cy + math.sin(angle) * inner
+            x2 = cx + math.cos(angle) * outer
+            y2 = cy + math.sin(angle) * outer
+            fade = int(88 * (1 - age))
+            colour = tuple(min(255, c // 3 + fade) for c in accent)
+            draw.line((x1, y1, x2, y2), fill=colour, width=2)
+            draw.ellipse((x2 - 2, y2 - 2, x2 + 2, y2 + 2), fill=colour)
+        core = tuple(min(255, c // 2 + 80) for c in accent)
+        draw.ellipse((cx - 4, cy - 4, cx + 4, cy + 4), fill=core)
+
+
+def _card_art(art_url):
+    """Fetch and fit optional encounter art once for an entire card render."""
+    if not art_url:
+        return None
+    try:
+        from PIL import Image
+        art = Image.open(io.BytesIO(_load(art_url))).convert("RGB")
+        side = min(art.size)
+        left = (art.width - side) // 2
+        top = (art.height - side) // 2
+        return art.crop((left, top, left + side, top + side)).resize((ART, ART), Image.LANCZOS)
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def _render_frame(boss_name, headline, lines, art, accent, frame=None):
+    from PIL import Image, ImageDraw
+
+    card = Image.new("RGB", (WIDTH, HEIGHT), NAVY)
+    draw = ImageDraw.Draw(card)
+    if frame is not None:
+        _draw_fireworks(draw, frame, accent)
+
+    regular = os.path.join(FONT_DIR, "DejaVuSans.ttf")
+    bold = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
+
+    text_left = 40
+    if art:
+        card.paste(art, (0, 0))
+        # A hairline in the accent, so the art reads as part of the card rather
+        # than as a picture someone dropped on top of it.
+        draw.rectangle([ART, 0, ART + 2, HEIGHT], fill=accent)
+        text_left = ART + 34
+
+    limit = WIDTH - text_left - 40
+    y = 44
+    text, font = _fit(headline, regular, draw, limit, 30, 22)
+    draw.text((text_left, y), text, font=font, fill=MUTED)
+
+    y += 44
+    text, font = _fit(boss_name, bold, draw, limit, 54, 32)
+    draw.text((text_left, y), text, font=font, fill=accent)
+
+    y += 78
+    for line in lines or ():
+        text, font = _fit(line, regular, draw, limit, 30, 21)
+        draw.text((text_left, y), text, font=font, fill=INK)
+        y += 40
+    return card
+
+
 def render(boss_name, headline, lines, art_url=None, accent=ACCENT):
     """The card as PNG bytes, or None if anything at all went wrong.
 
@@ -109,54 +192,29 @@ def render(boss_name, headline, lines, art_url=None, accent=ACCENT):
     for the layout to drift; the gold is a parameter precisely so it cannot.
     """
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image
     except ImportError:
         return None
 
     try:
-        card = Image.new("RGB", (WIDTH, HEIGHT), NAVY)
-        draw = ImageDraw.Draw(card)
-
-        regular = os.path.join(FONT_DIR, "DejaVuSans.ttf")
-        bold = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
-
-        text_left = 40
-        if art_url:
-            try:
-                art = Image.open(io.BytesIO(_load(art_url))).convert("RGB")
-                # Square-crop first so a non-square source is not squashed, then resize
-                # ONCE. Resizing a stretched image bakes the stretch in.
-                side = min(art.size)
-                left = (art.width - side) // 2
-                top = (art.height - side) // 2
-                art = art.crop((left, top, left + side, top + side))
-                art = art.resize((ART, ART), Image.LANCZOS)
-                card.paste(art, (0, 0))
-                # A hairline in the accent, so the art reads as part of the card rather
-                # than as a picture someone dropped on top of it.
-                draw.rectangle([ART, 0, ART + 2, HEIGHT], fill=accent)
-                text_left = ART + 34
-            except Exception:                                  # noqa: BLE001
-                # No art is a layout, not a failure: the text simply starts at the margin.
-                text_left = 40
-
-        limit = WIDTH - text_left - 40
-        y = 44
-        text, font = _fit(headline, regular, draw, limit, 30, 22)
-        draw.text((text_left, y), text, font=font, fill=MUTED)
-
-        y += 44
-        text, font = _fit(boss_name, bold, draw, limit, 54, 32)
-        draw.text((text_left, y), text, font=font, fill=accent)
-
-        y += 78
-        for line in lines or ():
-            text, font = _fit(line, regular, draw, limit, 30, 21)
-            draw.text((text_left, y), text, font=font, fill=INK)
-            y += 40
+        card = _render_frame(boss_name, headline, lines, _card_art(art_url), accent)
 
         out = io.BytesIO()
         card.save(out, format="PNG", optimize=True)
+        return out.getvalue()
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def render_clear(boss_name, headline, lines, art_url=None, accent=GOLD):
+    """The looping GIF used only for Normal and Heroic full-raid clear cards."""
+    try:
+        art = _card_art(art_url)
+        frames = [_render_frame(boss_name, headline, lines, art, accent, frame=i)
+                  for i in range(24)]
+        out = io.BytesIO()
+        frames[0].save(out, format="GIF", save_all=True, append_images=frames[1:],
+                       duration=100, loop=0, optimize=True, disposal=2)
         return out.getvalue()
     except Exception:                                          # noqa: BLE001
         return None

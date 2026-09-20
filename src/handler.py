@@ -212,6 +212,15 @@ def display_name(cfg):
     return cfg.get("team_name") or cfg["guild_name"]
 
 
+def clear_display_name(cfg, scope):
+    """The configured raid group named by a full-clear card.
+
+    The server-wide install is the Prog raid. Its ordinary kill cards retain the guild
+    name, but calling its tier clear "Scrambled" hides which raid group cleared it.
+    """
+    return cfg.get("team_name") or ("Prog Raid" if not scope.team else cfg["guild_name"])
+
+
 def difficulties(cfg):
     """Which difficulties this install announces, in the order configured. A server-wide
     install announces Heroic and nothing else, exactly as it always has."""
@@ -537,7 +546,7 @@ def card_prefix(team=None, difficulty=keys.HEROIC):
 
 
 def kill_card_url(cfg, slug, boss_key, boss_name, headline, lines, art_url, accent=None,
-                  team=None, difficulty=keys.HEROIC):
+                  team=None, difficulty=keys.HEROIC, animated=False):
     """Draw an announcement card and publish it, or return None and let the embed do it.
 
     Published to the same bucket as the recap page, under cards/, because it needs a URL
@@ -558,13 +567,23 @@ def kill_card_url(cfg, slug, boss_key, boss_name, headline, lines, art_url, acce
     try:
         if not cfg.get("recap_page_url") or not cfg.get("recap_page_bucket"):
             return None
-        png = kill_card.render(boss_name, headline, lines, art_url=art_url,
-                               accent=accent or kill_card.ACCENT)
-        if not png:
+        image = (kill_card.render_clear(boss_name, headline, lines, art_url=art_url,
+                                        accent=accent or kill_card.ACCENT)
+                 if animated else
+                 kill_card.render(boss_name, headline, lines, art_url=art_url,
+                                  accent=accent or kill_card.ACCENT))
+        if not image:
             return None
-        key = (f"cards/{slug}/{card_prefix(team, difficulty)}"
-               f"{raiderio.slugify(boss_key or boss_name)}.png")
-        publish_bytes(cfg, key, png, "image/png")
+        extension = "gif" if animated else "png"
+        content_type = "image/gif" if animated else "image/png"
+        basename = raiderio.slugify(boss_key or boss_name)
+        # A clear GIF is immutable once Discord has fetched it.  Put its content hash in
+        # the URL so a later correction gets a fresh asset instead of CloudFront's or
+        # Discord's cached first frame; ordinary first-kill PNG paths stay stable.
+        if animated:
+            basename += f"-{hashlib.sha1(image).hexdigest()[:12]}"
+        key = f"cards/{slug}/{card_prefix(team, difficulty)}{basename}.{extension}"
+        publish_bytes(cfg, key, image, content_type)
         return f"{cfg['recap_page_url']}/{key}"
     except Exception as exc:                                       # noqa: BLE001
         log("kill_card_failed", slug=slug, boss=boss_name, error=repr(exc),
@@ -751,18 +770,15 @@ def announce_aotc(cfg, scope, slug, raid_label, state, when, thumb=None, profile
     when_text = _when_text(when)
     heroic = difficulty == keys.HEROIC
     label = difficulty.title()
-    who = display_name(cfg)
+    who = clear_display_name(cfg, scope)
 
-    # Gold for AOTC, silver for a Normal clear, and otherwise the same drawing as a first
-    # kill -- one tier's worth of cards that read as one product, with the colour carrying
-    # the difference. Keyed on "aotc" / "cleared" rather than on a boss, so a re-announce
-    # overwrites its own card like the kills do.
+    # Gold for Heroic and silver for Normal.  The shared copy places the team first and
+    # the difficulty in the large line, then gives the raid and date exactly once.
+    copy = discord.clear_card_copy(who, raid_label, when_text, label)
     card = kill_card_url(cfg, slug, "aotc" if heroic else "cleared",
-                         "Ahead of the Curve" if heroic else f"{label} cleared",
-                         f"{who} just got" if heroic else f"{who} just cleared",
-                         [f"{label} {raid_label}", when_text], thumb,
+                         copy["difficulty"], copy["headline"], copy["lines"], thumb,
                          accent=kill_card.GOLD if heroic else kill_card.SILVER,
-                         team=scope.team, difficulty=difficulty)
+                         team=scope.team, difficulty=difficulty, animated=True)
 
     payload = discord.aotc_payload(
         who, raid_label, when_text, cfg["role_id"],

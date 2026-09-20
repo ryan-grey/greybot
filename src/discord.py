@@ -277,14 +277,31 @@ def kill_embed(guild_name, boss_name, killed, total, raid_name, realm_rank,
 NORMAL_SILVER = 0xC6D0DE
 
 
+def clear_card_copy(team_name, raid_name, when_text, difficulty):
+    """One wording contract for every full-raid clear card.
+
+    The renderer and its text fallback must never get to independently decide where a
+    difficulty or the word "cleared" belongs.  A clear is read top-to-bottom: the team
+    celebrated, the difficulty (as the large line), then the raid and its date.
+    """
+    label = str(difficulty).strip().title()
+    headline = f"{team_name} just cleared"
+    return {
+        "headline": headline,
+        "difficulty": label,
+        "lines": [raid_name, when_text],
+        "title": headline,
+        "description": f"**{label}**\n{raid_name}\n{when_text}",
+    }
+
+
 def aotc_payload(guild_name, raid_name, when_text, role_id, iso_ts=None,
                  thumbnail_url=None, guild_label=None, guild_url=None, repo_url=None,
                  card_url=None, difficulty="Heroic"):
     """The tier-clear card, and the only message in the bot that pings anyone.
 
-    On Heroic that is AOTC. On Normal it is "cleared Normal", in silver rather than gold:
-    the same card, the same ping, one rung down. The wording and the colour are the only
-    two things that differ, so they are decided here and nowhere else.
+    Heroic remains gold and Normal remains silver. Their shared wording comes from
+    ``clear_card_copy`` so every team's card has the same readable hierarchy.
 
     This is also the only card carrying a credit line. A kill card goes out several times
     a tier into a channel shared with the raid team, and a developer plug on every one of
@@ -292,16 +309,14 @@ def aotc_payload(guild_name, raid_name, when_text, role_id, iso_ts=None,
     which is the one moment where a small "built by" reads as charm rather than adverts.
     """
     heroic = str(difficulty).lower() == "heroic"
-    description = "Congratulations to the team!"
+    copy = clear_card_copy(guild_name, raid_name, when_text, difficulty)
+    description = copy["description"]
     if repo_url:
         description += f"\n\n[greyBot]({repo_url})"
     embed = {
-        "title": (f"{guild_name} just got AOTC on {when_text}" if heroic else
-                  f"{guild_name} just cleared {difficulty} {raid_name} on {when_text}"),
+        "title": copy["title"],
         "description": description,
         "color": AOTC_GOLD if heroic else NORMAL_SILVER,
-        "footer": {"text": (f"Ahead of the Curve — Heroic {raid_name}" if heroic else
-                            f"{difficulty} {raid_name} cleared")},
     }
     if iso_ts:
         embed["timestamp"] = iso_ts

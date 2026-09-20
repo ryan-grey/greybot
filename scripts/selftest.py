@@ -1246,40 +1246,51 @@ def test_discord_payloads():
     check("the role is allow-listed so the ping actually fires",
           a["allowed_mentions"]["roles"] == ["111111111111111111"])
     check("nothing else can be mentioned", a["allowed_mentions"]["parse"] == [])
-    check("AOTC title matches the spec",
-          a["embeds"][0]["title"]
-          == "Scrambled just got AOTC on August 28, 2026 at 11:14 PM EDT")
-    check("AOTC body matches the spec",
-          a["embeds"][0]["description"] == "Congratulations to the team!")
+    check("a clear leads with the configured display name",
+          a["embeds"][0]["title"] == "Scrambled just cleared")
+    check("the fallback gives Heroic its own prominent line",
+          a["embeds"][0]["description"]
+          == "**Heroic**\nThe Venomous Abyss\nAugust 28, 2026 at 11:14 PM EDT")
+    check("the fallback omits a redundant footer",
+          "footer" not in a["embeds"][0])
+
+    for team_name in ("Saturday Raid", "Meer's Raid", "Prog Raid"):
+        for difficulty in ("Normal", "Heroic"):
+            copy = discord.clear_card_copy(team_name, "The Venomous Abyss", "when", difficulty)
+            check(f"{team_name} {difficulty} clear has one clear headline",
+                  copy["headline"] == f"{team_name} just cleared", copy)
+            check(f"{team_name} {difficulty} clear puts only its difficulty in the large line",
+                  copy["difficulty"] == difficulty, copy)
+            check(f"{team_name} {difficulty} clear keeps raid and time once below it",
+                  copy["lines"] == ["The Venomous Abyss", "when"], copy)
 
     noping = discord.aotc_payload("Scrambled", "R", "when", "")
     check("an unset role id posts without a broken mention", "content" not in noping)
 
     credited = discord.aotc_payload("Scrambled", "R", "when", "1",
                                     repo_url="https://github.com/ryan-grey/greybot")
-    check("AOTC — once per tier — is where the credit goes",
+    check("a clear card keeps its one credit link",
           "[greyBot](https://github.com/ryan-grey/greybot)"
           in credited["embeds"][0]["description"])
-    check("...and it still leads with the line from the spec",
-          credited["embeds"][0]["description"].startswith("Congratulations to the team!"))
+    check("...after the shared clear copy",
+          credited["embeds"][0]["description"].startswith("**Heroic**\nR\nwhen"))
     check("no repo URL means no credit line, not a dead link",
           discord.aotc_payload("S", "R", "w", "1")["embeds"][0]["description"]
-          == "Congratulations to the team!")
+          == "**Heroic**\nR\nw")
 
     # The drawn AOTC card. The image carries the words, the embed keeps only what a PNG
     # cannot do: the ping, the author link and the clickable credit.
     carded = discord.aotc_payload("Scrambled", "R", "when", "1",
                                   thumbnail_url="https://art/x.jpg",
                                   repo_url="https://github.com/ryan-grey/greybot",
-                                  card_url="https://raids/cards/r/aotc.png")["embeds"][0]
+                                  card_url="https://raids/cards/r/aotc.gif?v=abc")["embeds"][0]
     check("a drawn AOTC card becomes the embed image",
-          carded.get("image") == {"url": "https://raids/cards/r/aotc.png"})
+          carded.get("image") == {"url": "https://raids/cards/r/aotc.gif?v=abc"})
     check("...and the embed stops repeating the card's words",
           "title" not in carded and "thumbnail" not in carded, sorted(carded))
     check("...but the credit link survives, because a PNG cannot be clicked",
           carded.get("description") == "[greyBot](https://github.com/ryan-grey/greybot)")
-    check("...and the footer still names the achievement",
-          carded["footer"]["text"] == "Ahead of the Curve — Heroic R")
+    check("...without a duplicate footer", "footer" not in carded)
     check("a card with no repo URL has no empty description either",
           "description" not in discord.aotc_payload("S", "R", "w", "1",
                                                     card_url="https://x/aotc.png")
@@ -1670,9 +1681,9 @@ def test_end_to_end():
     check("the remaining five bosses each get a card",
           len([p for p in posts if "just killed" in p["embeds"][0]["title"]]) == 5,
           len(posts))
-    check("AOTC follows, exactly once",
-          len([p for p in posts if "just got AOTC on" in p["embeds"][0]["title"]]) == 1)
-    aotc = [p for p in posts if "just got AOTC on" in p["embeds"][0]["title"]][0]
+    check("the Heroic clear follows exactly once",
+          len([p for p in posts if p["embeds"][0].get("title") == "Prog Raid just cleared"]) == 1)
+    aotc = [p for p in posts if p["embeds"][0].get("title") == "Prog Raid just cleared"][0]
     check("AOTC pings Prog Raiders and nothing else",
           aotc.get("content") == "<@&111111111111111111>"
           and aotc["allowed_mentions"] == {"parse": [],
@@ -1961,9 +1972,12 @@ def test_team_install():
           len(kills_posted))
     check("then ONE Normal-clear card", len(clears) == 1, len(clears))
     clear = clears[0] if clears else {"embeds": [{}]}
-    check("...titled as a Normal clear",
-          "just cleared Normal The Venomous Abyss on" in clear["embeds"][0].get("title", ""),
+    check("...using the team's clear headline without repeating Normal",
+          clear["embeds"][0].get("title") == "Meer's Raid just cleared",
           clear["embeds"][0].get("title"))
+    check("...putting Normal on its own fallback line",
+          clear["embeds"][0].get("description", "").startswith("**Normal**\nThe Venomous Abyss\n"),
+          clear["embeds"][0].get("description"))
     check("...in silver, not AOTC gold",
           clear["embeds"][0].get("color") == handler.discord.NORMAL_SILVER)
     check("...pinging the team's role", clear.get("content") == f"<@&{TEAM_ROLE}>"
@@ -2189,6 +2203,22 @@ def test_kill_card_image():
     finally:
         kill_card._load = real_load
 
+    puts = []
+    real_publish, handler.publish_bytes = handler.publish_bytes, lambda cfg, key, body, kind: puts.append(
+        (key, body, kind))
+    try:
+        clear_url = handler.kill_card_url({"recap_page_url": "https://raids.example",
+                                           "recap_page_bucket": "cards"},
+                                          "the-venomous-abyss", "aotc", "Heroic",
+                                          "Scrambled just cleared", ["The Venomous Abyss", "when"],
+                                          None, accent=kill_card.GOLD, animated=True)
+        check("a clear publishes a cache-busted GIF URL with the GIF MIME type",
+              clear_url and clear_url.endswith(".gif") and len(puts) == 1
+              and puts[0][2] == "image/gif" and puts[0][0].endswith(".gif")
+              and "aotc-" in puts[0][0], (clear_url, puts))
+    finally:
+        handler.publish_bytes = real_publish
+
     png = kill_card.render("Boss", "Guild just killed", ["line"], art_url=None)
     check("a card with no art at all is still a card", bool(png))
 
@@ -2196,8 +2226,8 @@ def test_kill_card_image():
     # so the two can never drift apart, and the gold is checked on the pixels themselves.
     from PIL import Image as _Image
     import io as _io
-    gold = kill_card.render("Ahead of the Curve", "Scrambled just got",
-                            ["Heroic The Venomous Abyss", "when"], accent=kill_card.GOLD)
+    gold = kill_card.render("Heroic", "Scrambled just cleared",
+                            ["The Venomous Abyss", "when"], accent=kill_card.GOLD)
     img = _Image.open(_io.BytesIO(gold)).convert("RGB")
     check("an AOTC card is the same size as a kill card",
           img.size == (kill_card.WIDTH, kill_card.HEIGHT), img.size)
@@ -2205,6 +2235,32 @@ def test_kill_card_image():
           kill_card.GOLD in set(img.getdata()) and kill_card.ACCENT not in set(img.getdata()))
     check("the accent is a parameter, and the default is still the kill-card blue",
           kill_card.ACCENT in set(_Image.open(_io.BytesIO(png)).convert("RGB").getdata()))
+
+    fireworks = kill_card.render_clear("Heroic", "Scrambled just cleared",
+                                       ["The Venomous Abyss", "when"], accent=kill_card.GOLD)
+    animated = _Image.open(_io.BytesIO(fireworks))
+    check("a full clear is a looping GIF", fireworks[:6] in (b"GIF87a", b"GIF89a")
+          and getattr(animated, "n_frames", 1) == 24 and animated.info.get("loop") == 0,
+          (fireworks[:6], getattr(animated, "n_frames", 1), animated.info))
+    animated.seek(0)
+    first = animated.convert("RGB").tobytes()
+    animated.seek(6)
+    check("firework frames actually move", first != animated.convert("RGB").tobytes())
+
+    art_source = _Image.new("RGB", (8, 8), (40, 70, 100))
+    art_bytes = _io.BytesIO()
+    art_source.save(art_bytes, format="PNG")
+    calls = []
+    real_load, kill_card._load = kill_card._load, lambda url, timeout=8: (calls.append(url)
+                                                                            or art_bytes.getvalue())
+    try:
+        check("a clear GIF fetches its art once, not once per animation frame",
+              kill_card.render_clear("Normal", "Saturday Raid just cleared", ["R", "when"],
+                                     art_url="https://art.example/boss.png",
+                                     accent=kill_card.SILVER) and calls == ["https://art.example/boss.png"],
+              calls)
+    finally:
+        kill_card._load = real_load
 
     # The boss is already CLAIMED when the card is drawn, so a bug in here loses the
     # announcement outright rather than just the picture. It happened once, live.
