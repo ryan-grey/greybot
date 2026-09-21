@@ -281,13 +281,33 @@ def on_raid_days(kills, cfg):
     return kept
 
 
+def excluded_owners(cfg):
+    """Warcraft Logs uploader ids this install never reads, whatever else it accepts."""
+    return {o.strip() for o in str(cfg.get("wcl_exclude_owner_ids") or "").split(",")
+            if o.strip()}
+
+
 def on_source_reports(kills, cfg):
     """Keep only the configured exact Warcraft Logs report title, if any.
 
     A partial match could make a title such as ``Prog Raid Alt`` join Prog's permanent
     first-kill state. Missing titles are also excluded while scoped: uncertainty delays
     a post instead of attributing another group's kill.
+
+    With neither a title nor an owner the source is POOLED: every guild report from any
+    uploader, so a night two people logged arrives twice. That is safe as it stands: the
+    boss claim announces each kill once, the roll call takes the earliest kill of the night,
+    and the recap drops overlapping logs (recap.drop_duplicate_logs). wcl_exclude_owner_ids
+    removes named uploaders in either mode, and the raid-day filter still decides which
+    nights count.
     """
+    excluded = excluded_owners(cfg)
+    if excluded:
+        kept = [k for k in kills if str(k.get("reportOwnerID") or "") not in excluded]
+        if len(kept) != len(kills):
+            log("kills_off_excluded_owner", dropped=len(kills) - len(kept),
+                owners=sorted(excluded), note="an uploader this install never reads")
+        kills = kept
     wanted = str(cfg.get("wcl_report_title") or "").strip()
     owner = str(cfg.get("wcl_report_owner_id") or "").strip()
     if not wanted and not owner:
@@ -2493,6 +2513,11 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         reports = [r for r in reports
                    if str(r.get("title") or "").strip().casefold() == title.casefold()
                    and str(((r.get("owner") or {}).get("id")) or "") == owner]
+    excluded = excluded_owners(cfg)
+    if excluded:
+        # Same rule as the announcer: a pooled source still never reads these uploaders.
+        reports = [r for r in reports
+                   if str(((r.get("owner") or {}).get("id")) or "") not in excluded]
     if raid_days(cfg):
         # The same uploader logs another team's Saturday. Same rule as the announcer:
         # a report filed outside the team's raid days is not the team's.

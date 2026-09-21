@@ -2120,6 +2120,23 @@ def test_team_install():
                    dict(kill("unknown", 0.5), reportTitle="", reportOwnerID=519077)]
     check("an exact title and verified owner exclude other reports",
           [k["name"] for k in handler.on_source_reports(title_kills, sourced)] == ["prog"])
+    # A POOLED source (Prog since 2026-09-21): no title, no owner, every uploader on the
+    # raid days, minus the uploaders it names as never its own.
+    pooled = dict(gcfg, raid_days=raid_day, wcl_exclude_owner_ids="40245")
+    pool_kills = [dict(kill("zat", 0.5, "zatrekaz"), reportTitle="Any title", reportOwnerID=68356),
+                  dict(kill("elder", 0.5, "elder"), reportTitle="Starting Heroic", reportOwnerID=3918),
+                  dict(kill("swib", 0.5, "swibeto"), reportTitle="Prog Raid", reportOwnerID=519077),
+                  dict(kill("meer", 0.5, "meerclar"), reportTitle="The Venomous Abyss",
+                       reportOwnerID=40245),
+                  dict(kill("sat", 1.5, "saturday"), reportTitle="Saturday Raid", reportOwnerID=519077)]
+    got = [k["name"] for k in handler.on_source_reports(handler.on_raid_days(pool_kills, pooled),
+                                                         pooled)]
+    check("a pooled source reads every uploader on its raid days, minus the excluded one",
+          got == ["zat", "elder", "swib"], got)
+    check("...and an excluded uploader is dropped even behind an exact title and owner",
+          handler.on_source_reports(title_kills, dict(sourced, wcl_exclude_owner_ids="519077")) == [])
+    check("...while no exclusions leave a pooled source unfiltered",
+          len(handler.on_source_reports(pool_kills, gcfg)) == len(pool_kills))
     check("a title source cannot use the guild state partition",
           sourced["wcl_report_title"] and not handler.is_team(sourced))
     check("an active-tier cutover rejects only explicitly older tiers",
@@ -3538,6 +3555,18 @@ def test_recap_end_to_end():
     check("...posts nothing", posts == [], f"{len(posts)} posts")
     check("...and claims NO night, so the real recap still fires",
           FAKE_DDB.items == before, "state changed — the dry run would silence the recap")
+
+    # A pooled source names the uploaders it never reads, and the recap honours that too.
+    idx, _exp = handler.raiderio.build_index(profile, handler.EXPANSION_HINT)
+    pooled = dict(config.load(), wcl_exclude_owner_ids="40245")
+    reports[0]["owner"] = {"id": 40245}
+    res = handler.recap_night("tok", pooled, pk, now, "now", 777, profile, idx, 0.0, dry=True)
+    check("the recap drops a report from an excluded uploader", res.get("reports") == 0, res)
+    reports[0]["owner"] = {"id": 68356}
+    res = handler.recap_night("tok", pooled, pk, now, "now", 777, profile, idx, 0.0, dry=True)
+    check("...and still reads any other uploader", res.get("dry") is True, res)
+    check("...writing nothing either way", FAKE_DDB.items == before)
+    del reports[0]["owner"]
 
     # The window override, and the fact that only a dry run gets one.
     old_start = reports[0]["startTime"]
