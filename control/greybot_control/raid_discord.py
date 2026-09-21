@@ -48,10 +48,16 @@ def button(label, action, event_id):
 
 
 def modal(custom_id, title, fields):
+    def row(spec):
+        # A trailing element pre-fills the input (used when editing an event).
+        name, label, style, required, limit, *prefill = spec
+        text = {"type": 4, "custom_id": name, "label": label, "style": style,
+                "required": required, "max_length": limit}
+        if prefill and prefill[0]:
+            text["value"] = str(prefill[0])[:limit]
+        return {"type": 1, "components": [text]}
     return {"type": 9, "data": {"custom_id": custom_id, "title": title,
-        "components": [{"type": 1, "components": [{"type": 4, "custom_id": name,
-            "label": label, "style": style, "required": required, "max_length": limit}]}
-            for name, label, style, required, limit in fields]}}
+        "components": [row(f) for f in fields]}}
 
 
 def template(store, guild, name):
@@ -156,17 +162,15 @@ def receive(cfg, store, packet):
                 if not 0 <= page <= (len(available) - 1) // 25:
                     raise Denied("Invalid choice page")
                 selected = available[page * 25:(page + 1) * 25]
-                preferred = next((s for s in event["signUps"] if str(s["userId"]) == actor), {})
-                if not preferred:
-                    with store.connection() as db:
-                        saved = db.execute("SELECT choice FROM raid_preferences WHERE guild=? AND user=? AND template=?",
-                                           (cfg.guild_id, actor, event.get("templateId", "standard"))).fetchone()
-                    preferred = json.loads(saved[0]) if saved else {}
+                # No option is pre-selected. A Discord string select fires no change
+                # event when the user re-picks an option already marked `default`, so a
+                # member re-choosing last week's spec (still shown selected) silently did
+                # nothing until they withdrew first. The roster card already shows each
+                # member's current pick, so the dropdown does not need to echo it.
                 components = [{"type": 1, "components": [{"type": 3, "custom_id": PREFIX + "choose:" + row["id"],
                     "placeholder": "Choose your " + group.lower() + " specialization" if group else "Choose your class / specialization", "options": [
                         {"label": c["label"][:100], "value": c["value"],
-                         **({"emoji": EMOJIS[c["emoji_id"]]} if c.get("emoji_id") in EMOJIS else {}), "default": bool(preferred) and
-                         all(c[k] == preferred.get(k) for k in ("className", "specName"))} for c in selected]}]}]
+                         **({"emoji": EMOJIS[c["emoji_id"]]} if c.get("emoji_id") in EMOJIS else {})} for c in selected]}]}]
                 pages = [button(str(p + 1), "page", row["id"] + ":" + str(p)) for p in range((len(available) + 24) // 25)]
                 if len(pages) > 1:
                     components.append({"type": 1, "components": pages[:5]})
@@ -176,6 +180,17 @@ def receive(cfg, store, packet):
             if operation == "status" and packet["type"] == 3:
                 return reply("Choose your attendance status.", [{"type": 1, "components": [
                     button(s, "set-status", row["id"] + ":" + s) for s in ("Bench", "Late", "Tentative", "Absence")]}])
+            if operation == "edit-open" and packet["type"] == 3:
+                # Managers/leaders can fix the title, date or details without the web
+                # panel. Authorization is re-checked when the edit is applied; this is
+                # only to avoid handing everyone an edit form.
+                if not int(member.get("permissions", "0")) & (8 | 32) and str(event.get("leaderId")) != actor:
+                    raise Denied("Only the event leader or a server manager can edit this event")
+                when = datetime.fromtimestamp(event["startTime"], timezone.utc).isoformat()
+                return modal(PREFIX + "edit-save:" + row["id"] + ":" + str(row["revision"]), "Edit raid signup", [
+                    ("title", "Event title", 1, True, 200, event.get("title", "")),
+                    ("when", "Date + offset: 2026-09-12T18:00-07:00", 1, True, 40, when),
+                    ("description", "Details", 2, False, 3500, event.get("description", ""))])
             value = ""
             if operation == "choose" and packet["type"] == 3:
                 values = data.get("values", [])
@@ -186,9 +201,17 @@ def receive(cfg, store, packet):
                 operation, value = "note", fields.get("note", "")
             elif operation == "set-status" and packet["type"] == 3 and len(parts) == 3:
                 operation, value = "status", parts[2]
+            elif operation == "edit-save" and packet["type"] == 5 and len(parts) == 3:
+                start = parse_start(fields.get("when", ""))
+                operation, value = "edit", {"title": fields.get("title", ""),
+                    "description": fields.get("description", ""), "startTime": start, "closingTime": start}
             elif operation != "withdraw" or packet["type"] != 3:
                 raise Denied("Unsupported raid control")
             body = {"operation": operation, "raid_id": row["id"], "value": value}
+            # Edits are applied against the revision the form was opened on, so two
+            # managers editing at once cannot silently overwrite each other.
+            if operation == "edit":
+                body["revision"] = int(parts[2])
     store.queue("raid-" + packet["id"], cfg.guild_id, actor, "raid", actor, body)
     return reply("Your raid request is queued. The signup card will update after your access is checked.")
 
@@ -293,7 +316,8 @@ def card(cfg, row, profiles):
     if opened:
         controls.append({"type": 1, "components": role_buttons(event, row["id"]) or [button("Sign up / change", "signup", row["id"])]})
         controls.append({"type": 1, "components": [button("Status", "status", row["id"]),
-                         button("Note", "note", row["id"]), button("Withdraw", "withdraw", row["id"])]})
+                         button("Note", "note", row["id"]), button("Withdraw", "withdraw", row["id"]),
+                         button("Edit event", "edit-open", row["id"])]})
     controls.append({"type": 1, "components": [{"type": 2, "style": 5, "label": "Full roster & event details", "url": cfg.origin + "/raids#" + row["id"]}]})
     payload = {"embeds": [embed], "components": controls, "allowed_mentions": {"parse": []}}
     if cfg.guild_id == "946663011991556117" and str(event.get("channelId")) == "1480026658705637516":

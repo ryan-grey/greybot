@@ -70,6 +70,52 @@ class RaidDiscordTests(unittest.TestCase):
             self.assertEqual(len(options), 10)
             self.assertTrue(all(o["label"].startswith(role+" · ") for o in options))
 
+    def test_spec_dropdown_never_preselects_a_default(self):
+        # Regression: a Discord string select fires no change event when a member
+        # re-picks an option already marked `default`, so re-choosing last week's
+        # spec silently did nothing until they picked something else first. The
+        # dropdown must offer every spec with no option pre-selected.
+        event = {"title": "Raid", "leaderId": "3", "channelId": "2", "startTime": 9999999999,
+                 "closingTime": 9999999999, "state": "open",
+                 "signUps": [{"userId": "3", "className": "Ranged", "specName": "Ranged0",
+                              "roleName": "Ranged", "status": "primary"}],
+                 "classes": [{"name": role, "specs": [{"name": role + str(i), "roleName": role} for i in range(3)]}
+                             for role in ("Tank", "Melee", "Ranged", "Healer")]}
+        eid = raids.create(self.store, "1", "3", "preselect-test", event)
+        packet = {**self.packet, "type": 3, "message": {"author": {"id": "9"}, "flags": 64},
+                  "data": {"custom_id": service.PREFIX + "group:" + eid + ":Ranged"}}
+        options = service.receive(self.cfg, self.store, packet)["data"]["components"][0]["components"][0]["options"]
+        self.assertTrue(options and any(o["value"] for o in options))
+        self.assertFalse(any(o.get("default") for o in options))
+
+    def test_event_can_be_edited_from_discord(self):
+        event = {"title": "Old title", "description": "d", "leaderId": "3", "channelId": "2",
+                 "startTime": 9999999999, "closingTime": 9999999999, "state": "open", "signUps": [],
+                 "classes": [{"name": "Ranged", "specs": [{"name": "Ranged0", "roleName": "Ranged"}]}]}
+        eid = raids.create(self.store, "1", "3", "edit-flow", event)
+        rev = raids.read(self.store, "1", eid)["revision"]
+        opener = {**self.packet, "type": 3, "channel_id": "2", "message": {"author": {"id": "9"}, "flags": 64},
+                  "member": {"user": {"id": "3"}, "permissions": "0"},
+                  "data": {"custom_id": service.PREFIX + "edit-open:" + eid}}
+        form = service.receive(self.cfg, self.store, opener)
+        self.assertEqual(form["type"], 9)
+        prefill = {c["components"][0]["custom_id"]: c["components"][0].get("value") for c in form["data"]["components"]}
+        self.assertEqual(prefill["title"], "Old title")
+        with self.assertRaises(Denied):  # a non-leader without manage permission cannot open the form
+            service.receive(self.cfg, self.store, {**opener, "member": {"user": {"id": "5"}, "permissions": "0"}})
+        future = (datetime.now(timezone.utc) + timedelta(days=2)).replace(microsecond=0).isoformat()
+        submit = {**self.packet, "type": 5, "channel_id": "2",
+                  "member": {"user": {"id": "3"}, "permissions": "0"},
+                  "data": {"custom_id": service.PREFIX + "edit-save:" + eid + ":" + str(rev), "components": [
+                      {"components": [{"custom_id": "title", "value": "New title"}]},
+                      {"components": [{"custom_id": "when", "value": future}]},
+                      {"components": [{"custom_id": "description", "value": "dd"}]}]}}
+        service.receive(self.cfg, self.store, submit)
+        job = json.loads(self.store.jobs("1")[0]["body"])
+        self.assertEqual(job["operation"], "edit")
+        self.assertEqual(job["value"]["title"], "New title")
+        self.assertEqual(job["revision"], rev)
+
     def test_missing_cached_identity_uses_preserved_signup_name(self):
         event = {"title": "Raid", "description": "", "leaderId": "3", "startTime": 9999999999,
                  "closingTime": 9999999999, "state": "open", "signUps": [
