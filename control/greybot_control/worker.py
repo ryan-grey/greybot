@@ -142,6 +142,8 @@ async def run():
     tenure.install(store)
     from . import log_routing
     log_routing.install(store)
+    from . import featured
+    featured.install(store)
     lock = open(cfg.state_dir / "worker.lock", "a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     with store.connection() as db:
@@ -192,6 +194,7 @@ async def run():
                         voice_clips.TRACE.append(packet["t"] + (":greyBot" if mine else ""))
                     detector.receive(packet)
                     log_routing.observe(cfg, store, packet)
+                    featured.observe(cfg, store, packet)
             except Exception:
                 # Do not let the library log raw event payloads on exceptions.
                 log.error("Event persistence failed; collector stopping")
@@ -266,6 +269,10 @@ async def run():
                     await log_routing.tick(cfg, store, api)
                 except Exception:
                     log.error("Saturday log routing failed; inspect log_route_delivery for uncertain moves")
+                try:
+                    await featured.tick(cfg, store, api)
+                except Exception:
+                    log.error("Featuring failed; inspect feature_delivery for uncertain cards")
                 if time.monotonic() >= next_tenure_check:
                     next_tenure_check = time.monotonic() + 300
                     try:

@@ -1776,8 +1776,15 @@ def test_interactions():
                      "application_id": "1"}), cfg, pk, now)["body"])["type"]
           == interactions.CHANNEL_MESSAGE_WITH_SOURCE)
 
-    check("the registered command set includes progress, setup, poll, raid and voice clip commands",
-          [c["name"] for c in interactions.COMMANDS] == ["progress", "setup", "poll", "create", "quickcreate", "raid", "clip"])
+    check("the registered command set includes progress, setup, poll, feature, raid and voice clip commands",
+          [c["name"] for c in interactions.COMMANDS] == ["progress", "setup", "poll", "Feature this post",
+                                                         "create", "quickcreate", "raid", "clip"])
+    feature = interactions.FEATURE_COMMAND
+    # Type 3 puts it under Apps in a message's right-click menu. Type 1 would
+    # register a slash command with the same name and no way to pick a post.
+    check("Feature this post is a message command", feature["type"] == 3)
+    check("...with no options to fill in", "options" not in feature)
+    check("...and refuses DMs", feature["dm_permission"] is False)
 
     setup = interactions.SETUP_COMMAND
     # 0x20 is MANAGE_GUILD. Discord takes this as a STRING bitfield; an int here

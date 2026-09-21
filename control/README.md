@@ -158,6 +158,26 @@ minute, and mute or deafen updates do not split a stay. An observation gap ends 
 stay where the gap began, so time is never invented across an outage and the totals run a
 little low. The report is cached for five minutes and the page refreshes itself.
 
+## Featured posts
+
+Members nominate a post two ways, into one counter: a `⭐` reaction, or **Feature
+this post** in a message's right-click Apps menu, for people who never discover
+reactions. A member's vote counts once however they cast it, and removing the
+star takes it back until the post is featured — after that it stays, because a
+card that appears and vanishes reads as a moderator deleting somebody's post.
+At `GREYBOT_FEATURE_THRESHOLD` nominations (default 4) greyBot posts a card to
+`GREYBOT_FEATURED_CHANNEL_ID`: the author's name and avatar, the text, the first
+image the post carried, a jump link, and the star count with the source channel.
+
+Only channels under `GREYBOT_FEATURE_CATEGORY_ID` are eligible, never the
+featured channel itself and never greyBot's own posts. The reaction payload
+carries no parent channel, so eligibility is checked again when the card is
+built; a nomination somewhere ineligible simply settles `ineligible` and no card
+appears. `feature_delivery` settles each post once and retries nothing —
+`featured` is the complete result, `unknown` a write Discord never confirmed,
+`gone` a deleted post. The menu command is registered from the Lambda's
+`interactions.COMMANDS` but answered here, since this is what holds the counts.
+
 ## Saturday log routing
 
 The Warcraft Logs integration posts every report its progression guild sees into the
@@ -240,6 +260,9 @@ Configuration comes from the process environment or SSM, never a tracked file:
 | `GREYBOT_CAPTURE_CONTENT` | `1` enables local message text; default metadata only |
 | `GREYBOT_PROG_LOGS_CHANNEL_ID` | Progression log channel the Warcraft Logs integration posts into |
 | `GREYBOT_SAT_LOGS_CHANNEL_ID` | Saturday team's log channel; set with the one above or neither |
+| `GREYBOT_FEATURED_CHANNEL_ID` | Where featured posts are published |
+| `GREYBOT_FEATURE_CATEGORY_ID` | Category whose channels can be nominated from; set with the one above or neither |
+| `GREYBOT_FEATURE_THRESHOLD` | Nominations needed to feature a post, minimum 2, default 4 |
 | `GREYBOT_ENFORCE` | `1` enables requested moderation after archive checks |
 | `AWS_PROFILE`, `AWS_DEFAULT_REGION` | AWS SDK authentication and region |
 

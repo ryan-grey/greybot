@@ -203,7 +203,12 @@ from polls import COMMAND as POLL_COMMAND
 
 from raid_commands import commands as raid_commands
 
-COMMANDS = [PROGRESS_COMMAND, SETUP_COMMAND, POLL_COMMAND, *raid_commands()]
+# Type 3 is a message command: it appears under Apps in a message's right-click
+# menu and carries no options. Registered here with the rest, but answered by
+# the control plane, which is what holds the nomination counts.
+FEATURE_COMMAND = {"name": "Feature this post", "type": 3, "dm_permission": False}
+
+COMMANDS = [PROGRESS_COMMAND, SETUP_COMMAND, POLL_COMMAND, FEATURE_COMMAND, *raid_commands()]
 
 
 def command_options(body):

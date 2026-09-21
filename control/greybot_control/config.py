@@ -46,6 +46,9 @@ class Config:
     rollcall_secret: str = ""
     prog_logs_channel_id: str = ""
     sat_logs_channel_id: str = ""
+    featured_channel_id: str = ""
+    feature_category_id: str = ""
+    feature_threshold: int = 4
 
     @property
     def secure(self):
@@ -88,7 +91,16 @@ class Config:
         sat_logs = os.environ.get("GREYBOT_SAT_LOGS_CHANNEL_ID", "").strip()
         if bool(prog_logs) != bool(sat_logs) or (prog_logs and prog_logs == sat_logs):
             raise ValueError("Saturday log routing needs two distinct log channel IDs")
-        if any(not value.isdecimal() for value in (*public_channels, *filter(None, (start_channel, prog_logs, sat_logs)))):
+        # Both sides of featuring, or neither: a nomination with nowhere to land is a dead end.
+        featured = os.environ.get("GREYBOT_FEATURED_CHANNEL_ID", "").strip()
+        category = os.environ.get("GREYBOT_FEATURE_CATEGORY_ID", "").strip()
+        if bool(featured) != bool(category) or (featured and featured == category):
+            raise ValueError("Featuring needs a featured channel and a distinct source category")
+        threshold = int(os.environ.get("GREYBOT_FEATURE_THRESHOLD", "4"))
+        if threshold < 2:
+            raise ValueError("Featuring needs at least two nominations")
+        if any(not value.isdecimal() for value in (*public_channels,
+                *filter(None, (start_channel, prog_logs, sat_logs, featured, category)))):
             raise ValueError("Configured channel IDs must be numeric")
         # Optional voice-only helper bots, one per extra simultaneous voice channel: GREYBOT_VOICE_HELPER_1_TOKEN[_SSM], _2_, ...
         helpers = []
@@ -99,4 +111,5 @@ class Config:
                    os.environ.get("GREYBOT_CAPTURE_CONTENT") == "1", enforce, archive_dir, start_channel, public_channels,
                    tuple(helpers), dm_owner(os.environ.get("GREYBOT_DM_OWNER_ID", "").strip()),
                    # Shared with the Lambda so it can ask who was in voice at a kill. Unset turns the route off.
-                   secret("GREYBOT_ROLLCALL_SECRET"), prog_logs, sat_logs)
+                   secret("GREYBOT_ROLLCALL_SECRET"), prog_logs, sat_logs,
+                   featured, category, threshold)

@@ -216,6 +216,12 @@ def create_app(cfg=None, store=None, discord=None):
                     return voice_clips.receive(cfg, store, packet)
                 except Denied as exc:
                     return raid_reply(str(exc))
+            from . import featured
+            if packet.get("type") == 2 and packet.get("data", {}).get("name") in featured.COMMAND_NAMES:
+                try:
+                    return featured.receive(cfg, store, packet)
+                except Denied as exc:
+                    return raid_reply(str(exc))
             if packet.get("data", {}).get("custom_id") == "greybot:verify":
                 return receive_verification(cfg, store, packet)
             if packet.get("data", {}).get("custom_id") == "greybot:verification_help":
