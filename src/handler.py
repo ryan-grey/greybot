@@ -1247,8 +1247,11 @@ def handle_interaction(event, cfg, scope, now):
         return interactions.unauthorized()
 
     kind = body.get("type")
-    # Raid signups and voice clips are both answered by the NAS service.
-    raid_request = (kind == 2 and body.get("data", {}).get("name") in {"create", "quickcreate", "raid", "clip"}
+    # Raid signups, voice clips and featuring are all answered by the NAS service.
+    # The featured name is taken from the command itself: a copy of the string here
+    # that drifted from the registered one relays nothing and answers "unknown command".
+    relayed_commands = {"create", "quickcreate", "raid", "clip", interactions.FEATURE_COMMAND["name"]}
+    raid_request = (kind == 2 and body.get("data", {}).get("name") in relayed_commands
                     or kind in {3, 5} and str(body.get("data", {}).get("custom_id", "")).startswith(("greybot:raid:", "greybot:clip:")))
     if raid_request:
         if body.get("guild_id") != cfg.get("discord_guild_id"):

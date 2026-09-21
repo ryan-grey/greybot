@@ -1776,6 +1776,30 @@ def test_interactions():
                      "application_id": "1"}), cfg, pk, now)["body"])["type"]
           == interactions.CHANNEL_MESSAGE_WITH_SOURCE)
 
+    # The name that is registered has to be the name the Lambda relays. It was not,
+    # and every use of the message menu came back "Unknown command feature this post"
+    # because the handler answered it here instead of passing it to the NAS service.
+    import role_relay
+    relayed, guild_cfg = [], {**cfg, "discord_guild_id": "relay-guild"}
+    original_forward = role_relay.forward
+
+    def capture(raw, signature, timestamp):
+        relayed.append(json.loads(raw))
+        return {"type": 5, "data": {"flags": 64}}
+
+    role_relay.forward = capture
+    try:
+        for name in ("clip", "create", interactions.FEATURE_COMMAND["name"]):
+            handler.handle_interaction(
+                event({"type": 2, "data": {"name": name, "type": 3, "target_id": "5"},
+                       "token": "t", "guild_id": "relay-guild", "application_id": "1"}),
+                guild_cfg, pk, now)
+    finally:
+        role_relay.forward = original_forward
+    check("every command the control plane owns is relayed to it, the message menu included",
+          [body["data"]["name"] for body in relayed]
+          == ["clip", "create", interactions.FEATURE_COMMAND["name"]], relayed)
+
     check("the registered command set includes progress, setup, poll, feature, raid and voice clip commands",
           [c["name"] for c in interactions.COMMANDS] == ["progress", "setup", "poll", "Feature this post",
                                                          "create", "quickcreate", "raid", "clip"])
