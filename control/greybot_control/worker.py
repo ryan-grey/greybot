@@ -140,6 +140,8 @@ async def run():
     anniversaries.install(store)
     from . import tenure
     tenure.install(store)
+    from . import log_routing
+    log_routing.install(store)
     lock = open(cfg.state_dir / "worker.lock", "a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     with store.connection() as db:
@@ -189,6 +191,7 @@ async def run():
                         mine = str((packet.get("d") or {}).get("user_id", "")) == cfg.client_id
                         voice_clips.TRACE.append(packet["t"] + (":greyBot" if mine else ""))
                     detector.receive(packet)
+                    log_routing.observe(cfg, store, packet)
             except Exception:
                 # Do not let the library log raw event payloads on exceptions.
                 log.error("Event persistence failed; collector stopping")
@@ -259,6 +262,10 @@ async def run():
                     await recorder.tick(api)
                 except Exception:
                     log.error("Voice listening status update failed")
+                try:
+                    await log_routing.tick(cfg, store, api)
+                except Exception:
+                    log.error("Saturday log routing failed; inspect log_route_delivery for uncertain moves")
                 if time.monotonic() >= next_tenure_check:
                     next_tenure_check = time.monotonic() + 300
                     try:

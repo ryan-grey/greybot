@@ -44,6 +44,8 @@ class Config:
     voice_helper_tokens: tuple[str, ...] = ()
     dm_owner_id: str = ""
     rollcall_secret: str = ""
+    prog_logs_channel_id: str = ""
+    sat_logs_channel_id: str = ""
 
     @property
     def secure(self):
@@ -81,7 +83,12 @@ class Config:
             raise ValueError("Configure one archive before enabling enforcement")
         start_channel = os.environ.get("GREYBOT_START_CHANNEL_ID", "").strip()
         public_channels = tuple(filter(None, (v.strip() for v in os.environ.get("GREYBOT_PUBLIC_CHANNEL_IDS", "").split(","))))
-        if any(not value.isdecimal() for value in (*public_channels, *((start_channel,) if start_channel else ()))):
+        # Both sides of the Saturday log move, or neither: a half-configured route would delete.
+        prog_logs = os.environ.get("GREYBOT_PROG_LOGS_CHANNEL_ID", "").strip()
+        sat_logs = os.environ.get("GREYBOT_SAT_LOGS_CHANNEL_ID", "").strip()
+        if bool(prog_logs) != bool(sat_logs) or (prog_logs and prog_logs == sat_logs):
+            raise ValueError("Saturday log routing needs two distinct log channel IDs")
+        if any(not value.isdecimal() for value in (*public_channels, *filter(None, (start_channel, prog_logs, sat_logs)))):
             raise ValueError("Configured channel IDs must be numeric")
         # Optional voice-only helper bots, one per extra simultaneous voice channel: GREYBOT_VOICE_HELPER_1_TOKEN[_SSM], _2_, ...
         helpers = []
@@ -92,4 +99,4 @@ class Config:
                    os.environ.get("GREYBOT_CAPTURE_CONTENT") == "1", enforce, archive_dir, start_channel, public_channels,
                    tuple(helpers), dm_owner(os.environ.get("GREYBOT_DM_OWNER_ID", "").strip()),
                    # Shared with the Lambda so it can ask who was in voice at a kill. Unset turns the route off.
-                   secret("GREYBOT_ROLLCALL_SECRET"))
+                   secret("GREYBOT_ROLLCALL_SECRET"), prog_logs, sat_logs)

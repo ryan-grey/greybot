@@ -158,6 +158,27 @@ minute, and mute or deafen updates do not split a stay. An observation gap ends 
 stay where the gap began, so time is never invented across an outage and the totals run a
 little low. The report is cached for five minutes and the page refreshes itself.
 
+## Saturday log routing
+
+The Warcraft Logs integration posts every report its progression guild sees into the
+progression log channel, so a progression raider who starts a report for the Saturday team
+puts it in the wrong channel. With both `GREYBOT_PROG_LOGS_CHANNEL_ID` and
+`GREYBOT_SAT_LOGS_CHANNEL_ID` set and `GREYBOT_ENFORCE=1`, `log_routing` moves those
+reports. A post qualifies only when the integration's webhook wrote it, it carries a
+`warcraftlogs.com/reports/` link, and its Eastern timestamp falls on a Saturday — or before
+6am Sunday, for a raid that ran past midnight — and more than a day after a progression
+night ended. Progression raids Tuesday and Thursday 9pm to midnight, and a report started
+within 24 hours of one of those windows stays where it is, so a late Wednesday upload is
+never treated as somebody else's raid.
+
+The report is republished in the Saturday channel first and the original deleted second,
+carrying the integration's own embed across with a footer saying where it came from.
+`log_route_delivery` settles each message exactly once and retries nothing: `moved` is the
+complete result, `duplicated` means the copy landed but the original is still there to
+remove by hand, `unknown` means a write whose outcome Discord never confirmed, and `gone`
+or `skipped` mean there was nothing to move. Members posting links themselves are untouched,
+and nothing is moved out of the Saturday channel.
+
 ## Direct messages
 
 With `GREYBOT_DM_OWNER_ID` set, the worker subscribes to direct messages and `dm_relay`
@@ -217,6 +238,8 @@ Configuration comes from the process environment or SSM, never a tracked file:
 | `GREYBOT_ARCHIVE_DIR` | Optional owner-recoverable archive on the same NAS |
 | `GREYBOT_RETENTION_DAYS` | Explicit archive default, no assumed retention period |
 | `GREYBOT_CAPTURE_CONTENT` | `1` enables local message text; default metadata only |
+| `GREYBOT_PROG_LOGS_CHANNEL_ID` | Progression log channel the Warcraft Logs integration posts into |
+| `GREYBOT_SAT_LOGS_CHANNEL_ID` | Saturday team's log channel; set with the one above or neither |
 | `GREYBOT_ENFORCE` | `1` enables requested moderation after archive checks |
 | `AWS_PROFILE`, `AWS_DEFAULT_REGION` | AWS SDK authentication and region |
 
