@@ -19,6 +19,22 @@ def secret(name):
     return value
 
 
+def hydrate(name):
+    """Resolve NAME_SSM into the process environment, for secrets read as env vars.
+
+    Config carries the secrets it owns, but member verification reads its
+    Turnstile secret straight from os.environ at call sites that have no Config
+    to hand. Fetching it once at startup lets a deployment keep the value in a
+    parameter store instead of the environment file, without threading Config
+    through them. A value set directly still wins and is never overwritten.
+    """
+    if os.environ.get(name):
+        return
+    value = secret(name)
+    if value:
+        os.environ[name] = value
+
+
 def dm_owner(value):
     # The one person who receives DMs sent to greyBot and may answer as it. Unset turns the relay off.
     if value and not value.isdecimal():
@@ -71,6 +87,8 @@ class Config:
         checkout = Path(__file__).resolve().parents[2]
         if state == checkout or checkout in state.parents:
             raise ValueError("Runtime data must be outside the repository")
+        # Read by verification.py through os.environ, so it is resolved rather than returned.
+        hydrate("GREYBOT_TURNSTILE_SECRET")
         guild = os.environ["GREYBOT_GUILD_ID"]
         client = os.environ["GREYBOT_CLIENT_ID"]
         if not guild.isdecimal() or not client.isdecimal():

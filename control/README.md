@@ -382,7 +382,15 @@ No live history import or client-registration change happens automatically.
 project, sharing only their private state directory. Set `GREYBOT_ENV_FILE` to
 an absolute path outside the checkout containing the runtime variables above,
 and `GREYBOT_DATA_DIR` to a private directory writable by container UID 10001.
-Protect the environment file with mode 0600. Do not mount media shares or the
+Protect the environment file with mode 0600, and **never copy it as a deploy
+rollback**. Each `cp runtime.env runtime.env.before-<change>` leaves the live bot
+token, OAuth secret and tunnel token in another plaintext file that nothing reads
+and nobody revisits: by 2026-09-21 the live token existed in eight files on the
+NAS, seven of them stale copies from a single day's deploys. The encrypted restic
+backup already holds a versioned history of this file, so a rollback restores
+from there. Change the file in place and roll back by restoring, not by copying.
+
+Do not mount media shares or the
 Docker socket. Both services restart automatically after a host reboot.
 
 The web port binds only to NAS loopback at port 8088. An HTTPS reverse proxy
