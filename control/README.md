@@ -169,6 +169,15 @@ At `GREYBOT_FEATURE_THRESHOLD` nominations (default 4) greyBot posts a card to
 `GREYBOT_FEATURED_CHANNEL_ID`: the author's name and avatar, the text, the first
 image the post carried, a jump link, and the star count with the source channel.
 
+A menu nomination is otherwise invisible — nobody else can see a post was put
+forward — so greyBot puts the first `⭐` on the post itself. That reaction is both
+the counter and the button: everyone else just clicks the pill. greyBot takes its
+own star back as soon as a member has put one there, so the number on the pill is
+the real vote count rather than greyBot's seed plus the votes. `feature_marks`
+holds that one star per post: `pending` to place, `seeded` while greyBot's own is
+the only one, `clearing` once a member has starred it, `done` after. Both the PUT
+and the DELETE are idempotent, so a repeat costs nothing.
+
 Only channels under `GREYBOT_FEATURE_CATEGORY_ID` are eligible, never the
 featured channel itself and never greyBot's own posts. The reaction payload
 carries no parent channel, so eligibility is checked again when the card is

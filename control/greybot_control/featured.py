@@ -33,6 +33,9 @@ def install(store):
                 guild TEXT NOT NULL, message TEXT NOT NULL, state TEXT NOT NULL,
                 target TEXT NOT NULL DEFAULT '', stars INTEGER NOT NULL DEFAULT 0,
                 observed REAL NOT NULL, PRIMARY KEY(guild,message));
+            CREATE TABLE IF NOT EXISTS feature_marks(
+                guild TEXT NOT NULL, message TEXT NOT NULL, channel TEXT NOT NULL,
+                state TEXT NOT NULL, at REAL NOT NULL, PRIMARY KEY(guild,message));
         ''')
         # A claim that provably published nothing resumes after a restart.
         db.execute("UPDATE feature_delivery SET state='pending' WHERE state='featuring' AND target=''")
@@ -58,6 +61,19 @@ def nominate(cfg, store, message, member, channel, source):
             db.execute('INSERT OR IGNORE INTO feature_delivery(guild,message,state,stars,observed)'
                        ' VALUES(?,?,?,?,?)', (cfg.guild_id, message, 'pending', stars, time.time()))
     return stars
+
+
+def mark(cfg, store, message, channel):
+    """A menu nomination is invisible, so greyBot puts the first star on the post itself.
+
+    That star is what everyone else sees and clicks: Discord's own reaction pill is
+    both the counter and the button. greyBot takes its own star back as soon as a
+    member has put one there, so the number on the pill is the real vote count.
+    """
+    with store.connection() as db:
+        db.execute('INSERT INTO feature_marks(guild,message,channel,state,at) VALUES(?,?,?,?,?)'
+                   ' ON CONFLICT(guild,message) DO NOTHING',
+                   (cfg.guild_id, message, channel, 'pending', time.time()))
 
 
 def withdraw(cfg, store, message, member):
@@ -86,6 +102,11 @@ def observe(cfg, store, packet):
     if packet['t'] == 'MESSAGE_REACTION_REMOVE':
         withdraw(cfg, store, message, member)
         return
+    # A member has starred it, so greyBot's seed star has done its job and should
+    # come off; the pill stays up on the member's own star.
+    with store.connection() as db:
+        db.execute("UPDATE feature_marks SET state='clearing' WHERE guild=? AND message=?"
+                   " AND state='seeded'", (cfg.guild_id, message))
     # The reaction payload has no parent, so the channel is checked when the
     # card is built. A nomination in an ineligible channel simply never features.
     nominate(cfg, store, message, member, channel, 'reaction')
@@ -116,10 +137,12 @@ def receive(cfg, store, packet):
     if already:
         return reply(f'That post is already on its way to <#{cfg.featured_channel_id}>.')
     stars = nominate(cfg, store, target, str(actor), str(channel.get('id') or ''), 'menu')
+    mark(cfg, store, target, str(channel.get('id') or ''))
     short = cfg.feature_threshold - stars
     if short > 0:
         return reply(f'{STAR} Noted -- that post has **{stars}** of **{cfg.feature_threshold}** '
-                     f'nominations. {short} more and it lands in <#{cfg.featured_channel_id}>.')
+                     f'nominations. {short} more and it lands in <#{cfg.featured_channel_id}>. '
+                     f'Everyone else can just click the {STAR} on the post itself.')
     return reply(f'{STAR} That is **{stars}** nominations -- it is going to '
                  f'<#{cfg.featured_channel_id}> now.')
 
@@ -161,6 +184,58 @@ def card(guild, message, channel, stars, link):
     if not embed['description'] and not image:
         embed['description'] = '*(no text -- open the original)*'
     return {'content': '', 'embeds': [embed], 'allowed_mentions': {'parse': []}}
+
+
+def own_star(message):
+    """Whether greyBot's own star is on the post, and whether anyone's is."""
+    for reaction in message.get('reactions') or []:
+        emoji = reaction.get('emoji') or {}
+        if not emoji.get('id') and emoji.get('name') == STAR:
+            return bool(reaction.get('me')), int(reaction.get('count') or 0)
+    return False, 0
+
+
+async def marks_tick(cfg, store, api):
+    """Put greyBot's seed star on one post, or take one back. Both calls are idempotent."""
+    if not enabled(cfg):
+        return
+    with store.connection() as db:
+        row = db.execute("SELECT message,channel,state FROM feature_marks WHERE guild=?"
+                         " AND state IN ('pending','clearing') ORDER BY at LIMIT 1",
+                         (cfg.guild_id,)).fetchone()
+    if not row:
+        return
+    message, channel, state = row['message'], row['channel'], row['state']
+    reaction = f'/channels/{channel}/messages/{message}/reactions/{quote(STAR)}/@me'
+
+    def settle(new):
+        with store.connection() as db:
+            db.execute('UPDATE feature_marks SET state=? WHERE guild=? AND message=?',
+                       (new, cfg.guild_id, message))
+
+    if state == 'clearing':
+        try:
+            await api.request('DELETE', reaction)
+        except Denied:
+            pass  # Already gone, or the post is.
+        settle('done')
+        return
+    try:
+        original = await api.request('GET', f'/channels/{channel}/messages/{message}')
+    except Denied:
+        settle('gone')
+        return
+    mine, count = own_star(original or {})
+    if count and not mine:
+        settle('done')  # A member's star is already the pill; no seed needed.
+        return
+    if not mine:
+        try:
+            await api.request('PUT', reaction)
+        except Denied:
+            settle('gone')
+            return
+    settle('seeded')
 
 
 async def tick(cfg, store, api):
@@ -212,8 +287,3 @@ async def tick(cfg, store, api):
         settle('unknown')
         raise
     settle('featured', posted['id'])
-    # A star on the original marks it so members can see it already went up.
-    try:
-        await api.request('PUT', f'/channels/{channel}/messages/{message}/reactions/{quote(STAR)}/@me')
-    except Exception:
-        pass  # Cosmetic only: the post is featured either way.

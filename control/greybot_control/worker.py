@@ -271,6 +271,7 @@ async def run():
                     log.error("Saturday log routing failed; inspect log_route_delivery for uncertain moves")
                 try:
                     await featured.tick(cfg, store, api)
+                    await featured.marks_tick(cfg, store, api)
                 except Exception:
                     log.error("Featuring failed; inspect feature_delivery for uncertain cards")
                 if time.monotonic() >= next_tenure_check:

@@ -113,6 +113,61 @@ class MenuTests(Base):
         self.assertEqual(self.votes(), 3)
 
 
+class SeedStarTests(Base):
+    def menu(self, member='11'):
+        return {'type': 2, 'guild_id': '1', 'application_id': '9', 'id': '77', 'token': 't',
+                'member': {'user': {'id': member, 'bot': False}},
+                'channel': {'id': MEMES, 'parent_id': SOCIAL},
+                'data': {'name': 'Feature this post', 'type': 3, 'target_id': '9',
+                         'resolved': {'messages': {'9': {'id': '9', 'author': {'id': '42'}}}}}}
+
+    def marks(self):
+        with self.store.connection() as db:
+            return {r['message']: r['state'] for r in
+                    db.execute('SELECT message,state FROM feature_marks')}
+
+    def api(self, calls, reactions=()):
+        class API:
+            async def request(self, method, path, **kwargs):
+                calls.append((method, path))
+                return {'id': '9', 'reactions': list(reactions)} if method == 'GET' else None
+        return API()
+
+    def test_the_menu_puts_greybots_star_on_the_post_so_others_can_click_it(self):
+        calls = []
+        f.receive(self.cfg, self.store, self.menu())
+        self.assertEqual(self.marks(), {'9': 'pending'})
+        asyncio.run(f.marks_tick(self.cfg, self.store, self.api(calls)))
+        self.assertIn(('PUT', f'/channels/{MEMES}/messages/9/reactions/%E2%AD%90/@me'), calls)
+        self.assertEqual(self.marks(), {'9': 'seeded'})
+
+    def test_no_seed_when_a_member_already_starred_it(self):
+        calls = []
+        f.receive(self.cfg, self.store, self.menu())
+        reactions = [{'emoji': {'id': None, 'name': f.STAR}, 'count': 1, 'me': False}]
+        asyncio.run(f.marks_tick(self.cfg, self.store, self.api(calls, reactions)))
+        self.assertEqual([m for m, _ in calls], ['GET'])
+        self.assertEqual(self.marks(), {'9': 'done'})
+
+    def test_greybot_takes_its_star_back_once_a_member_stars_it(self):
+        calls = []
+        f.receive(self.cfg, self.store, self.menu())
+        asyncio.run(f.marks_tick(self.cfg, self.store, self.api(calls)))
+        f.observe(self.cfg, self.store, star(member='12'))
+        self.assertEqual(self.marks(), {'9': 'clearing'})
+        calls.clear()
+        asyncio.run(f.marks_tick(self.cfg, self.store, self.api(calls)))
+        self.assertEqual(calls, [('DELETE', f'/channels/{MEMES}/messages/9/reactions/%E2%AD%90/@me')])
+        self.assertEqual(self.marks(), {'9': 'done'})
+
+    def test_a_star_reaction_alone_never_seeds_anything(self):
+        calls = []
+        f.observe(self.cfg, self.store, star(member='11'))
+        asyncio.run(f.marks_tick(self.cfg, self.store, self.api(calls)))
+        self.assertEqual(calls, [])
+        self.assertEqual(self.marks(), {})
+
+
 class CardTests(Base):
     MESSAGE = {'id': '9', 'content': 'look at this', 'timestamp': '2026-09-21T12:00:00+00:00',
                'author': {'id': '42', 'username': 'someone', 'avatar': 'a'*32},
