@@ -464,6 +464,14 @@ query($code: String!, $ids: [Int]!) {
 """ % RATE
 
 
+def player_details(token, code, fight_ids):
+    """playerDetails over some fights: {"tanks": [...], "healers": [...], "dps": [...]}, each
+    player carrying name, type (class), server and specs ([{"spec", "count"}])."""
+    data = query(token, LINEUP_Q, {"code": code, "ids": [int(i) for i in fight_ids]})
+    node = ((_report(data).get("playerDetails") or {}).get("data") or {}).get("playerDetails")
+    return node or {}, rate_limit(data)
+
+
 def kill_lineup(token, code, encounter_id, difficulty=HEROIC):
     """The raid as it stood for one kill: [{"name", "class", "server", "role"}], tanks then
     healers then damage, in the order the report lists them. [] when the report has no such
@@ -473,12 +481,11 @@ def kill_lineup(token, code, encounter_id, difficulty=HEROIC):
     fights = sorted(_report(data).get("fights") or [], key=lambda f: f.get("startTime") or 0)
     if not fights:
         return [], rate_limit(data)
-    data = query(token, LINEUP_Q, {"code": code, "ids": [int(fights[0]["id"])]})
-    details = ((_report(data).get("playerDetails") or {}).get("data") or {}).get("playerDetails") or {}
+    details, rate = player_details(token, code, [fights[0]["id"]])
     people = []
     for role, group in (("tank", "tanks"), ("healer", "healers"), ("dps", "dps")):
         for p in details.get(group) or []:
             if p.get("name"):
                 people.append({"name": p["name"], "class": p.get("type") or "",
                                "server": p.get("server") or "", "role": role})
-    return people, rate_limit(data)
+    return people, rate

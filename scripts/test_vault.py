@@ -204,6 +204,69 @@ class BuildTests(unittest.TestCase):
         self.assertTrue(png and png.startswith(b"\x89PNG"))
 
 
+class RoleTests(unittest.TestCase):
+    def setUp(self):
+        self.profiles = {
+            "wholepie": {"name": "Wholepie", "realm": "Proudmoore", "class": "Paladin",
+                         "active_spec_name": "Retribution", "active_spec_role": "DPS"},
+            "thaydan": {"name": "Thaydan", "realm": "Proudmoore", "class": "Demon Hunter",
+                        "active_spec_name": "Havoc", "active_spec_role": "DPS"}}
+        self.members = [member("1", "Pie"), member("2", "Straightish")]
+        self.mapping = {"1": ["Wholepie"], "2": ["Thaydan"]}
+        self.kits = {"wholepie": full_kit(MAIN_HAND=item("MAIN_HAND")), "thaydan": full_kit()}
+
+    def rows(self, played, specs):
+        rows = vault.build(self.members, self.mapping, self.profiles, {}, {}, START, END,
+                           equipment=self.kits, gems=GEMS, played=played, specs=specs)
+        return {r["member"]: r for r in rows}
+
+    def test_the_raid_spec_is_the_one_with_the_most_pulls_across_reports(self):
+        details = [
+            {"tanks": [{"name": "Wholepie", "specs": [{"spec": "Protection", "count": 23}]}],
+             "dps": [{"name": "Thaydan", "specs": [{"spec": "Havoc", "count": 2}]},
+                     {"name": "Yòshi", "specs": [{"spec": "BeastMastery", "count": 5}]}]},
+            {"tanks": [{"name": "Thaydan", "specs": [{"spec": "Vengeance", "count": 19}]}],
+             "dps": [{"name": "Wholepie", "specs": [{"spec": "Retribution", "count": 1}]}]}]
+        self.assertEqual(vault.raid_specs(details), {
+            "wholepie": {"spec": "Protection", "role": "tank"},
+            "thaydan": {"spec": "Vengeance", "role": "tank"},
+            "yòshi": {"spec": "Beast Mastery", "role": "dps"}})
+
+    def test_spec_roles(self):
+        self.assertEqual([vault.spec_role(s) for s in ("Protection", "Holy", "Augmentation", "")],
+                         ["tank", "healer", "dps", ""])
+
+    def test_the_role_raided_wins_over_a_stale_raiderio_spec(self):
+        played = {"wholepie": {"spec": "Protection", "role": "tank"}}
+        pie = self.rows(played, {"wholepie": "Protection"})["Pie"]
+        self.assertEqual((pie["role"], pie["spec"]), ("tank", "Protection"))
+        self.assertEqual(pie["gear"]["enchant_missing"], ["Weapon"])
+        self.assertNotIn("off_spec", pie)
+
+    def test_gear_worn_for_another_role_is_marked_not_graded(self):
+        played = {"thaydan": {"spec": "Vengeance", "role": "tank"}}
+        rows = self.rows(played, {"thaydan": "Havoc"})
+        dh = rows["Straightish"]
+        self.assertEqual(dh["role"], "tank")
+        self.assertIsNone(dh["gear"])
+        self.assertEqual(dh["off_spec"], {"now": "Havoc", "raids": "Vengeance"})
+        text = vault.payload(list(rows.values()), START, END, "Smoobies", True)
+        self.assertIn("Thaydan · M+ 0 of 4 at +10 · gear not checked: logged out as Havoc, "
+                      "raids Vengeance", text["embeds"][0]["description"])
+        png = vault_card.render(list(rows.values()), START, END, "Smoobies", {})
+        self.assertTrue(png and png.startswith(b"\x89PNG"))
+
+    def test_without_a_live_spec_nothing_is_called_off_spec(self):
+        played = {"thaydan": {"spec": "Vengeance", "role": "tank"}}
+        dh = self.rows(played, {})["Straightish"]
+        self.assertNotIn("off_spec", dh)
+        self.assertEqual(dh["role"], "tank")
+
+    def test_with_no_logs_the_live_spec_sets_the_role(self):
+        self.assertEqual(self.rows({}, {"wholepie": "Protection"})["Pie"]["role"], "tank")
+        self.assertEqual(self.rows({}, {})["Pie"]["role"], "dps")
+
+
 class GateTests(unittest.TestCase):
     def test_nothing_runs_until_the_channel_is_configured(self):
         import handler

@@ -6,7 +6,11 @@ enchants.
 GEAR. Blizzard's equipment profile, read when the report runs. An enchant is missing from a
 slot that takes one (ENCHANT_SLOTS) or low when its crafted rank is below the top; a gem is
 missing from an empty socket or low when it is below the season's top gem rank. See
-gear_check.
+gear_check. Only the set being worn can be read, so a raider logged out in a spec of a
+different role from the one they raided as is marked, not graded: that is not the raid set.
+
+ROLE. What the raider played in that week's Heroic and Mythic pulls (Warcraft Logs
+playerDetails), else Blizzard's live active spec. Raider.IO's is the last resort; it lags.
 
 WHAT COUNTS. The vault's own rules, restricted to the two rows the raid team cares about:
 
@@ -143,24 +147,31 @@ def blizzard_bosses(encounters, start, end):
     return bosses
 
 
+def raid_fights(rep, start, end):
+    """One report's Heroic and Mythic raid pulls, kills and wipes, that ended in the window."""
+    lo, hi = start.timestamp() * 1000, end.timestamp() * 1000
+    base = rep.get("startTime") or 0
+    for f in rep.get("fights") or []:
+        if not f.get("encounterID"):
+            continue
+        if int(f.get("difficulty") or 0) not in WCL_DIFFICULTIES:
+            continue
+        if int(f.get("size") or 0) and int(f["size"]) < RAID_MIN_SIZE:
+            continue
+        if lo <= base + (f.get("endTime") or 0) < hi:
+            yield f
+
+
 def wcl_bosses(reports, start, end):
     """{folded character name: set of normalised boss names} from Warcraft Logs report
     details (wcl.report_detail) -- Heroic and Mythic raid kills inside the window."""
-    lo, hi = start.timestamp() * 1000, end.timestamp() * 1000
     out = {}
     for rep in reports:
         actors = {int(a["id"]): a["name"] for a in
                   ((rep.get("masterData") or {}).get("actors")) or []
                   if a.get("id") is not None and a.get("name")}
-        base = rep.get("startTime") or 0
-        for f in rep.get("fights") or []:
-            if not f.get("kill") or not f.get("encounterID"):
-                continue
-            if int(f.get("difficulty") or 0) not in WCL_DIFFICULTIES:
-                continue
-            if int(f.get("size") or 0) and int(f["size"]) < RAID_MIN_SIZE:
-                continue
-            if not lo <= base + (f.get("endTime") or 0) < hi:
+        for f in raid_fights(rep, start, end):
+            if not f.get("kill"):
                 continue
             boss = raiderio.normalize(f.get("name"))
             for pid in f.get("friendlyPlayers") or []:
@@ -168,6 +179,26 @@ def wcl_bosses(reports, start, end):
                 if name:
                     out.setdefault(fold(name), set()).add(boss)
     return out
+
+
+def raid_specs(details):
+    """{folded character name: {"spec", "role"}}: what each raider played in the week's raid
+    pulls, from wcl.player_details for each report. The spec with the most pulls wins, so a
+    swap for one boss does not change what someone raids as."""
+    pulls = {}
+    for node in details:
+        for bucket, role in (("tanks", "tank"), ("healers", "healer"), ("dps", "dps")):
+            for p in (node or {}).get(bucket) or []:
+                if not p.get("name"):
+                    continue
+                count = pulls.setdefault(fold(p["name"]), {})
+                for s in p.get("specs") or []:
+                    if s.get("spec"):
+                        # "BeastMastery" in the logs, "Beast Mastery" everywhere else.
+                        key = (re.sub(r"(?<=[a-z])(?=[A-Z])", " ", s["spec"]), role)
+                        count[key] = count.get(key, 0) + int(s.get("count") or 1)
+    return {name: dict(zip(("spec", "role"), max(count, key=count.get)))
+            for name, count in pulls.items() if count}
 
 
 def wcl_realms(reports):
@@ -285,6 +316,16 @@ def gear_check(equipment, gems, best):
 
 
 ROLE = {"TANK": "tank", "HEALING": "healer", "DPS": "dps"}
+# Spec names that are not damage. Protection, Holy and Restoration each belong to two
+# classes, but both classes' versions share the role, so the name alone is enough.
+TANK_SPECS = {"Blood", "Vengeance", "Guardian", "Brewmaster", "Protection"}
+HEALER_SPECS = {"Restoration", "Holy", "Discipline", "Mistweaver", "Preservation"}
+
+
+def spec_role(spec):
+    if not spec:
+        return ""
+    return "tank" if spec in TANK_SPECS else "healer" if spec in HEALER_SPECS else "dps"
 STALE = timedelta(days=1)
 
 
@@ -300,7 +341,7 @@ def stale_since(profile, end):
 
 
 def build(members, mapping, profiles, encounters, raided, start, end, equipment=None,
-          gems=None):
+          gems=None, played=None, specs=None):
     """One row per prog raider, those with something to fix first.
 
     `members` are Discord guild-member objects already filtered to the role; `mapping` is
@@ -308,8 +349,14 @@ def build(members, mapping, profiles, encounters, raided, start, end, equipment=
     folded character name; `raided` is wcl_bosses' output; `gems` maps gem item id to
     (quality, item level). A character Blizzard would not show equipment for gets
     "gear": None, which the card prints as unknown rather than as clean.
+
+    The role shown is the one raided that week (`played`, raid_specs' output), else the
+    spec logged out in. `specs` is Blizzard's live active spec, read alongside the gear; when
+    it is a different role from the raid one, the gear on is not the raid set, so it is not
+    graded and the row carries "off_spec" instead.
     """
     equipment, gems = equipment or {}, gems or {}
+    played, specs = played or {}, specs or {}
     best = best_gem_level(gems)
     rows = []
     for m in members:
@@ -323,18 +370,24 @@ def build(members, mapping, profiles, encounters, raided, start, end, equipment=
             slots, at = mplus_slots(levels)
             bosses = union_bosses(blizzard_bosses(encounters.get(fold(name)), start, end),
                                   raided.get(fold(name)))
+            raids, now = played.get(fold(name)), specs.get(fold(name))
+            off = bool(raids and now and spec_role(now) != raids["role"])
             row.update({
                 "character": profile.get("name") or name,
                 "realm": profile.get("realm") or "",
                 "class": profile.get("class") or "",
-                "role": ROLE.get(str(profile.get("active_spec_role") or "").upper(), ""),
+                "role": ((raids or {}).get("role") or spec_role(now)
+                         or ROLE.get(str(profile.get("active_spec_role") or "").upper(), "")),
+                "spec": (raids or {}).get("spec") or now or profile.get("active_spec_name") or "",
                 "runs": len(levels), "runs_at_level": sum(1 for lv in levels if lv >= MPLUS_LEVEL),
                 "mplus_slots": slots, "mplus_levels": at,
                 "bosses": len(bosses), "raid_slots": filled(len(bosses), RAID_THRESHOLDS),
                 "seen": stale_since(profile, end),
                 "gear": (gear_check(equipment[fold(name)], gems, best)
-                         if fold(name) in equipment else None),
+                         if fold(name) in equipment and not off else None),
             })
+            if off:
+                row["off_spec"] = {"now": now, "raids": raids["spec"]}
         else:
             row.update({"runs": 0, "runs_at_level": 0, "mplus_slots": 0,
                         "mplus_levels": [None] * 3, "bosses": 0, "raid_slots": 0,
@@ -375,7 +428,7 @@ def payload(rows, start, end, team_name, has_card):
     lines = [f"**{len(short)} of {len(rows)}** short of {MIN_MPLUS_SLOTS} Mythic+ vault slots at "
              f"+{MPLUS_LEVEL} · **{len(geared)}** with gems or enchants to fix."]
     for r in rows:
-        if not r["issues"] and r.get("realm"):
+        if not r["issues"] and r.get("realm") and not r.get("off_spec"):
             continue
         who = f"<@{r['id']}>" if r["id"] else r["member"]
         if not r.get("realm"):
@@ -390,6 +443,9 @@ def payload(rows, start, end, team_name, has_card):
             bits.append(vault_bit)
         if gear_text(r["gear"]):
             bits.append(gear_text(r["gear"]))
+        if r.get("off_spec"):
+            bits.append(f"gear not checked: logged out as {r['off_spec']['now']}, raids "
+                        f"{r['off_spec']['raids']}")
         lines.append(f"{who} → {r['character']} · " + " · ".join(bits))
     embed = {"title": f"Vault & gear check · {label}", "description": "\n".join(lines)[:4000],
              "color": 0x4493F8,
@@ -461,6 +517,24 @@ def fetch_gems(equipment, token, get):
             out[gem] = (((data.get("quality") or {}).get("type")), int(data.get("level") or 0))
         except Exception as exc:                               # noqa: BLE001
             log("vault_gem_unknown", gem=gem, error=str(exc)[:120])
+    return out
+
+
+def fetch_specs(profiles, token, get):
+    """{folded name: active spec name} from Blizzard's character summary, read with the gear
+    so the two agree. Raider.IO's active spec is only as fresh as its last crawl, which put
+    a Protection paladin in his tank set down as Retribution."""
+    out = {}
+    for key, profile in profiles.items():
+        realm = raiderio.slugify(str(profile.get("realm") or "").replace("'", ""))
+        name = urllib.parse.quote(str(profile.get("name") or "").lower())
+        try:
+            data = get(token, f"/profile/wow/character/{realm}/{name}", namespace="profile-us")
+            spec = (data.get("active_spec") or {}).get("name")
+            if isinstance(spec, str) and spec:
+                out[key] = spec
+        except Exception as exc:                               # noqa: BLE001
+            log("vault_spec_missing", character=profile.get("name"), error=str(exc)[:120])
     return out
 
 

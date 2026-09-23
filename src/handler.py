@@ -2102,6 +2102,9 @@ def vault_week(event, cfg, now):
     codes = list(dict.fromkeys(r["code"] for r in listed))
     reports = [wcl.report_detail(token, code)[0] for code in codes]
     raided = vault.wcl_bosses(reports, start, end)
+    played = vault.raid_specs([wcl.player_details(token, code, ids)[0]
+                               for code, rep in zip(codes, reports)
+                               if (ids := [f["id"] for f in vault.raid_fights(rep, start, end)])])
 
     guild_members = raiderio._get("https://raider.io/api/v1/guilds/profile", {
         "region": cfg["guild_region"], "realm": cfg["guild_realm"],
@@ -2110,7 +2113,7 @@ def vault_week(event, cfg, now):
     characters = [c for m in members for c in mapping.get(m["user"]["id"], [])]
     profiles = vault.fetch_profiles(characters, roster, vault.wcl_realms(reports),
                                     cfg["guild_region"], cfg["guild_realm"])
-    encounters, equipment, gems = {}, {}, {}
+    encounters, equipment, gems, specs = {}, {}, {}, {}
     if cfg.get("blizzard_client_id") and cfg.get("blizzard_client_secret"):
         btoken = blizzard.get_token(cfg["blizzard_client_id"], cfg["blizzard_client_secret"])
         chosen = {vault.fold(c): profiles[vault.fold(c)] for c in
@@ -2119,11 +2122,13 @@ def vault_week(event, cfg, now):
         encounters = vault.fetch_encounters(chosen, btoken, blizzard._get)
         equipment = vault.fetch_equipment(chosen, btoken, blizzard._get)
         gems = vault.fetch_gems(equipment, btoken, blizzard._get)
+        specs = vault.fetch_specs(chosen, btoken, blizzard._get)
     rows = vault.build(members, mapping, profiles, encounters, raided, start, end,
-                       equipment=equipment, gems=gems)
+                       equipment=equipment, gems=gems, played=played, specs=specs)
     summary = {"start": _iso(start), "end": _iso(end), "raiders": len(rows),
                "flagged": sum(1 for r in rows if r["flagged"]),
                "gear": sum(1 for r in rows if (r["gear"] or {}) and any(r["gear"].values())),
+               "off_spec": sum(1 for r in rows if r.get("off_spec")),
                "reports": len(codes)}
     # Counts only: the names are the card's business, not the log's.
     log("vault_week", **summary, blizzard=len(encounters), equipment=len(equipment),

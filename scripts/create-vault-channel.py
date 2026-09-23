@@ -26,7 +26,7 @@ import urllib.request
 GUILD = "946663011991556117"
 CATEGORY = "951999761358147604"          # 💀✧ Progression Raid
 GREYBOT_ROLE = "1546734395115835402"
-NAME = "prog-vault"
+NAME = "for-will"
 TOPIC = "Tuesday vault and gear check for Prog Raiders. Officers only."
 
 VIEW, SEND, EMBED, ATTACH, HISTORY = 1 << 10, 1 << 11, 1 << 14, 1 << 15, 1 << 16

@@ -22,6 +22,13 @@ the slots behind each count. Mentions are suppressed, so it pings nobody.
 - Prog Raiders are members holding the prog role. Their characters come from the prog-raid
   roll call mapping (`ROLLCALL#SETUP`). A member with several characters is reported on the
   one that raided with the guild most that week, then the highest item level.
+- The role icon is the role raided that week (Warcraft Logs playerDetails over the week's
+  Heroic and Mythic pulls, most pulls wins), else Blizzard's live active spec. Raider.IO's
+  active spec is the last resort because it lags: it had a Protection paladin in his tank
+  set down as Retribution.
+- Blizzard shows only the set being worn. A raider logged out in a spec of a different role
+  from the one they raided as gets "<spec> gear / not checked" instead of grades, and a
+  "gear not checked" line in the post.
 - Raider.IO only counts runs it has seen. An amber "RIO <date>" means the character had not
   been refreshed for over a day before reset.
 - Blizzard keeps only the last kill per boss, so a boss killed again after reset hides its

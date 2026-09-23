@@ -10,6 +10,9 @@ every row so they can be read straight down:
   GEMS      OK, or how many sockets are empty (red) or below the top gem rank (amber)
   ENCHANTS  OK, or how many enchants are missing (red) or below max rank (amber)
 
+The role glyph is the role raided that week. A raider logged out in a spec of another role
+is wearing another set, so both gear columns say which spec and "not checked", in amber.
+
 Raiders with anything to fix come first. The slot names behind a count are in the post's
 text, not on the card, which has room for a number and not a list.
 
@@ -174,9 +177,16 @@ def render(rows, start, end, team_name, pictures=None):
                     if nx + canvas.width(note, small) <= limit:
                         canvas.text(nx, ry + 7, note, small, LOW)
             _vault(canvas, raid_x, ry, r["raid_slots"], r["mplus_levels"])
-            for cx, keys in ((gems_x, ("gem_empty", "gem_low")),
-                             (enchants_x, ("enchant_missing", "enchant_low"))):
-                cell, colour = gear_cell(r["gear"], *keys) if r.get("realm") else ("", rc.MUTED)
+            off = r.get("off_spec")
+            for cx, keys, note in ((gems_x, ("gem_empty", "gem_low"),
+                                    f"{off['now']} gear" if off else ""),
+                                   (enchants_x, ("enchant_missing", "enchant_low"), "not checked")):
+                if not r.get("realm"):
+                    cell, colour = "", rc.MUTED
+                elif off:
+                    cell, colour = note, LOW
+                else:
+                    cell, colour = gear_cell(r["gear"], *keys)
                 canvas.text(cx, ry + 5, rc._ellipsis(canvas, cell, cell_font, CELL), cell_font,
                             colour)
             ry += ROW
