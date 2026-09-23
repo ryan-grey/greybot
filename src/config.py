@@ -102,6 +102,12 @@ LOW_PARSE_DM = f"{PREFIX}/recap/low_parse_dm"
 # a deploy; 25 is Warcraft Logs' own grey band.
 LOW_PARSE_MAX = f"{PREFIX}/recap/low_parse_max"
 
+# Where the Tuesday Great Vault check posts: the officers-only channel under Progression
+# Raid. EMPTY IS OFF, and it is fetched in a call of its own rather than added to
+# OPTIONAL_NAMES: deployed before the role is granted it, it would otherwise deny the whole
+# chunk it landed in and switch off the recap page and the grey-parse DM with it.
+VAULT_CHANNEL = f"{PREFIX}/vault/channel_id"
+
 OPTIONAL_NAMES = [BLIZZARD_CLIENT_ID, BLIZZARD_CLIENT_SECRET,
                   DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID,
                   RECAP_ENABLED, RECAP_WORST_PARSE, RECAP_SCHEDULE,
@@ -201,6 +207,12 @@ def load(now=None):
                               "names": chunk,
                               "note": "those optional features disabled; required config "
                                       "is fine"}))
+    try:
+        opt = ssm.get_parameters(Names=[VAULT_CHANNEL], WithDecryption=True)
+        got.update({p["Name"]: p["Value"] for p in opt.get("Parameters", [])})
+    except Exception as exc:                                   # noqa: BLE001
+        print(json.dumps({"event": "optional_config_unavailable", "error": repr(exc),
+                          "names": [VAULT_CHANNEL]}))
 
     _cache.clear()
     _fetched_at["t"] = now
@@ -240,6 +252,7 @@ def load(now=None):
         "rollcall_secret": got.get(ROLLCALL_SECRET, DEFAULTS[ROLLCALL_SECRET]).strip(),
         "low_parse_dm": got.get(LOW_PARSE_DM, DEFAULTS[LOW_PARSE_DM]).strip(),
         "low_parse_max": _number(got.get(LOW_PARSE_MAX), DEFAULTS[LOW_PARSE_MAX]),
+        "vault_channel": got.get(VAULT_CHANNEL, "").strip(),
     })
     return _cache
 
@@ -258,6 +271,7 @@ def redacted(cfg):
             # Whether it is on, never who receives it.
             "lowParseDmEnabled": bool(cfg.get("low_parse_dm")),
             "lowParseMax": cfg.get("low_parse_max"),
+            "vaultEnabled": bool(cfg.get("vault_channel")),
             "rosterMinPct": cfg.get("roster_min_pct"),
             "overlapHigh": cfg.get("overlap_high"),
             "overlapLow": cfg.get("overlap_low"),

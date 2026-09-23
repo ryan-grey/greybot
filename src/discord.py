@@ -630,7 +630,8 @@ def dm_to(bot_token, user_id, payload, attachment=None, timeout=10, sleep=time.s
                       timeout=timeout, sleep=sleep, max_attempts=max_attempts)
 
 
-def post_to(destination, payload, timeout=10, sleep=time.sleep, max_attempts=MAX_ATTEMPTS):
+def post_to(destination, payload, timeout=10, sleep=time.sleep, max_attempts=MAX_ATTEMPTS,
+            attachment=None):
     """POST one announcement to wherever this install posts.
 
     Two destinations, one call site. A single-tenant install posts through the
@@ -644,8 +645,11 @@ def post_to(destination, payload, timeout=10, sleep=time.sleep, max_attempts=MAX
     channel is the smallest permission that does the job.
 
     `destination` is either {"webhook": url} or {"bot_token": t, "channel": id}.
+    `attachment` is ("name.png", bytes), uploaded with the message on the bot path only.
     """
     if destination.get("webhook"):
+        if attachment:
+            raise DiscordError("attachments are posted with the bot token, not a webhook")
         return post(destination["webhook"], payload, timeout=timeout, sleep=sleep)
 
     token = destination.get("bot_token")
@@ -653,6 +657,12 @@ def post_to(destination, payload, timeout=10, sleep=time.sleep, max_attempts=MAX
     if not token or not channel:
         raise DiscordError("no destination configured: need a webhook, "
                            "or a bot token and channel id")
+    if attachment:
+        filename, blob = attachment
+        data, content_type = _multipart(payload, filename, blob)
+        return _post_raw(f"{CHANNEL_API}/{channel}/messages", data, content_type,
+                         headers={"Authorization": f"Bot {token}"},
+                         timeout=timeout, sleep=sleep, max_attempts=max_attempts)
     return _post_json(f"{CHANNEL_API}/{channel}/messages", payload,
                       headers={"Authorization": f"Bot {token}"},
                       timeout=timeout, sleep=sleep, max_attempts=max_attempts)

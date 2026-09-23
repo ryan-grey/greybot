@@ -1793,6 +1793,8 @@ def handler(event, context):
         if event.get("mode") in ("mplus_collect", "mplus_recap", "mplus_records"):
             import mplus_service
             return mplus_service.handle(event, cfg, now, context)
+        if event.get("mode") == "vault":
+            return vault_week(event, cfg, now)
 
     # Fan out. One poll per registered install, each on its own Scope and its own
     # merged config. A failure in one tenant is caught and logged rather than
@@ -2039,6 +2041,121 @@ def send_low_parses(cfg, sources, eligible_names, night_diff, tier, difficulty,
     log("low_parse_dm_sent", parses=len(entries),
         raiders=len({e["name"] for e in entries}), threshold=cfg.get("low_parse_max"))
     return True
+
+
+VAULT_TEAM = "prog-raid"
+
+
+def vault_week(event, cfg, now):
+    """The Tuesday Great Vault check for the prog raid team. Three ways to run it, most
+    private first:
+
+      {"mode":"vault","dry":true}      the rows, nothing drawn or sent
+      {"mode":"vault","preview":true}  the card DM'd to the operator (recap/low_parse_dm) alone
+      {"mode":"vault"}                 the weekly post -- OFF until /greybot/vault/channel_id
+                                       names the channel
+
+    `"end":"YYYY-MM-DD"` reports the week that reset that day instead of the latest one.
+    The weekly post claims its week before sending and never releases it: a missed report
+    can be sent again by hand, a duplicate cannot be taken back.
+    """
+    import vault
+    import vault_card
+    dry, preview = bool(event.get("dry")), bool(event.get("preview"))
+    channel = cfg.get("vault_channel") or ""
+    if not (dry or preview) and not channel.isdecimal():
+        log("vault_disabled", note="no /greybot/vault/channel_id; nothing posted")
+        return {"ok": True, "skipped": "vault_disabled"}
+
+    team_name = event.get("team") or VAULT_TEAM
+    pairs = [(s, c) for s, c in tenant_configs(cfg) if s.team == team_name]
+    if not pairs:
+        raise RuntimeError(f"no registered install with team {team_name!r}")
+    scope, tcfg = pairs[0]
+    at = now
+    if event.get("end"):
+        at = datetime.fromisoformat(str(event["end"])).replace(
+            hour=vault.RESET_HOUR_UTC, tzinfo=timezone.utc) + timedelta(minutes=1)
+    start, end = vault.week_window(at)
+
+    setup = store.get_rollcall_setup(scope) or {}
+    mapping = setup.get("members") or {}
+    guild = tcfg.get("discord_guild_id") or cfg["discord_guild_id"]
+
+    def discord_get(path):
+        status, body = health._get(f"https://discord.com/api/v10{path}", token=cfg["bot_token"])
+        if status != 200:
+            raise RuntimeError(f"Discord {path.split('?')[0]} answered {status}")
+        return body
+
+    members = vault.fetch_members(discord_get, guild, tcfg.get("role_id") or cfg["role_id"])
+
+    # Raid kills from the logs: the guild's reports and every team that logs under a
+    # personal account, deduplicated by report.
+    token = wcl.get_token(cfg["wcl_client_id"], cfg["wcl_client_secret"])
+    gid, _rate = guild_id(token, cfg)
+    lo, hi = start.timestamp() * 1000, end.timestamp() * 1000
+    listed = wcl.reports_in_window(token, gid, lo, hi, limit=100)[0]
+    for uid in sorted({str(c.get("wcl_user_id")) for _s, c in tenant_configs(cfg)
+                       if c.get("wcl_user_id")}):
+        listed += wcl.reports_in_window(token, None, lo, hi, limit=100, user_id=int(uid))[0]
+    codes = list(dict.fromkeys(r["code"] for r in listed))
+    reports = [wcl.report_detail(token, code)[0] for code in codes]
+    raided = vault.wcl_bosses(reports, start, end)
+
+    guild_members = raiderio._get("https://raider.io/api/v1/guilds/profile", {
+        "region": cfg["guild_region"], "realm": cfg["guild_realm"],
+        "name": cfg["guild_name"], "fields": "members"}).get("members") or []
+    roster = {vault.fold(m["character"]["name"]): m["character"] for m in guild_members}
+    characters = [c for m in members for c in mapping.get(m["user"]["id"], [])]
+    profiles = vault.fetch_profiles(characters, roster, vault.wcl_realms(reports),
+                                    cfg["guild_region"], cfg["guild_realm"])
+    encounters, equipment, gems = {}, {}, {}
+    if cfg.get("blizzard_client_id") and cfg.get("blizzard_client_secret"):
+        btoken = blizzard.get_token(cfg["blizzard_client_id"], cfg["blizzard_client_secret"])
+        chosen = {vault.fold(c): profiles[vault.fold(c)] for c in
+                  (vault.choose(mapping.get(m["user"]["id"], []), raided, profiles)
+                   for m in members) if c}
+        encounters = vault.fetch_encounters(chosen, btoken, blizzard._get)
+        equipment = vault.fetch_equipment(chosen, btoken, blizzard._get)
+        gems = vault.fetch_gems(equipment, btoken, blizzard._get)
+    rows = vault.build(members, mapping, profiles, encounters, raided, start, end,
+                       equipment=equipment, gems=gems)
+    summary = {"start": _iso(start), "end": _iso(end), "raiders": len(rows),
+               "flagged": sum(1 for r in rows if r["flagged"]),
+               "gear": sum(1 for r in rows if (r["gear"] or {}) and any(r["gear"].values())),
+               "reports": len(codes)}
+    # Counts only: the names are the card's business, not the log's.
+    log("vault_week", **summary, blizzard=len(encounters), equipment=len(equipment),
+        profiles=len(profiles))
+    if dry:
+        return {"ok": True, **summary, "rows": rows}
+
+    pictures = rollcall.pictures([{"id": m["user"]["id"], "avatar_url": vault.avatar_url(m, guild)}
+                                  for m in members])
+    label = tcfg.get("team_name") or setup.get("label") or cfg["guild_name"]
+    card = vault_card.render(rows, start, end, label, pictures)
+    if not card:
+        log("vault_card_failed", note="sending the list as text instead")
+    payload = vault.payload(rows, start, end, label, bool(card))
+    attachment = ("vault.png", card) if card else None
+
+    if preview:
+        owner = cfg.get("low_parse_dm")
+        if not owner:
+            raise RuntimeError("no operator DM configured (/greybot/recap/low_parse_dm)")
+        discord.dm_to(cfg["bot_token"], owner, payload, attachment=attachment)
+        log("vault_preview_sent", **summary)
+        return {"ok": True, "preview": True, **summary}
+
+    week = end.date().isoformat()
+    if not store.claim_vault(scope, week):
+        log("vault_already_posted", week=week)
+        return {"ok": True, "skipped": "already_posted", "week": week}
+    result = discord.post_to({"bot_token": cfg["bot_token"], "channel": channel}, payload,
+                             max_attempts=1, attachment=attachment)
+    log("vault_posted", week=week, message=getattr(result, "message_id", None), **summary)
+    return {"ok": True, "posted": True, "week": week, **summary}
 
 
 def rollcall_setup(event, cfg, now_iso):

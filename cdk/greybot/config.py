@@ -92,6 +92,8 @@ class StageConfig:
         # Who privately gets the night's grey parses, and what counts as grey. Empty is OFF.
         "recap/low_parse_dm",
         "recap/low_parse_max",
+        # The Tuesday Great Vault check's channel. Granted, not created: empty is OFF.
+        "vault/channel_id",
     ))
 
     @property

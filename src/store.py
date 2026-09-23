@@ -752,6 +752,26 @@ def release_rollcall(scope, night_key):
                     ExpressionAttributeValues={":b": {"SS": [night_key]}})
 
 
+# The Tuesday Great Vault check: one post per install per reset week, claimed by the date
+# the week ended. Never released automatically -- see handler.vault_week.
+VAULT_SK = "VAULT"
+
+
+def claim_vault(scope, week_key):
+    """Atomically claim one week's vault post. Same discipline as claim_recap."""
+    try:
+        ddb.update_item(
+            TableName=TABLE, Key={"pk": _s(scope.tenant), "sk": _s(VAULT_SK)},
+            UpdateExpression="ADD posted :b",
+            ConditionExpression="attribute_not_exists(posted) OR NOT contains(posted, :k)",
+            ExpressionAttributeValues={":b": {"SS": [week_key]}, ":k": _s(week_key)})
+        return True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
 def get_rollcall_setup(scope):
     """{"voice_channel": id, "members": {discord_id: [character, ...]}} or None."""
     res = ddb.get_item(TableName=TABLE,
