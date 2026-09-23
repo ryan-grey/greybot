@@ -117,6 +117,21 @@ class GreybotStack(Stack):
 
     # ----------------------------------------------------------------- iam
 
+    def _app_boundary(self) -> iam.IManagedPolicy:
+        """ryangrey-app-boundary, on every role this stack creates.
+
+        Without it the CDK exec role could attach AdministratorAccess to a
+        greybot role and hand it to a Lambda or a Scheduler universal target,
+        which made `infra` a path to full admin. The exec supplement now only
+        allows CreateRole with this exact boundary, so dropping it here fails
+        the deploy rather than quietly reopening that path.
+        """
+        existing = self.node.try_find_child("AppBoundary")
+        if existing is not None:
+            return existing
+        return iam.ManagedPolicy.from_managed_policy_name(
+            self, "AppBoundary", "ryangrey-app-boundary")
+
     def _role(self) -> iam.Role:
         """The runtime role, statement-for-statement from the baseline.
 
@@ -131,6 +146,7 @@ class GreybotStack(Stack):
             self, "RuntimeRole",
             role_name=cfg.role_name,
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            permissions_boundary=self._app_boundary(),
         )
 
         policy = iam.Policy(self, "RuntimePolicy", policy_name="greybot-runtime")
@@ -327,6 +343,7 @@ class GreybotStack(Stack):
             self, "SchedulerRole",
             role_name=cfg.scheduler_role_name,
             assumed_by=iam.ServicePrincipal("scheduler.amazonaws.com"),
+            permissions_boundary=self._app_boundary(),
         )
         scheduler_role.add_to_policy(iam.PolicyStatement(
             actions=["lambda:InvokeFunction"],

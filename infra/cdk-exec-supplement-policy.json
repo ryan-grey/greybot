@@ -27,7 +27,6 @@
         "iam:DeleteRolePolicy",
         "iam:GetRolePolicy",
         "iam:ListRolePolicies",
-        "iam:CreateRole",
         "iam:DeleteRole",
         "iam:GetRole",
         "iam:UpdateRole",
@@ -43,6 +42,22 @@
         "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ryangrey-greybot-scheduler-role",
         "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ryangrey-greybot-scheduler-role-dev"
       ]
+    },
+    {
+      "Sid": "CreateGreybotRolesOnlyWithTheBoundary",
+      "Effect": "Allow",
+      "Action": ["iam:CreateRole", "iam:PutRolePermissionsBoundary"],
+      "Resource": [
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ryangrey-greybot-role",
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ryangrey-greybot-role-dev",
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ryangrey-greybot-scheduler-role",
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ryangrey-greybot-scheduler-role-dev"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::${AWS_ACCOUNT_ID}:policy/ryangrey-app-boundary"
+        }
+      }
     },
     {
       "Sid": "CreateGreybotResourcesDevOpsLacks",
