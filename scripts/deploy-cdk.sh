@@ -28,13 +28,46 @@ CDK_VERSION="${CDK_VERSION:-2.1139.0}"
 # The self-test gates the deploy, exactly as the pre-CDK scripts/deploy.sh did. Losing that
 # gate in the CDK cutover is how three separate defects reached prod at once.
 if [ -x "$ROOT/.venv/bin/python" ]; then
-  echo "==> Self-test"
-  "$ROOT/.venv/bin/python" "$ROOT/scripts/selftest.py" >/dev/null
-  echo "    all checks passed"
+  PY="$ROOT/.venv/bin/python"
 else
   echo "!!  no .venv — skipping the self-test's PyNaCl signature checks" >&2
-  python3 "$ROOT/scripts/selftest.py" >/dev/null
+  PY=python3
 fi
+echo "==> Self-test"
+"$PY" "$ROOT/scripts/selftest.py" >/dev/null
+echo "    all checks passed"
+
+# The feature suites the self-test does not cover. Each is its own script with its own
+# exit code; any one failing stops the deploy, and its output is shown only then.
+echo "==> Feature tests"
+for t in "$ROOT"/scripts/test_*.py; do
+  if ! out="$("$PY" "$t" 2>&1)"; then
+    printf '%s\n' "$out" >&2
+    echo "!!  $(basename "$t") failed" >&2
+    exit 1
+  fi
+done
+echo "    all passed"
+
+# The NAS control service's suite, in its own venv: its pins (discord.py, fastapi, the
+# voice receiver) have nothing to do with the Lambda package. Built on first use, with
+# voice-recv --no-deps exactly as the Dockerfile installs it.
+CONTROL="$ROOT/control"
+CVENV="$CONTROL/.venv"
+if [ ! -x "$CVENV/bin/python" ]; then
+  echo "==> Creating control/.venv for the control service's tests"
+  python3 -m venv "$CVENV"
+  "$CVENV/bin/pip" install --quiet -r "$CONTROL/requirements.txt" \
+    -r "$CONTROL/requirements-reader.txt"
+  "$CVENV/bin/pip" install --quiet --no-deps -r "$CONTROL/requirements-voice.txt"
+fi
+echo "==> Control service tests"
+if ! out="$(cd "$CONTROL" && "$CVENV/bin/python" -m unittest discover -s tests -p 'test_*.py' 2>&1)"; then
+  printf '%s\n' "$out" >&2
+  echo "!!  control service tests failed" >&2
+  exit 1
+fi
+echo "    $(printf '%s\n' "$out" | grep -E '^Ran ')"
 
 echo "==> Packaging"
 "$ROOT/scripts/build-lambda.sh"
