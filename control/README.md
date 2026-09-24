@@ -1,6 +1,6 @@
 # Server control service
 
-This additional service is under development. It does not replace the deployed
+This additional service runs in production on greyNAS. It does not replace the deployed
 raid Lambda, register commands, change bot permissions or remove integrations.
 It uses the same bot application for Gateway collection and REST moderation;
 the existing signed `/progress` HTTP endpoint remains in place.

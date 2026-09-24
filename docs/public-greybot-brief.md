@@ -1,6 +1,9 @@
 # Project #9 — Public greyBot on CDK
 
-**Status:** brief only — nothing built. Written Sept 1, 2026 (at Ryan's direction).
+**Status:** on hold — greyBot stays a private bot (2026-09-24). Phase 1 (the CDK port) is
+done and Phase 2's tenant keys are in the code; Phase 3 onward is not started. The app
+is not public, has no install link and `/setup` answers only in the home server.
+Written Sept 1, 2026 (at Ryan's direction).
 **Decision:** Watchtower Pro is archived. Project #9 is generalizing greyBot from a
 single-guild personal bot into an installable, multi-tenant Discord app, with its
 infrastructure rebuilt in **AWS CDK**. Two portfolio gaps close at once: first product
