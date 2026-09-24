@@ -220,14 +220,36 @@ def uses_team_recap(cfg):
     return is_team(cfg) and not cfg.get("preserve_prog_recap")
 
 
+CURRENT_TIER = "current"
+
+
 def is_active_raid(cfg, slug):
     """Whether this source may announce this tier.
 
     A configured active slug is a fail-closed cutover boundary: existing rows remain
     available for audit and dedupe, but an old farm tier cannot create or retry a post.
+    It may name several raids, comma-separated. `current` is resolved to the live raids
+    by with_current_tier before anything asks; left unresolved it admits nothing.
     """
-    active = str(cfg.get("active_raid_slug") or "").strip()
-    return not active or active == slug
+    active = {s.strip() for s in str(cfg.get("active_raid_slug") or "").split(",")
+              if s.strip()}
+    return not active or slug in active
+
+
+def with_current_tier(cfg, index, now):
+    """Resolve an active slug of `current` to every raid Raider.IO lists as live now.
+
+    A season's raids share one window -- an eight-boss raid and a one-boss side raid open
+    the same week -- so the tier is all of them, and the next season's cutover happens by
+    itself when Raider.IO closes the old window. With no window data the gate stays shut:
+    a kill still in the lookback window posts on the next poll that can see the calendar.
+    """
+    if str(cfg.get("active_raid_slug") or "").strip().lower() != CURRENT_TIER:
+        return cfg
+    live = sorted(m["slug"] for m in index.live_at(now, cfg["guild_region"])) if index else []
+    if not live:
+        log("current_tier_unknown", note="no live raid window from Raider.IO; announcing nothing")
+    return dict(cfg, active_raid_slug=",".join(live) or "-")
 
 
 def display_name(cfg):
@@ -1293,6 +1315,14 @@ def handle_interaction(event, cfg, scope, now):
             return interactions.http(200,
                                      handle_progress(body, caller_cfg, caller_scope, now))
         if name == "setup":
+            # Private bot: only the home server can become an install. Another server
+            # that got hold of the app would otherwise start spending the shared
+            # Warcraft Logs budget on its next poll.
+            if str(body.get("guild_id") or "") != str(cfg.get("discord_guild_id") or ""):
+                log("setup_denied", reason="not_home_server")
+                return interactions.http(200, interactions.message(
+                    {"description": "greyBot is a private bot and can't be set up here.",
+                     "color": discord.BRAND_ACCENT}, ephemeral=True))
             # Belt and braces on top of default_member_permissions. That field is
             # a default a server admin can override in Discord's UI, so it is not
             # by itself an authorisation check. 0x20 is MANAGE_GUILD.
@@ -1872,6 +1902,7 @@ def poll_one(event, cfg, scope, now, now_iso, started):
     profile = raiderio.guild_profile(cfg["guild_region"], cfg["guild_realm"],
                                      cfg["guild_name"])
     index, expansions = raiderio.build_index(profile, EXPANSION_HINT)
+    cfg = with_current_tier(cfg, index, now)
 
     # The second schedule. Same function, same package, one branch -- not a parallel stack.
     # It sits above the bootstrap branch rather than below it because a recap before the

@@ -1818,6 +1818,17 @@ def test_interactions():
     check("...as a string, which is what Discord accepts",
           isinstance(setup["default_member_permissions"], str))
     check("/setup refuses DMs", setup["dm_permission"] is False)
+
+    # Private bot: a server other than the home one is refused before anything is
+    # deferred, so no Raider.IO lookup, no config row and no registry entry.
+    res = handler.handle_interaction(
+        event({"type": 2, "data": {"name": "setup"}, "token": "t", "application_id": "1",
+               "guild_id": "stranger-guild", "member": {"permissions": "32"}}),
+        guild_cfg, pk, now)
+    reply = json.loads(res["body"])
+    check("/setup in any server but the home one is refused as a private bot",
+          reply.get("type") == interactions.CHANNEL_MESSAGE_WITH_SOURCE
+          and "private bot" in reply["data"]["embeds"][0]["description"], reply)
     opts = {o["name"]: o for o in setup["options"]}
     check("...asks for region, realm, guild and channel",
           all(k in opts for k in ("region", "realm", "guild", "channel")))
@@ -2175,6 +2186,29 @@ def test_team_install():
                                  "the-venomous-abyss")
           and not handler.is_active_raid(dict(gcfg, active_raid_slug="the-venomous-abyss"),
                                             "tier-mn-1"))
+    season = datetime(2026, 9, 23, 2, 33, tzinfo=timezone.utc)
+    current = handler.with_current_tier(dict(gcfg, active_raid_slug="current"), INDEX, season)
+    check("a current tier admits every raid live that week, the side raid included",
+          handler.is_active_raid(current, "the-venomous-abyss")
+          and handler.is_active_raid(current, "the-tidebound-grotto"),
+          current.get("active_raid_slug"))
+    check("...and not last season's raids once Raider.IO has closed their window",
+          not handler.is_active_raid(current, "tier-mn-1")
+          and not handler.is_active_raid(current, "sporefall"))
+    spring = handler.with_current_tier(dict(gcfg, active_raid_slug="current"), INDEX,
+                                       datetime(2026, 7, 1, tzinfo=timezone.utc))
+    check("...so the cutover to a new season needs no config change",
+          handler.is_active_raid(spring, "tier-mn-1")
+          and not handler.is_active_raid(spring, "the-venomous-abyss"))
+    dark = handler.with_current_tier(dict(gcfg, active_raid_slug="current"),
+                                     raiderio.RaidIndex([]), season)
+    check("...and with no raid calendar a current tier announces nothing",
+          not handler.is_active_raid(dark, "the-venomous-abyss"))
+    check("an unresolved current tier admits nothing either",
+          not handler.is_active_raid(dict(gcfg, active_raid_slug="current"),
+                                     "the-venomous-abyss"))
+    check("an install without a tier gate is left exactly as it was",
+          handler.with_current_tier(gcfg, INDEX, season) is gcfg)
 
     # --- the two sources -------------------------------------------------
     # Every seven days lands on the same weekday, so history on 7.5 and 14.5 days ago is
