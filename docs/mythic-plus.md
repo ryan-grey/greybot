@@ -99,14 +99,11 @@ compare its source with the repository baseline, and run publication guards agai
 the unpacked package. Update function code with a revision precondition and verify
 its SHA-256; do not use an environment replacement that drops existing variables.
 
-`infra/configure-mplus.py` previews by default. Supply the AWS profile, existing
-function name, existing recap schedule name, and destination channel ID. `--apply`
-adds only an IAM Query grant restricted to Mythic+ partitions, merges the new
-environment variables, enables collection and leaves weekly publication disabled.
-After successful live collection and a dry recap, add `--publish --apply` to enable
-Tuesday publication. Existing raid schedules are not modified. These additive
-schedules and the Query policy are managed by this script, separately from the
-original CDK baseline; rerun it after a full CDK rollout to reconcile configuration.
+The three schedules, the IAM Query grant restricted to Mythic+ partitions and the
+`MPLUS_*` environment are declared in the CDK stack (`cdk/greybot/config.py`) and ship
+with `scripts/deploy-cdk.sh prod`. They were first rolled out by `infra/configure-mplus.py`,
+which is retired (2026-09-24): change them in the stack, never by hand, or the next deploy
+puts them back.
 
 Verify fresh collector state, score snapshots, retained run records, the configured
 channel, Lambda result and both schedule states. Do not send synthetic standings to
@@ -116,8 +113,7 @@ IO ranking until two real weekly boundary snapshots exist.
 ## New dungeon records
 
 The record dispatcher checks every minute and posts to the same configured channel.
-Enable its schedule with `infra/configure-mplus.py --records --publish --apply`
-and the existing required arguments. It first waits for one complete roster pass
+Its schedule is `MplusRecordsSchedule` in the CDK stack. It first waits for one complete roster pass
 under the record collector, then quietly seeds records from retained runs including
 available season-best runs. This avoids announcing the historical backlog.
 

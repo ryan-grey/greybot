@@ -1,0 +1,8 @@
+{
+  "RecapSchedule": { "Name": "ryangrey-greybot-recap" },
+  "SaturdayRecapSchedule": { "Name": "ryangrey-greybot-recap-saturday-raid" },
+  "VaultSchedule": { "Name": "ryangrey-greybot-vault" },
+  "MplusCollectSchedule": { "Name": "ryangrey-greybot-mplus-collect" },
+  "MplusRecordsSchedule": { "Name": "ryangrey-greybot-mplus-records" },
+  "MplusRecapSchedule": { "Name": "ryangrey-greybot-mplus-recap" }
+}

@@ -117,5 +117,5 @@ echo "  aws lambda invoke --function-name ryangrey-greybot --region $REGION \\"
 echo "    --cli-binary-format raw-in-base64-out \\"
 echo "    --payload '{\"mode\":\"recap\",\"dry\":true,\"hours\":48}' /dev/stdout"
 echo
-echo "The schedule is deliberately NOT created here. See infra/create-recap-schedule.sh,"
-echo "which refuses to run until /greybot/recap/enabled is true."
+echo "The schedule is deliberately NOT created here. It is RecapSchedule in the CDK stack"
+echo "(cdk/greybot/config.py); the recap posts nothing until /greybot/recap/enabled is true."

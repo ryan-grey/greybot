@@ -96,9 +96,58 @@ class StageConfig:
         "vault/channel_id",
     ))
 
+    # The schedules beside the poller: same function, same scheduler role, one input each.
+    # Created by the infra/ scripts first and adopted by `cdk import`, so every value is
+    # the live one, retry policy and Input string byte for byte.
+    extra_schedules: tuple = ()
+
+    # Environment beyond the three keys every stage carries. The retired configure-mplus.py
+    # set these on the live function; declared here, a template change can no longer drop them.
+    extra_env: tuple = ()
+
     @property
     def is_prod(self) -> bool:
         return self.stage == "prod"
+
+    @property
+    def mplus(self) -> bool:
+        return any(k == "MPLUS_ENABLED" and v == "1" for k, v in self.extra_env)
+
+
+@dataclass(frozen=True)
+class ExtraSchedule:
+    logical_id: str
+    suffix: str                 # appended to the function name
+    expression: str
+    timezone: str
+    input: str
+    max_event_age: int
+    max_retries: int
+    description: str = ""
+
+
+_ET = "America/New_York"
+# Days, not minutes: a raid-night post that misses its slot still belongs to that night.
+_RAID_DAY = 86400
+# M+ jobs run every minute or weekly off a live snapshot; a stale retry is worse than none.
+_MPLUS_AGE = 300
+
+PROD_SCHEDULES = (
+    ExtraSchedule("RecapSchedule", "recap", "cron(15 0 ? * WED,FRI *)", _ET,
+                  '{"mode":"recap"}', _RAID_DAY, 2),
+    ExtraSchedule("SaturdayRecapSchedule", "recap-saturday-raid", "cron(15 23 ? * SAT *)", _ET,
+                  '{"mode":"recap","team":"saturday-raid"}', _RAID_DAY, 2,
+                  "Saturday Raid recap, 1:00 AM Eastern Sunday (the raid runs past "
+                  "midnight), team-only"),
+    ExtraSchedule("VaultSchedule", "vault", "cron(30 11 ? * TUE *)", _ET,
+                  '{"mode":"vault"}', _RAID_DAY, 1),
+    ExtraSchedule("MplusCollectSchedule", "mplus-collect", "rate(1 minute)", "UTC",
+                  '{"mode": "mplus_collect"}', _MPLUS_AGE, 0),
+    ExtraSchedule("MplusRecordsSchedule", "mplus-records", "rate(1 minute)", "UTC",
+                  '{"mode": "mplus_records"}', _MPLUS_AGE, 0),
+    ExtraSchedule("MplusRecapSchedule", "mplus-recap", "cron(0 10 ? * TUE *)", _ET,
+                  '{"mode": "mplus_recap"}', _MPLUS_AGE, 0),
+)
 
 
 PROD = StageConfig(
@@ -111,6 +160,13 @@ PROD = StageConfig(
     api_name="greybot-interactions",
     ssm_prefix="/greybot",
     recap_page_bucket="raids.ryangrey.dev",
+    extra_schedules=PROD_SCHEDULES,
+    extra_env=(
+        ("MPLUS_ENABLED", "1"),
+        ("MPLUS_CHANNEL_ID", "1548100008719679538"),
+        ("MPLUS_SCORE_POLICY", "overall_for_participants"),
+        ("MPLUS_RECORD_BOARD_ENABLED", "1"),
+    ),
 )
 
 # NOTE ON THE DEV SSM PREFIX

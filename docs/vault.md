@@ -52,16 +52,15 @@ the slots behind each count. Mentions are suppressed, so it pings nobody.
 The weekly post claims its week (`VAULT` row, tenant partition) before sending and never
 releases it: a missed post can be sent by hand, a duplicate cannot be taken back.
 
-## Go live (in this order, only when approved)
+## Go live (done 2026-09-23)
 
-1. Deploy the code: `scripts/deploy-cdk.sh prod` (done 2026-09-23). The deploy grants
-   `/greybot/vault/channel_id`; nothing posts yet. CDK leaves the Lambda's Mythic+
-   environment variables alone as long as the stack's own Environment block is unchanged.
-   Diff the environment and schedules before and after. Do not "restore" them with
-   `infra/configure-mplus.py --apply`, which also rewrites the Mythic+ schedules.
+1. Deploy the code: `scripts/deploy-cdk.sh prod`. The deploy grants
+   `/greybot/vault/channel_id`.
 2. Create the channel: `scripts/create-vault-channel.py` (preview), then `--apply`. It
    denies @everyone and allows only greyBot; GM and Officer see it through Administrator.
 3. `aws ssm put-parameter --name /greybot/vault/channel_id --type String --value <id>`.
-4. `infra/create-vault-schedule.sh` (preview), then `--apply`.
+4. The schedule, first made by the retired `infra/create-vault-schedule.sh`, is now
+   `VaultSchedule` in the CDK stack (`cdk/greybot/config.py`), adopted 2026-09-24.
 
-Turning it off is deleting the schedule or emptying the parameter.
+Turning it off is emptying the parameter; removing `VaultSchedule` from the stack and
+deploying stops the timer itself.

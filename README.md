@@ -190,7 +190,7 @@ before the role was widened.
 |---|---|---|
 | `/greybot/recap/enabled` | **false** | the recap posts nothing until this is turned on |
 | `/greybot/recap/show_worst_parse` | **false** | parse-shaming starts arguments; opt in, never out |
-| `/greybot/recap/schedule` | — | the cron; `infra/create-recap-schedule.sh` reads it |
+| `/greybot/recap/schedule` | — | informational; the live cron is `RecapSchedule` in `cdk/greybot/config.py` |
 | `/greybot/team/roster_min_first_kill_pct` | 50 | share of first kills that puts a player on the roster |
 | `/greybot/team/prog_overlap_high` | 70 | roster overlap at or above this is the prog team |
 | `/greybot/team/prog_overlap_low` | 35 | roster overlap at or below this is the other team |
@@ -1025,7 +1025,6 @@ scripts/set-webhook-identity.py   name + avatar on the announcing webhook
 infra/iam-setup.sh   one-time admin setup (1 of 2): table, execution + scheduler roles
 infra/create-schedule.sh   admin setup (2 of 2): the 15-minute poll, created last
 infra/grant-recap-config.sh       widen the role for the recap, create its parameters
-infra/create-recap-schedule.sh    the Wed/Fri post-raid recap schedule
 infra/create-interactions-api.sh  the HTTPS endpoint Discord posts interactions to
 infra/grant-interactions.sh       widen the role for slash commands
 infra/grant-alerts.sh             health alerts: the parameter + sns:Publish on the role

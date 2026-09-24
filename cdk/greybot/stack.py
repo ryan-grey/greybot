@@ -205,6 +205,16 @@ class GreybotStack(Stack):
                            f"{cfg.alerts_topic_name}"],
             ),
         )
+        # Mythic+ reads its own history by Query, and only inside the MPLUS# partitions:
+        # the same leading-key fence as the TENANT# statement above, around other rows.
+        if cfg.mplus:
+            policy.document.add_statements(iam.PolicyStatement(
+                actions=["dynamodb:Query"],
+                resources=[f"arn:aws:dynamodb:{Aws.REGION}:{Aws.ACCOUNT_ID}:"
+                           f"table/{cfg.table_name}"],
+                conditions={"ForAllValues:StringLike": {
+                    "dynamodb:LeadingKeys": ["MPLUS#*"]}},
+            ))
         policy.attach_to_role(role)
         # PutObject ONLY, and only under the one bucket, and only when a bucket is
         # configured for this stage. Not ListBucket, not GetObject, not Delete: the bot
@@ -267,6 +277,7 @@ class GreybotStack(Stack):
                 # isolation working, but the result is a dev bot that cannot
                 # start rather than one pointed at the right tree.
                 **({} if cfg.is_prod else {"SSM_PREFIX": cfg.ssm_prefix}),
+                **dict(cfg.extra_env),
             },
         )
 
@@ -366,3 +377,26 @@ class GreybotStack(Stack):
                 role_arn=scheduler_role.role_arn,
             ),
         )
+
+        # Recaps, the vault check and Mythic+: each a fixed Input to the same function
+        # through the same role. They began as infra/ scripts and were adopted by
+        # `cdk import`, so a stack rebuild brings every one of them back.
+        for s in cfg.extra_schedules:
+            scheduler.CfnSchedule(
+                self, s.logical_id,
+                name=f"{cfg.function_name}-{s.suffix}",
+                description=s.description or None,
+                schedule_expression=s.expression,
+                schedule_expression_timezone=s.timezone,
+                state="ENABLED",
+                flexible_time_window=scheduler.CfnSchedule.FlexibleTimeWindowProperty(
+                    mode="OFF"),
+                target=scheduler.CfnSchedule.TargetProperty(
+                    arn=self.function.function_arn,
+                    role_arn=scheduler_role.role_arn,
+                    input=s.input,
+                    retry_policy=scheduler.CfnSchedule.RetryPolicyProperty(
+                        maximum_event_age_in_seconds=s.max_event_age,
+                        maximum_retry_attempts=s.max_retries),
+                ),
+            ).apply_removal_policy(self.removal)
