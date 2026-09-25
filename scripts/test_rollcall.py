@@ -1,4 +1,4 @@
-"""Offline tests for the raid-night roll call: which kill, who is who, the claim, and the card."""
+"""Offline tests for the raid-night roll call: which pull, who is who, the claim, and the card."""
 import hashlib
 import hmac
 import io
@@ -29,22 +29,57 @@ VOICE = [{"id": "1", "name": "Pie", "avatar_url": ""}, {"id": "2", "name": "Fûr
          {"id": "5", "name": "Justin", "avatar_url": ""}]
 
 
-def kill(name, at, report="R1", start=None):
-    return {"name": name, "encounterID": 9, "killedAtMs": at, "reportCode": report,
-            "reportStartMs": start or at - 3600_000, "zoneName": "The Venomous Abyss"}
+def pull(name, end, seconds=240, report="R1", start=None, difficulty="heroic", won=True):
+    return {"name": name, "encounterID": 9, "fightID": 3, "kill": won, "difficulty": difficulty,
+            "startedAtMs": end - seconds * 1000, "endedAtMs": end, "reportCode": report,
+            "reportStartMs": start or end - 3600_000, "zoneName": "The Venomous Abyss"}
 
 
-class WhichKillTests(unittest.TestCase):
-    def test_earliest_kill_of_the_night_across_difficulties_and_reports(self):
-        first, later = kill("Altar", MS(2026, 9, 18, 2, 15)), kill("Second", MS(2026, 9, 18, 2, 25))
-        relog = kill("Third", MS(2026, 9, 18, 4, 20), report="R2", start=MS(2026, 9, 18, 4, 5))   # 12:05 AM relog
-        found = rollcall.first_kills([("heroic", [later, relog]), ("normal", [first])], int(NOW.timestamp() * 1000) + 3 * 3600_000, TZ)
+class WhichPullTests(unittest.TestCase):
+    def test_earliest_real_pull_of_the_night_across_difficulties_and_reports(self):
+        first, later = pull("Altar", MS(2026, 9, 18, 2, 15), difficulty="normal"), pull("Second", MS(2026, 9, 18, 2, 25))
+        relog = pull("Third", MS(2026, 9, 18, 4, 20), report="R2", start=MS(2026, 9, 18, 4, 5))   # 12:05 AM relog
+        found = rollcall.first_pulls([later, relog, first], int(NOW.timestamp() * 1000) + 3 * 3600_000, TZ)
         self.assertEqual([(k["name"], k["difficulty"], k["night"]) for k in found], [("Altar", "normal", "2026-09-17")])
 
-    def test_last_nights_kill_is_not_called_the_morning_after(self):
-        old = kill("Altar", MS(2026, 9, 17, 2, 15))
-        self.assertEqual(rollcall.first_kills([("heroic", [old])], int(NOW.timestamp() * 1000), TZ), [])
-        self.assertEqual(len(rollcall.first_kills([("heroic", [old])], int(NOW.timestamp() * 1000), TZ, max_age_hours=72)), 1)
+    def test_a_wipe_counts_and_a_pull_of_a_minute_or_less_does_not(self):
+        mispull = pull("Oops", MS(2026, 9, 18, 1, 50), seconds=60, won=False)
+        wipe = pull("Altar", MS(2026, 9, 18, 2, 0), seconds=61, won=False)
+        kill = pull("Altar", MS(2026, 9, 18, 2, 15))
+        found = rollcall.first_pulls([kill, wipe, mispull], int(NOW.timestamp() * 1000), TZ)
+        self.assertEqual([(k["endedAtMs"], k["kill"]) for k in found], [(wipe["endedAtMs"], False)])
+        self.assertEqual(rollcall.first_pulls([mispull], int(NOW.timestamp() * 1000), TZ), [])
+
+    def test_last_nights_pull_is_not_called_the_morning_after(self):
+        old = pull("Altar", MS(2026, 9, 17, 2, 15))
+        self.assertEqual(rollcall.first_pulls([old], int(NOW.timestamp() * 1000), TZ), [])
+        self.assertEqual(len(rollcall.first_pulls([old], int(NOW.timestamp() * 1000), TZ, max_age_hours=72)), 1)
+
+
+class PullSourceTests(unittest.TestCase):
+    def test_the_pulls_query_asks_for_every_boss_fight_at_any_difficulty(self):
+        for doc in (rollcall.wcl.PULLS_Q, rollcall.wcl.USER_PULLS_Q):
+            self.assertIn("fights(killType: Encounters)", doc)
+            self.assertNotIn("$difficulty", doc)
+        self.assertIn("userID: $userID", rollcall.wcl.USER_PULLS_Q)
+
+    def test_pulls_come_back_absolute_and_trash_is_dropped(self):
+        data = {"reportData": {"reports": {"data": [{"code": "R1", "startTime": 1000, "owner": {"id": 7},
+                "zone": {"name": "The Venomous Abyss"}, "fights": [
+                    {"id": 2, "encounterID": 0, "name": "Trash", "startTime": 5, "endTime": 90000},
+                    {"id": 4, "encounterID": 9, "name": "Altar", "kill": False, "difficulty": 3, "startTime": 100, "endTime": 70100}]}]}}}
+        with patch.object(rollcall.wcl, "query", return_value=data):
+            pulls, _rate = rollcall.wcl.boss_pulls_since("t", 1, 0)
+        self.assertEqual([(p["fightID"], p["startedAtMs"], p["endedAtMs"], p["kill"], p["difficulty"]) for p in pulls],
+                         [(4, 1100, 71100, False, 3)])
+
+    def test_the_handler_keeps_only_this_installs_difficulties_and_names_them(self):
+        import handler
+        rows = [{**pull("A", MS(2026, 9, 18, 2, 0)), "difficulty": 3}, {**pull("B", MS(2026, 9, 18, 2, 5)), "difficulty": 5}]
+        with patch.object(handler.wcl, "boss_pulls_since", return_value=(rows, None)) as ask:
+            got = handler.fetch_pulls("t", 1, {"difficulties": "normal,heroic", "wcl_user_id": "40245"}, 0)
+        self.assertEqual([(p["name"], p["difficulty"]) for p in got], [("A", "normal")])
+        self.assertEqual(ask.call_args.kwargs, {"user_id": 40245})
 
 
 class WhoIsWhoTests(unittest.TestCase):
@@ -95,22 +130,22 @@ class RunTests(unittest.TestCase):
         with patch.object(rollcall.store, "get_rollcall_setup", return_value={"voice_channel": "10", "members": {}, "label": "Smoobies", "live": live} if setup else None), \
              patch.object(rollcall.store, "claim_rollcall", side_effect=lambda s, n: calls["claimed"].append(n) or claim), \
              patch.object(rollcall.store, "release_rollcall", side_effect=lambda s, n: calls["released"].append(n)), \
-             patch.object(rollcall.wcl, "kill_lineup", return_value=(lineup, None)), \
+             patch.object(rollcall.wcl, "pull_lineup", return_value=(lineup, None)), \
              patch.object(rollcall, "ask_voice", return_value={"channel": "Smoobies", "members": voice}), \
              patch.object(rollcall, "pictures", return_value={}):
-            results = rollcall.run(self.CFG, self.SCOPE, "token", [("heroic", [kill("Altar", MS(2026, 9, 18, 2, 15))])], NOW, TZ,
+            results = rollcall.run(self.CFG, self.SCOPE, "token", lambda since: [pull("Altar", MS(2026, 9, 18, 2, 15))], NOW, TZ,
                                    team_name="", destination={"channel": "c"},
                                    publish=lambda key, body: calls["published"].append(key) or "https://raids.example/" + key,
                                    post=lambda where, payload: calls["posts"].append(payload), dry=dry)
         return results, calls
 
-    def test_posts_once_with_the_card_and_names_who_was_not_in_the_kill(self):
+    def test_posts_once_with_the_card_and_names_who_was_not_in_the_pull(self):
         results, calls = self.run_it(VOICE)
         self.assertEqual((len(calls["posts"]), calls["released"], results[0]["notInKill"]), (1, [], 2))
         payload = calls["posts"][0]
         self.assertEqual(payload["allowed_mentions"], {"parse": []})
-        self.assertIn("In Discord but not in kill: NotBrewst, Justin", payload["embeds"][0]["description"])
-        self.assertIn("In kill but not in Discord: Deathbrewst", payload["embeds"][0]["description"])
+        self.assertIn("In Discord but not in pull: NotBrewst, Justin", payload["embeds"][0]["description"])
+        self.assertIn("In pull but not in Discord: Deathbrewst", payload["embeds"][0]["description"])
         # Members are described as being in Discord. How they were found is not the post's to say.
         self.assertNotIn("voice", json.dumps(payload).lower())
         self.assertTrue(payload["embeds"][0]["image"]["url"].startswith("https://raids.example/rollcall/guild/2026-09-17/"))
@@ -146,12 +181,12 @@ class RunTests(unittest.TestCase):
         with patch.object(rollcall.store, "get_rollcall_setup", return_value={"voice_channel": "10", "members": {}, "label": "", "live": True}), \
              patch.object(rollcall.store, "claim_rollcall", return_value=True), \
              patch.object(rollcall.store, "release_rollcall") as release, \
-             patch.object(rollcall.wcl, "kill_lineup", return_value=(LINEUP, None)), \
+             patch.object(rollcall.wcl, "pull_lineup", return_value=(LINEUP, None)), \
              patch.object(rollcall, "ask_voice", return_value={"channel": "Smoobies", "members": VOICE}), \
              patch.object(rollcall, "pictures", return_value={}):
             def post(where, payload):
                 raise TimeoutError("no answer")
-            rollcall.run(self.CFG, self.SCOPE, "t", [("heroic", [kill("Altar", MS(2026, 9, 18, 2, 15))])], NOW, TZ,
+            rollcall.run(self.CFG, self.SCOPE, "t", lambda since: [pull("Altar", MS(2026, 9, 18, 2, 15))], NOW, TZ,
                          team_name="", destination={}, publish=lambda k, b: "u", post=post)
         release.assert_not_called()
 
@@ -162,10 +197,10 @@ class RunTests(unittest.TestCase):
              patch.object(rollcall.store, "claim_rollcall", return_value=True), \
              patch.object(rollcall.store, "release_rollcall") as release, \
              patch.object(rollcall.store, "put_rollcall_pending", side_effect=lambda s, n, p, at: held.append((n, p))), \
-             patch.object(rollcall.wcl, "kill_lineup", return_value=(LINEUP, None)), \
+             patch.object(rollcall.wcl, "pull_lineup", return_value=(LINEUP, None)), \
              patch.object(rollcall, "ask_voice", return_value={"channel": "x", "members": VOICE}), \
              patch.object(rollcall, "pictures", return_value={}):
-            rollcall.run(self.CFG, scope, "t", [("heroic", [kill("Altar", MS(2026, 9, 18, 2, 15))])], NOW, TZ,
+            rollcall.run(self.CFG, scope, "t", lambda since: [pull("Altar", MS(2026, 9, 18, 2, 15))], NOW, TZ,
                          team_name="Meer's Raid", destination={"channel": "c"}, publish=lambda k, b: "https://raids.example/" + k,
                          post=lambda w, p: posts.append(p), review=lambda user, p: dms.append((user, p)))
         self.assertEqual((posts, len(held), dms[0][0]), ([], 1, "42"))
@@ -241,7 +276,7 @@ class CardTests(unittest.TestCase):
         self.assertEqual(([p["name"] for p in unclaimed], [m["name"] for m in outside]), (["Deathbrewst"], ["NotBrewst", "Justin"]))
 
     def test_the_public_wording_never_says_how_members_were_found(self):
-        for text in (rollcall_card.NOT_IN_DISCORD, rollcall_card.NOT_IN_KILL):
+        for text in (rollcall_card.NOT_IN_DISCORD, rollcall_card.NOT_IN_PULL):
             self.assertNotIn("voice", text.lower())
 
 

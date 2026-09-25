@@ -370,6 +370,19 @@ def fetch_kills(token, gid, cfg, since_ms, limit, difficulty=keys.HEROIC, max_pa
     return on_source_reports(on_raid_days(kills, cfg), cfg), rate
 
 
+def fetch_pulls(token, gid, cfg, since_ms):
+    """The roll call's trigger: boss pulls, kill or wipe, at this install's difficulties, from
+    its source on its raid days. The same filters as fetch_kills, so a roll call can never be
+    drawn from a report the announcer would refuse."""
+    if (cfg.get("wcl_report_title") or cfg.get("wcl_report_owner_id")) and not is_team(cfg):
+        return []
+    names = {wcl.DIFFICULTY_IDS[d]: d for d in difficulties(cfg)}
+    extra = {"user_id": int(cfg["wcl_user_id"])} if cfg.get("wcl_user_id") else {}
+    pulls, _rate = wcl.boss_pulls_since(token, gid, since_ms, **extra)
+    pulls = [{**p, "difficulty": names[p["difficulty"]]} for p in pulls if p["difficulty"] in names]
+    return on_source_reports(on_raid_days(pulls, cfg), cfg)
+
+
 def team_progress(cfg, profile, slug, difficulty):
     """(killed, total, realm_rank) as the card should print them.
 
@@ -1937,7 +1950,7 @@ def poll_one(event, cfg, scope, now, now_iso, started):
     # A hand-run roll call: `{"mode":"rollcall","team":...,"dry":true,"hours":72}` draws the
     # card for a past night and returns where it was published, claiming and posting nothing.
     if isinstance(event, dict) and str(event.get("mode") or "").lower() == "rollcall":
-        return {"ok": True, "rollcall": roll_call(cfg, scope, token, by_difficulty, now,
+        return {"ok": True, "rollcall": roll_call(cfg, scope, token, gid, now,
                                                   dry=bool(event.get("dry", True)),
                                                   hours=event.get("hours"))}
 
@@ -1991,6 +2004,12 @@ def poll_one(event, cfg, scope, now, now_iso, started):
         # profile this poll ALREADY fetched. Free here, and it keeps the slow path genuinely
         # exceptional rather than routine.
         refresh_snapshot(scope, cfg, profile, index, now_iso)
+        # A night that has only wiped so far has no kills in the window, and the roll call
+        # fires on the first real pull, not the first kill -- so it runs here too.
+        try:
+            roll_call(cfg, scope, token, gid, now)
+        except Exception as exc:                               # noqa: BLE001
+            log("rollcall_error", error=repr(exc))
         log("poll_idle", lookbackDays=LOOKBACK_DAYS, points=rate, reportsVisible=len(seen),
             ms=int((time.time() - started) * 1000))
         return {"ok": True, "kills": 0}
@@ -2021,7 +2040,7 @@ def poll_one(event, cfg, scope, now, now_iso, started):
     # After the announcements, so a first kill's own card always lands above its roll call,
     # and wrapped because attendance is never allowed to cost a kill announcement.
     try:
-        roll_call(cfg, scope, token, by_difficulty, now)
+        roll_call(cfg, scope, token, gid, now)
     except Exception as exc:                                   # noqa: BLE001
         log("rollcall_error", error=repr(exc))
 
@@ -2258,7 +2277,7 @@ def rollcall_click(body, cfg):
     return answer(f"Posted to <#{tcfg.get('channel_id')}>.")
 
 
-def roll_call(cfg, scope, token, by_difficulty, now, dry=False, hours=None):
+def roll_call(cfg, scope, token, gid, now, dry=False, hours=None):
     """rollcall.run with this install's name, channel and publisher filled in."""
     def publish(key, body):
         publish_bytes(cfg, key, body, "image/png")
@@ -2276,7 +2295,8 @@ def roll_call(cfg, scope, token, by_difficulty, now, dry=False, hours=None):
         return discord._post_json(f"{discord.CHANNEL_API}/{opened.message_id}/messages", payload,
                                   headers=headers, max_attempts=1)
 
-    return rollcall.run(cfg, scope, token, by_difficulty, now, ANNOUNCE_TZ,
+    return rollcall.run(cfg, scope, token, lambda since_ms: fetch_pulls(token, gid, cfg, since_ms),
+                        now, ANNOUNCE_TZ,
                         team_name=cfg.get("team_name") or "",
                         destination=None if dry else destination(cfg),
                         publish=publish, post=post, review=review, dry=dry,

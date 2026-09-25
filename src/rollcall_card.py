@@ -1,10 +1,10 @@
-"""The raid-night roll call, drawn: who was in the night's first kill, and who they are.
+"""The raid-night roll call, drawn: who was in the night's first real pull, and who they are.
 
 Attendance, not performance. One narrow list in the recap card's own markup -- the raid as
 Warcraft Logs recorded it, grouped tank / healer / damage, one person to a row and read the
 way you would say it: picture, Discord name, an arrow, the role glyph, the character in its
 class colour. Whatever could not be paired goes underneath in two short lists: characters in
-the kill with nobody beside them, and members who were around for the kill but had no
+the pull with nobody beside them, and members who were around for the pull but had no
 character in it.
 
 The card says "Discord" and nothing more specific. Where the member list comes from is the
@@ -15,8 +15,8 @@ Narrower than the recap card on purpose. That one is six leaderboards across; th
 of names, and at 640 px every row was mostly empty space that a phone then shrank.
 
 Bots cannot take screenshots, and a screenshot would not be evidence anyway: it shows whenever
-someone remembered to take it. This is drawn from the kill's own timestamp, so it is the same
-answer whether the poll noticed the kill in one minute or fourteen.
+someone remembered to take it. This is drawn from the pull's own timestamp, so it is the same
+answer whether the poll noticed the pull in one minute or fourteen.
 
 Pure drawing. The caller supplies everything, including each member's picture as bytes, so
 this module makes no network calls and a missing picture is a drawn circle, not a failure.
@@ -33,8 +33,8 @@ ROLES = (("tank", "Tanks"), ("healer", "Healers"), ("dps", "Damage"))
 WIDTH = 440                    # CSS px, against the recap card's 640
 ROW = 26
 ARROW = "→"
-NOT_IN_DISCORD = "In kill but not in Discord"
-NOT_IN_KILL = "In Discord but not in kill"
+NOT_IN_DISCORD = "In pull but not in Discord"
+NOT_IN_PULL = "In Discord but not in pull"
 
 
 def _panel(canvas, x, y, w, h, title, badge):
@@ -76,7 +76,7 @@ def _clean(name):
 
 def pair(lineup, members):
     """(rows, unclaimed, outside): every character with the member who plays it or None, the
-    characters nobody was paired with, and the members who had no character in the kill."""
+    characters nobody was paired with, and the members who had no character in the pull."""
     by_character = {id(m["character"]): m for m in members if m.get("character")}
     rows = [(p, by_character.get(id(p))) for p in lineup]
     return (rows, [p for p, m in rows if m is None],
@@ -99,7 +99,7 @@ def _chip_rows(canvas, labels, font, width):
 def render(team_name, boss, sub, lineup, members, pictures=None):
     """PNG bytes, or None.
 
-    `lineup` is wcl.kill_lineup's list. `members` is rollcall.assign's output: [{"id", "name",
+    `lineup` is wcl.pull_lineup's list. `members` is rollcall.assign's output: [{"id", "name",
     "character": the lineup row they played, or None}]. `pictures` maps member id to bytes.
     """
     try:
@@ -110,11 +110,11 @@ def render(team_name, boss, sub, lineup, members, pictures=None):
         pictures = pictures or {}
         rows, unclaimed, outside = pair(lineup, members)
         full = WIDTH - 2 * rc.PAD
-        labels = [f"{len(lineup)} in the kill"]
+        labels = [f"{len(lineup)} in the pull"]
         if outside:
-            labels.append(f"{len(outside)} in Discord, not in kill")
+            labels.append(f"{len(outside)} in Discord, not in pull")
         if unclaimed:
-            labels.append(f"{len(unclaimed)} in kill, not in Discord")
+            labels.append(f"{len(unclaimed)} in pull, not in Discord")
         measure_image = Image.new("RGB", (1, 1))
         measure = rc._Canvas(measure_image, ImageDraw.Draw(measure_image), {})
         chips = _chip_rows(measure, labels, measure.font("semibold", 12), WIDTH)
@@ -125,7 +125,7 @@ def render(team_name, boss, sub, lineup, members, pictures=None):
         heads = sum(1 for role, _t in ROLES if any(p["role"] == role for p in lineup))
         body = box(len(lineup) + heads)
         tails = [(title, people) for title, people in ((NOT_IN_DISCORD, unclaimed),
-                                                       (NOT_IN_KILL, outside)) if people]
+                                                       (NOT_IN_PULL, outside)) if people]
         head = 24 + 18 + 34 + 22 + 30 * len(chips) + 8
         height = (rc.TOPBAR + head + body + sum(rc.COL_GAP + box(len(p)) for _t, p in tails)
                   + rc.PAD)
@@ -142,7 +142,7 @@ def render(team_name, boss, sub, lineup, members, pictures=None):
                     "greyBot", lede, rc.MUTED)
 
         y = rc.TOPBAR + 24
-        kicker = " · ".join(s for s in ("ROLL CALL", (team_name or "").upper(), "FIRST KILL") if s)
+        kicker = " · ".join(s for s in ("ROLL CALL", (team_name or "").upper(), "FIRST PULL") if s)
         canvas.text(rc.PAD, y, kicker, canvas.font("regular", 12), rc.MUTED, spacing=2.5)
         y += 18
         h1 = canvas.font("bold", 26)
@@ -178,7 +178,7 @@ def render(team_name, boss, sub, lineup, members, pictures=None):
             return x + 20 + gap + canvas.width(text, font)
 
         left, edge = rc.PAD + 12, rc.PAD + full - 12
-        _panel(canvas, rc.PAD, y, full, body, "In the kill", str(len(lineup)))
+        _panel(canvas, rc.PAD, y, full, body, "In the pull", str(len(lineup)))
         ry = y + rc.COL_HEAD + 8
         for role, title in ROLES:
             group = [(p, m) for p, m in rows if p["role"] == role]
@@ -198,7 +198,7 @@ def render(team_name, boss, sub, lineup, members, pictures=None):
                 character(p, x, ry, edge)
                 ry += ROW
         if not lineup:
-            canvas.text(left, ry + 7, "The log lists nobody for this kill.", small, rc.MUTED)
+            canvas.text(left, ry + 7, "The log lists nobody for this pull.", small, rc.MUTED)
 
         ty = y + body
         for title, people in tails:
@@ -206,7 +206,7 @@ def render(team_name, boss, sub, lineup, members, pictures=None):
             _panel(canvas, rc.PAD, ty, full, box(len(people)), title, str(len(people)))
             for i, person in enumerate(people):
                 row_y = ty + rc.COL_HEAD + 8 + i * ROW
-                if title == NOT_IN_KILL:
+                if title == NOT_IN_PULL:
                     member(person, left, row_y, edge, font=name_font)
                 else:
                     character(person, left, row_y, edge)

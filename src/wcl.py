@@ -138,6 +138,14 @@ query($guildID: Int!, $start: Float!, $limit: Int!, $difficulty: Int!, $page: In
 USER_REPORTS_Q = REPORTS_Q.replace("$guildID: Int!", "$userID: Int!").replace(
     "guildID: $guildID", "userID: $userID")
 
+# The roll call's own pair: every BOSS pull, kill or wipe, at any difficulty. A night can
+# open on an hour of wipes, and the roll call is about who turned up, not who got a kill.
+# Derived from the announcer's documents so the report fields can never drift apart.
+PULLS_Q = REPORTS_Q.replace(", $difficulty: Int!", "").replace(
+    "fights(killType: Kills, difficulty: $difficulty)", "fights(killType: Encounters)")
+USER_PULLS_Q = USER_REPORTS_Q.replace(", $difficulty: Int!", "").replace(
+    "fights(killType: Kills, difficulty: $difficulty)", "fights(killType: Encounters)")
+
 
 def rate_limit(data):
     """Pull rateLimitData out of any response that carried it. Never raises -- a missing
@@ -225,6 +233,38 @@ def heroic_kills_since(token, guild_id, since_ms, limit=12, difficulty=HEROIC,
             })
     kills.sort(key=lambda k: k["killedAtMs"])
     return kills, rate
+
+
+def boss_pulls_since(token, guild_id, since_ms, limit=4, user_id=None):
+    """Every boss pull, kill or wipe, in the source's reports since `since_ms`: one small
+    page, because the roll call only ever looks at tonight. `difficulty` is WCL's id, and
+    fight times are made absolute. Ascending by pull start."""
+    who = ({"userID": int(user_id)} if user_id else {"guildID": int(guild_id)})
+    data = query(token, USER_PULLS_Q if user_id else PULLS_Q,
+                 {**who, "start": float(since_ms), "limit": int(limit), "page": 1})
+    pulls = []
+    for rep in (((data.get("reportData") or {}).get("reports") or {}).get("data")) or []:
+        base = int(rep.get("startTime") or 0)
+        zone = rep.get("zone") or {}
+        for f in rep.get("fights") or []:
+            if not f.get("encounterID") or f.get("startTime") is None or f.get("endTime") is None:
+                continue
+            pulls.append({
+                "encounterID": int(f["encounterID"]),
+                "name": f.get("name") or f"Encounter {f['encounterID']}",
+                "difficulty": int(f.get("difficulty") or 0),
+                "kill": bool(f.get("kill")),
+                "fightID": int(f["id"]),
+                "zoneName": zone.get("name") or "",
+                "reportCode": rep.get("code"),
+                "reportTitle": rep.get("title") or "",
+                "reportOwnerID": int(((rep.get("owner") or {}).get("id")) or 0),
+                "reportStartMs": base,
+                "startedAtMs": base + int(f["startTime"]),
+                "endedAtMs": base + int(f["endTime"]),
+            })
+    pulls.sort(key=lambda p: p["startedAtMs"])
+    return pulls, rate_limit(data)
 
 
 # ------------------------------------------------------------------ recap queries
@@ -454,8 +494,8 @@ def kill_participants(token, code, encounter_id, difficulty=HEROIC):
 # ------------------------------------------------------------------ roll call
 #
 # playerDetails is the only place a report says what ROLE each raider filled, and it wants
-# fight IDs, which a kill from REPORTS_Q does not carry. So: the kill fights first (the query
-# the first-kill roster already uses), then the details for the earliest of them.
+# fight IDs. A pull from boss_pulls_since carries its own, so the roll call asks for exactly
+# that fight.
 LINEUP_Q = """
 query($code: String!, $ids: [Int]!) {
   %s
@@ -472,16 +512,11 @@ def player_details(token, code, fight_ids):
     return node or {}, rate_limit(data)
 
 
-def kill_lineup(token, code, encounter_id, difficulty=HEROIC):
-    """The raid as it stood for one kill: [{"name", "class", "server", "role"}], tanks then
-    healers then damage, in the order the report lists them. [] when the report has no such
-    kill, which is a late-arriving log rather than an error."""
-    data = query(token, KILL_ROSTER_Q, {"code": code, "encounterID": int(encounter_id),
-                                        "difficulty": int(difficulty)})
-    fights = sorted(_report(data).get("fights") or [], key=lambda f: f.get("startTime") or 0)
-    if not fights:
-        return [], rate_limit(data)
-    details, rate = player_details(token, code, [fights[0]["id"]])
+def pull_lineup(token, code, fight_id):
+    """The raid as it stood for one boss pull, kill or wipe: [{"name", "class", "server",
+    "role"}], tanks then healers then damage, in the order the report lists them. [] when the
+    report does not list the pull's players yet, which is a late-arriving log, not an error."""
+    details, rate = player_details(token, code, [fight_id])
     people = []
     for role, group in (("tank", "tanks"), ("healer", "healers"), ("dps", "dps")):
         for p in details.get(group) or []:
