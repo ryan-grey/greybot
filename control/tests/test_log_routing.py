@@ -19,22 +19,40 @@ def eastern(*parts):
 
 
 class WindowTests(unittest.TestCase):
-    def test_progression_nights_and_their_day_of_grace_stay(self):
+    def test_progression_nights_and_one_hour_of_leeway_stay(self):
         self.assertTrue(r.prog_night(eastern(2026, 9, 15, 22, 30)))   # Tuesday raid.
         self.assertTrue(r.prog_night(eastern(2026, 9, 16, 0, 45)))    # Past midnight, same night.
-        self.assertTrue(r.prog_night(eastern(2026, 9, 16, 20, 0)))    # Inside the day of grace.
+        self.assertFalse(r.prog_night(eastern(2026, 9, 16, 20, 0)))   # No day-long grace.
         self.assertTrue(r.prog_night(eastern(2026, 9, 17, 21, 2)))    # Thursday raid.
         self.assertFalse(r.prog_night(eastern(2026, 9, 17, 12, 0)))   # Tuesday's grace expired.
         self.assertFalse(r.prog_night(eastern(2026, 9, 19, 0, 30)))   # Thursday's expires at Saturday.
         self.assertFalse(r.prog_night(eastern(2026, 9, 14, 20, 0)))   # Monday is nobody's raid night.
 
-    def test_only_saturday_reports_outside_the_grace_move(self):
+    def test_every_day_outside_progression_hours_moves(self):
         self.assertTrue(r.misrouted(eastern(2026, 9, 19, 21, 30)))    # Saturday night.
         self.assertTrue(r.misrouted(eastern(2026, 9, 19, 14, 32)))    # Saturday afternoon.
         self.assertTrue(r.misrouted(eastern(2026, 9, 20, 1, 15)))     # Ran past midnight.
-        self.assertFalse(r.misrouted(eastern(2026, 9, 20, 9, 0)))     # Sunday proper.
+        self.assertTrue(r.misrouted(eastern(2026, 9, 20, 9, 0)))      # Sunday proper.
         self.assertFalse(r.misrouted(eastern(2026, 9, 15, 22, 30)))   # Tuesday progression.
-        self.assertFalse(r.misrouted(eastern(2026, 9, 14, 20, 0)))    # Monday alt run.
+        self.assertTrue(r.misrouted(eastern(2026, 9, 14, 20, 0)))     # Monday alt run.
+
+    def test_exact_boundaries_on_both_raid_nights_in_summer_and_winter(self):
+        for month, days in ((9, (15, 17)), (12, (15, 17))):
+            for day in days:
+                for offset, hour, minute, second, stays in (
+                        (0, 19, 59, 59, False), (0, 20, 0, 0, True),
+                        (0, 23, 59, 59, True), (1, 0, 0, 0, True),
+                        (1, 0, 59, 59, True), (1, 1, 0, 0, False)):
+                    when = eastern(2026, month, day + offset, hour, minute, second)
+                    with self.subTest(when=when):
+                        self.assertEqual(r.prog_night(when), stays)
+                        self.assertEqual(r.misrouted(when), not stays)
+
+    def test_utc_is_converted_to_eastern(self):
+        self.assertTrue(r.prog_night(datetime.fromisoformat('2026-09-16T04:59:59+00:00')))
+        self.assertFalse(r.prog_night(datetime.fromisoformat('2026-09-16T05:00:00+00:00')))
+        self.assertTrue(r.prog_night(datetime.fromisoformat('2026-12-16T05:59:59+00:00')))
+        self.assertFalse(r.prog_night(datetime.fromisoformat('2026-12-16T06:00:00+00:00')))
 
 
 class RouteTests(unittest.TestCase):
@@ -51,7 +69,7 @@ class RouteTests(unittest.TestCase):
         with self.store.connection() as db:
             return [dict(row) for row in db.execute('SELECT message,state,target FROM log_route_delivery')]
 
-    def test_only_saturday_integration_posts_in_that_channel_are_recorded(self):
+    def test_members_and_webhooks_outside_hours_in_that_channel_are_recorded(self):
         for packet in (self.packet,
                        {**self.packet, 'd': {**self.packet['d'], 'timestamp': '2026-09-15T22:30:00-04:00'}},
                        {**self.packet, 'd': {**self.packet['d'], 'id': '10', 'webhook_id': None}},
@@ -59,7 +77,24 @@ class RouteTests(unittest.TestCase):
                        {**self.packet, 'd': {**self.packet['d'], 'id': '12', 'guild_id': '99'}},
                        {**self.packet, 't': 'MESSAGE_UPDATE'}):
             r.observe(self.cfg, self.store, packet)
-        self.assertEqual([row['message'] for row in self.pending()], ['9'])
+        self.assertEqual({row['message'] for row in self.pending()}, {'9', '10'})
+
+    def test_weekday_member_link_is_moved_and_content_preserved(self):
+        packet = {**self.packet, 'd': {**self.packet['d'], 'webhook_id': None,
+                  'timestamp': '2026-09-14T22:30:00-04:00'}}
+        original = {'id': '9', 'content': 'Our run: ' + EMBED['url'], 'embeds': []}
+        calls = []
+        api = self.api(calls, original=original)
+        r.observe(self.cfg, self.store, packet)
+        asyncio.run(r.tick(self.cfg, self.store, api))
+        self.assertEqual(calls[2][2]['content'], original['content'])
+        self.assertEqual(calls[2][2]['allowed_mentions'], {'parse': []})
+        self.assertEqual(self.pending()[0]['state'], 'moved')
+
+    def test_missing_or_invalid_timestamp_is_ignored(self):
+        for stamp in (None, '', 'not-a-date'):
+            r.observe(self.cfg, self.store, {**self.packet, 'd': {**self.packet['d'], 'timestamp': stamp}})
+        self.assertEqual(self.pending(), [])
 
     def test_disabled_routing_records_nothing(self):
         for cfg in (SimpleNamespace(guild_id='1', enforce=False, prog_logs_channel_id='2', sat_logs_channel_id='3'),
@@ -67,8 +102,9 @@ class RouteTests(unittest.TestCase):
             r.observe(cfg, self.store, self.packet)
         self.assertEqual(self.pending(), [])
 
-    def api(self, calls, saturday=(), fail=''):
-        original = {'id': '9', 'content': '', 'embeds': [EMBED], 'webhook_id': '7'}
+    def api(self, calls, saturday=(), fail='', original=None):
+        if original is None:
+            original = {'id': '9', 'content': '', 'embeds': [EMBED], 'webhook_id': '7'}
 
         class API:
             async def request(self, method, path, **kwargs):

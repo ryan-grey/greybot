@@ -193,20 +193,22 @@ The Warcraft Logs integration posts every report its progression guild sees into
 progression log channel, so a progression raider who starts a report for the Saturday team
 puts it in the wrong channel. With both `GREYBOT_PROG_LOGS_CHANNEL_ID` and
 `GREYBOT_SAT_LOGS_CHANNEL_ID` set and `GREYBOT_ENFORCE=1`, `log_routing` moves those
-reports. A post qualifies only when the integration's webhook wrote it, it carries a
-`warcraftlogs.com/reports/` link, and its Eastern timestamp falls on a Saturday — or before
-6am Sunday, for a raid that ran past midnight — and more than a day after a progression
-night ended. Progression raids Tuesday and Thursday 9pm to midnight, and a report started
-within 24 hours of one of those windows stays where it is, so a late Wednesday upload is
-never treated as somebody else's raid.
+reports from members, bots, and webhooks. A post qualifies when it carries a
+`warcraftlogs.com/reports/` link and its posting timestamp is outside Tuesday and
+Thursday 9pm to midnight Eastern (America/New_York), with one hour of leeway
+on either side. Posts from 8pm Tuesday through just before 1am Wednesday, and
+8pm Thursday through just before 1am Friday, stay in progression logs. Everything
+outside those windows goes to Saturday logs.
+The rule uses when the message was posted, not the report's raid date, and applies
+to new messages after activation; it does not sweep old channel history.
 
 The report is republished in the Saturday channel first and the original deleted second,
 carrying the integration's own embed across with a footer saying where it came from.
 `log_route_delivery` settles each message exactly once and retries nothing: `moved` is the
 complete result, `duplicated` means the copy landed but the original is still there to
 remove by hand, `unknown` means a write whose outcome Discord never confirmed, and `gone`
-or `skipped` mean there was nothing to move. Members posting links themselves are untouched,
-and nothing is moved out of the Saturday channel.
+or `skipped` mean there was nothing to move. Ordinary conversation without a report link
+stays put, and nothing is moved out of the Saturday channel.
 
 ## Direct messages
 

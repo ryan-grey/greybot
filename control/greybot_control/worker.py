@@ -268,7 +268,7 @@ async def run():
                 try:
                     await log_routing.tick(cfg, store, api)
                 except Exception:
-                    log.error("Saturday log routing failed; inspect log_route_delivery for uncertain moves")
+                    log.error("Log routing failed; inspect log_route_delivery for uncertain moves")
                 try:
                     await featured.tick(cfg, store, api)
                     await featured.marks_tick(cfg, store, api)

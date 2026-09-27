@@ -1,4 +1,4 @@
-"""Saturday Warcraft Logs uploads belong to the Saturday team, not progression.
+"""Warcraft Logs posts outside progression raid hours belong in Saturday logs.
 
 The Warcraft Logs integration posts every report its guild sees into the
 progression team's log channel, including the ones a progression raider starts
@@ -17,13 +17,12 @@ from .discord_api import Denied
 
 ZONE = ZoneInfo('America/New_York')
 
-# Progression raids Tuesday and Thursday, 9pm to midnight Eastern. A report
-# started within a day of one of those nights is still that night's work;
-# anything later is somebody raiding with a different team.
+# Use the post's timestamp: progression raids Tuesday and Thursday,
+# 9pm to midnight Eastern, with one hour of leeway on either side.
 PROG_NIGHTS = (1, 3)  # Monday is 0.
 PROG_START = clock(21)
 PROG_HOURS = 3
-PROG_GRACE_HOURS = 24
+PROG_LEEWAY_HOURS = 1
 
 REPORT = re.compile(r'https?://(?:www\.)?warcraftlogs\.com/reports/[A-Za-z0-9]+')
 
@@ -43,24 +42,21 @@ def install(store):
 
 def prog_night(when):
     """True while a report still counts as the progression team's raid night."""
-    for days in range(PROG_GRACE_HOURS // 24 + 2):
+    when = when.astimezone(ZONE)
+    for days in (0, 1):
         day = (when - timedelta(days=days)).date()
         if day.weekday() not in PROG_NIGHTS:
             continue
         start = datetime.combine(day, PROG_START, ZONE)
-        if start <= when < start + timedelta(hours=PROG_HOURS + PROG_GRACE_HOURS):
+        if (start - timedelta(hours=PROG_LEEWAY_HOURS)
+                <= when < start + timedelta(hours=PROG_HOURS + PROG_LEEWAY_HOURS)):
             return True
     return False
 
 
-def saturday_night(when):
-    """The Saturday team's raid, which can run past midnight into Sunday."""
-    return when.weekday() == 5 or (when.weekday() == 6 and when.hour < 6)
-
-
 def misrouted(when):
-    """A Saturday report far enough from a progression night to not be one."""
-    return saturday_night(when) and not prog_night(when)
+    """Any report posted outside Tuesday/Thursday progression raid hours."""
+    return not prog_night(when)
 
 
 def report_link(message):
@@ -90,14 +86,14 @@ def republish(message, link):
 
 
 def observe(cfg, store, packet):
-    """Record an integration post that landed in the progression channel on a Saturday."""
+    """Record a post outside progression hours, from a member, bot, or webhook."""
     if not routing_enabled(cfg) or packet.get('t') != 'MESSAGE_CREATE':
         return
     data = packet.get('d') or {}
-    # Only the integration's own posts move. A raider talking in the channel stays put.
+    # tick checks for a report link before publishing or deleting anything.
     if (str(data.get('guild_id') or '') != cfg.guild_id
             or str(data.get('channel_id') or '') != cfg.prog_logs_channel_id
-            or not data.get('webhook_id') or not data.get('id')):
+            or not data.get('id')):
         return
     try:
         when = datetime.fromisoformat(str(data['timestamp'])).astimezone(ZONE)
@@ -166,7 +162,7 @@ async def tick(cfg, store, api):
     settle('published', target)
     try:
         await api.request('DELETE', f'/channels/{cfg.prog_logs_channel_id}/messages/{message}',
-                          reason='Saturday raid report moved to the Saturday team log channel')
+                          reason='Report posted outside progression raid hours moved to Saturday logs')
     except Exception:
         # The report is safe in both channels; removing the original is a manual cleanup.
         settle('duplicated', target)
