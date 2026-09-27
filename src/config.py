@@ -32,6 +32,7 @@ TTL_SECONDS = float(os.environ.get("CONFIG_TTL_SECONDS", "300"))
 
 WCL_CLIENT_ID = f"{PREFIX}/wcl/client_id"
 WCL_CLIENT_SECRET = f"{PREFIX}/wcl/client_secret"
+WCL_USER_AUTH = f"{PREFIX}/wcl/user_auth"
 DISCORD_WEBHOOK = f"{PREFIX}/discord/webhook_url"
 DISCORD_ROLE_ID = f"{PREFIX}/discord/prog_role_id"
 GUILD_NAME = f"{PREFIX}/guild/name"
@@ -214,11 +215,26 @@ def load(now=None):
         print(json.dumps({"event": "optional_config_unavailable", "error": repr(exc),
                           "names": [VAULT_CHANNEL]}))
 
+    # Separate grant: rolling this feature out must not disable other optional settings.
+    user_auth = None
+    try:
+        opt = ssm.get_parameters(Names=[WCL_USER_AUTH], WithDecryption=True)
+        raw = next((p["Value"] for p in opt.get("Parameters", []) if p["Name"] == WCL_USER_AUTH), "")
+        if raw:
+            user_auth = json.loads(raw)
+            if not isinstance(user_auth, dict):
+                raise ValueError("invalid account grant")
+    except Exception:
+        # Never log JSON parsing errors: they may include token material.
+        print(json.dumps({"event": "wcl_user_auth_unavailable"}))
+        user_auth = None
+
     _cache.clear()
     _fetched_at["t"] = now
     _cache.update({
         "wcl_client_id": got[WCL_CLIENT_ID].strip(),
         "wcl_client_secret": got[WCL_CLIENT_SECRET].strip(),
+        "wcl_user_auth": user_auth,
         "webhook": got.get(DISCORD_WEBHOOK, "").strip(),
         "role_id": got[DISCORD_ROLE_ID].strip(),
         "guild_name": got[GUILD_NAME].strip(),
@@ -262,6 +278,7 @@ def redacted(cfg):
     return {"guild": cfg["guild_name"], "realm": cfg["guild_realm"],
             "region": cfg["guild_region"], "roleId": cfg["role_id"],
             "wclClientId": cfg["wcl_client_id"], "webhookSet": bool(cfg["webhook"]),
+            "wclUserConnected": bool(cfg.get("wcl_user_auth")),
             "bossArtEnabled": bool(cfg.get("blizzard_client_id")
                                    and cfg.get("blizzard_client_secret")),
             "interactionsEnabled": bool(cfg.get("public_key")),

@@ -1631,7 +1631,8 @@ def backfill(spec, cfg, now_iso):
     if not slugs:
         raise RuntimeError("backfill needs 'slug' or 'slugs'")
 
-    token = wcl.get_token(tcfg["wcl_client_id"], tcfg["wcl_client_secret"])
+    token = wcl.get_token(tcfg["wcl_client_id"], tcfg["wcl_client_secret"],
+                          user_auth=tcfg.get("wcl_user_auth"))
     gid, _rate = guild_id(token, tcfg)
     profile = raiderio.guild_profile(tcfg["guild_region"], tcfg["guild_realm"],
                                      tcfg["guild_name"])
@@ -1894,7 +1895,8 @@ def poll_one(event, cfg, scope, now, now_iso, started):
         except Exception as exc:                                   # noqa: BLE001
             log("health_check_error", error=repr(exc))
 
-    token = wcl.get_token(cfg["wcl_client_id"], cfg["wcl_client_secret"])
+    token = wcl.get_token(cfg["wcl_client_id"], cfg["wcl_client_secret"],
+                          user_auth=cfg.get("wcl_user_auth"))
 
     gid, rate = guild_id(token, cfg)
 
@@ -2142,7 +2144,8 @@ def vault_week(event, cfg, now):
 
     # Raid kills from the logs: the guild's reports and every team that logs under a
     # personal account, deduplicated by report.
-    token = wcl.get_token(cfg["wcl_client_id"], cfg["wcl_client_secret"])
+    token = wcl.get_token(cfg["wcl_client_id"], cfg["wcl_client_secret"],
+                          user_auth=cfg.get("wcl_user_auth"))
     gid, _rate = guild_id(token, cfg)
     lo, hi = start.timestamp() * 1000, end.timestamp() * 1000
     listed = wcl.reports_in_window(token, gid, lo, hi, limit=100)[0]
@@ -2901,6 +2904,14 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     # A team's page lives under its slug. Two teams raid the same Tuesday, and one night
     # key for both would have the second recap overwrite the first's page.
     page_path = f"{scope.team}/{night_key}" if scope.team else night_key
+    # A user grant can read private/unlisted reports. Their recap must stay in
+    # the configured Discord channel, not the publicly readable recap bucket.
+    nonpublic = not wcl.reports_are_public(token, [
+        {"visibility": c["detail"].get("visibility") or c["meta"].get("visibility")}
+        for c in chosen])
+    if nonpublic:
+        cfg = {**cfg, "recap_page_url": "", "recap_page_bucket": ""}
+        log("recap_private_source", note="public recap page and image publishing disabled")
     page_url = f"{cfg['recap_page_url']}/{page_path}/" if cfg.get("recap_page_url") else None
     page_html = recap_page.render(
         who, tier["label"], night_text,
@@ -2928,6 +2939,17 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     # put, a dry run -- means the embed carries the six fields itself.
     card_url = recap_card_url(cfg, page_path, summary, who, night_text, tier["label"],
                               diff_label, dry=dry)
+    attachment = None
+    if nonpublic:
+        try:
+            png = recap_card.render(summary, guild_name=who, night_text=night_text,
+                                    raid_name=tier["label"], difficulty=diff_label,
+                                    raiders=summary.get("raiders"))
+            if png:
+                attachment = ("recap.png", png)
+                card_url = "attachment://recap.png"
+        except Exception:
+            log("recap_private_card_failed", note="using the Discord text summary")
     payload = discord.recap_embed(
         who, tier["label"], night_text, summary,
         report_url=report_url(earliest["meta"]["code"]), iso_ts=_iso(_at(earliest["base"])),
@@ -2957,7 +2979,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
                 "lowParseWouldSend": bool(grey_payload and cfg.get("low_parse_dm"))}
 
     try:
-        sent = discord.post_to(destination(cfg), payload)
+        sent = discord.post_to(destination(cfg), payload, **({"attachment": attachment} if attachment else {}))
     except discord.DiscordError as exc:
         # Hand the night back so the next run retries it, exactly as a failed kill
         # announcement hands the boss back.

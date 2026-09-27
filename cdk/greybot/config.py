@@ -58,6 +58,7 @@ class StageConfig:
     ssm_leaves: tuple = field(default=(
         "wcl/client_id",
         "wcl/client_secret",
+        "wcl/user_auth",
         "discord/webhook_url",
         "discord/prog_role_id",
         "discord/bot_token",

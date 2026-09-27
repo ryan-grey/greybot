@@ -21,6 +21,7 @@ import urllib.request
 
 TOKEN_URL = "https://www.warcraftlogs.com/oauth/token"
 API_URL = "https://www.warcraftlogs.com/api/v2/client"
+USER_API_URL = "https://www.warcraftlogs.com/api/v2/user"
 
 # WCL difficulty ids for retail raids. Heroic is 4; the others are here so the constant
 # is self-documenting rather than a bare 4 three files away from its meaning.
@@ -31,6 +32,19 @@ _token = {"value": None, "expires_at": 0.0}
 
 class WCLError(RuntimeError):
     pass
+
+
+class UserToken(str):
+    """Mark an operator-authorized bearer without changing existing query callers."""
+
+    def __repr__(self):
+        return "<Warcraft Logs user token>"
+
+
+def reports_are_public(token, reports):
+    """Unknown visibility is private when queries can see operator-only data."""
+    default = "unknown" if isinstance(token, UserToken) else "public"
+    return all((report.get("visibility") or default) == "public" for report in reports)
 
 
 def _post(url, data, headers, timeout=20):
@@ -45,7 +59,7 @@ def _post(url, data, headers, timeout=20):
         raise WCLError(f"network error calling {urllib.parse.urlparse(url).path}: {exc.reason}") from exc
 
 
-def get_token(client_id, client_secret, now=None):
+def get_token(client_id, client_secret, now=None, user_auth=None):
     """Client-credentials token, cached in module scope across warm invocations.
 
     WCL issues these with a very long life, so re-minting one on every poll is pure waste.
@@ -53,6 +67,17 @@ def get_token(client_id, client_secret, now=None):
     later; expiring in between would surface as a confusing 401 on the real query.
     """
     now = now if now is not None else time.time()
+    if user_auth is not None:
+        try:
+            valid = (user_auth.get("client_id") == client_id
+                     and isinstance(user_auth.get("access_token"), str)
+                     and bool(user_auth["access_token"])
+                     and float(user_auth["expires_at"]) > now + 60)
+        except (TypeError, ValueError, KeyError):
+            valid = False
+        if not valid:
+            raise WCLError("Warcraft Logs account grant expired or invalid; reconnect or renew it")
+        return UserToken(user_auth["access_token"])
     if _token["value"] and now < _token["expires_at"] - 60:
         return _token["value"]
 
@@ -73,7 +98,7 @@ def get_token(client_id, client_secret, now=None):
 
 def query(token, document, variables=None):
     body = json.dumps({"query": document, "variables": variables or {}}).encode()
-    payload = _post(API_URL, body, {
+    payload = _post(USER_API_URL if isinstance(token, UserToken) else API_URL, body, {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     })
@@ -291,7 +316,7 @@ query($guildID: Int!, $start: Float!, $end: Float!, $limit: Int!) {
   %s
   reportData {
     reports(guildID: $guildID, startTime: $start, endTime: $end, limit: $limit) {
-      data { code title startTime endTime guildTag { id name } zone { id name }
+      data { code title startTime endTime visibility guildTag { id name } zone { id name }
              owner { id name } }
     }
   }
@@ -307,7 +332,7 @@ query($code: String!) {
   %s
   reportData {
     report(code: $code) {
-      code title startTime endTime
+      code title startTime endTime visibility
       guild { id name } guildTag { id name } zone { id name }
       masterData { actors(type: "Player") { id name server type subType } }
       fights(killType: Encounters) {

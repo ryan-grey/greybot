@@ -709,6 +709,20 @@ every transition twice.
 
 ### The third team: Saturday Raid
 
+Private guild reports can be read after the operator connects their Warcraft Logs
+account using `scripts/connect-wcl.py --expected-user <account-name> --verify-report <code>`
+with `AWS_PROFILE=infra`. Add `http://127.0.0.1:8769/callback` to the existing client's
+redirect URLs, then open the helper's local start URL in Chrome. It checks OAuth state,
+uses PKCE, verifies both the account and report, and stores the grant only in encrypted
+SSM `/greybot/wcl/user_auth`. It never prints access or refresh tokens. The runtime has
+read-only access to this parameter and uses `/api/v2/user` for the connected account.
+Without a connection, the existing public API remains in use.
+
+The helper reports the grant's expiry; renew it with the same command plus `--refresh`,
+or reconnect in Chrome if authorization was revoked. An expired grant raises an explicit
+error rather than silently treating private raids as absent. Private and unlisted recap
+sources produce a Discord attachment, with no public recap webpage or image upload.
+
 **Saturday Raid** posts to `#satbot` (channel `1546012918825492510`), announces Normal and
 Heroic first kills, and its clear cards ping **Saturday Raiders**. Registered 2026-09-06 as
 `TENANT#946663011991556117#saturday-raid`.
