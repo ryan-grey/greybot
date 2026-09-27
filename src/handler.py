@@ -2904,12 +2904,12 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     # A team's page lives under its slug. Two teams raid the same Tuesday, and one night
     # key for both would have the second recap overwrite the first's page.
     page_path = f"{scope.team}/{night_key}" if scope.team else night_key
-    # A user grant can read private/unlisted reports. Their recap must stay in
-    # the configured Discord channel, not the publicly readable recap bucket.
-    nonpublic = not wcl.reports_are_public(token, [
+    # Private sources stay in Discord unless this install explicitly authorizes
+    # publishing its recaps. The authorization does not change WCL visibility.
+    discord_only = not wcl.may_publish_recap(token, [
         {"visibility": c["detail"].get("visibility") or c["meta"].get("visibility")}
-        for c in chosen])
-    if nonpublic:
+        for c in chosen], allow_private=cfg.get("publish_private_recaps", False))
+    if discord_only:
         cfg = {**cfg, "recap_page_url": "", "recap_page_bucket": ""}
         log("recap_private_source", note="public recap page and image publishing disabled")
     page_url = f"{cfg['recap_page_url']}/{page_path}/" if cfg.get("recap_page_url") else None
@@ -2940,7 +2940,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     card_url = recap_card_url(cfg, page_path, summary, who, night_text, tier["label"],
                               diff_label, dry=dry)
     attachment = None
-    if nonpublic:
+    if discord_only:
         try:
             png = recap_card.render(summary, guild_name=who, night_text=night_text,
                                     raid_name=tier["label"], difficulty=diff_label,

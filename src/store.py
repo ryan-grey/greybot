@@ -964,6 +964,7 @@ def get_config(tenant):
         "active_raid_slug": text("activeRaidSlug"),
         "raid_days": text("raidDays"),
         "difficulties": text("difficulties"),
+        "publish_private_recaps": text("publishPrivateRecaps").lower() == "true",
     }
 
 
@@ -1000,6 +1001,7 @@ def put_config(tenant, region, realm, name, channel_id, now_iso,
             "preserveProgRecap": _s(str(team.get("preserve_prog_recap") or "")),
             "suppressExistingAotc": _s(str(team.get("suppress_existing_aotc") or "")),
             "activeRaidSlug": _s(str(team.get("active_raid_slug") or "")),
+            "publishPrivateRecaps": _s("true" if team.get("publish_private_recaps") is True else "false"),
             "raidDays": _s(team.get("raid_days") or ""),
             "difficulties": _s(team.get("difficulties") or keys.HEROIC)})
     ddb.put_item(TableName=TABLE, Item=item)

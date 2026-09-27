@@ -721,7 +721,11 @@ Without a connection, the existing public API remains in use.
 The helper reports the grant's expiry; renew it with the same command plus `--refresh`,
 or reconnect in Chrome if authorization was revoked. An expired grant raises an explicit
 error rather than silently treating private raids as absent. Private and unlisted recap
-sources produce a Discord attachment, with no public recap webpage or image upload.
+sources default to a Discord attachment, with no public recap webpage or image upload.
+An install may explicitly opt into public recap pages and images with its CONFIG
+`publishPrivateRecaps` string set to `true`; this does not change the source report's
+Warcraft Logs visibility. Saturday Raid has this enabled so its posts retain the
+full recap link on raids.ryangrey.dev even when that night's logs are private.
 
 **Saturday Raid** posts to `#satbot` (channel `1546012918825492510`), announces Normal and
 Heroic first kills, and its clear cards ping **Saturday Raiders**. Registered 2026-09-06 as

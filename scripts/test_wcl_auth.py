@@ -53,6 +53,15 @@ class UserGrantTests(unittest.TestCase):
         self.assertIn("visibility", wcl.NIGHT_REPORTS_Q)
         self.assertIn("visibility", wcl.USER_NIGHT_REPORTS_Q)
 
+    def test_private_recap_publication_requires_explicit_opt_in(self):
+        token = wcl.UserToken("test-user-token")
+        reports = [{"visibility": "private"}]
+        self.assertFalse(wcl.may_publish_recap(token, reports))
+        for value in (False, None, "false", "true", 1):
+            self.assertFalse(wcl.may_publish_recap(token, reports, allow_private=value))
+        self.assertTrue(wcl.may_publish_recap(token, reports, allow_private=True))
+        self.assertTrue(wcl.may_publish_recap(token, [{"visibility": "public"}]))
+
 
 if __name__ == "__main__":
     unittest.main()

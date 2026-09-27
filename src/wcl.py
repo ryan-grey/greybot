@@ -47,6 +47,11 @@ def reports_are_public(token, reports):
     return all((report.get("visibility") or default) == "public" for report in reports)
 
 
+def may_publish_recap(token, reports, allow_private=False):
+    """An explicit install-level opt-in may publish recaps from private logs."""
+    return allow_private is True or reports_are_public(token, reports)
+
+
 def _post(url, data, headers, timeout=20):
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
