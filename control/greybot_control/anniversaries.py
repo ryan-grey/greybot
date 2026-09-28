@@ -43,7 +43,7 @@ def post(guild, member, years):
         'content': f"🎉 Happy server anniversary, <@{profile['id']}>!",
         'allowed_mentions': {'parse': [], 'users': [profile['id']]},
         'embeds': [{'author': {'name': profile['name'], 'icon_url': profile['avatar_url']},
-                    'title': f'🎂 {years} {unit} in the guild!',
+                    'title': f'🎂 {years} {unit} in the server!',
                     'description': f'Thanks for being part of our community for {years} {unit}!',
                     'color': 0x4493F8, 'thumbnail': {'url': profile['avatar_url']},
                     'footer': {'text': 'greyBot · Membership anniversary'}}],
