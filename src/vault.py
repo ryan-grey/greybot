@@ -18,16 +18,14 @@ WHAT COUNTS. The vault's own rules, restricted to the two rows the raid team car
   Mythic+  completed keystone runs; 1 / 4 / 8 fill 1 / 2 / 3, and a slot is worth the level
            of the Nth-best run -- so a +10 slot is filled when that run was +10 or higher.
 
-A raider is flagged when fewer than two Mythic+ slots reached +10, i.e. fewer than four runs
-at +10 or above. Only flagged raiders get the Discord user -> character line on the card;
-everyone else is shown by character alone.
+A raider needs verification when fewer than two Mythic+ slots are evidenced at +10.
+Public run data is a lower bound, never proof that the raider missed the requirement.
 
 WHERE THE NUMBERS COME FROM, and what each misses:
 
-  Mythic+  Raider.IO's weekly-highest-level runs (up to ten per character, which covers the
-           eighth-best run the third slot needs), filtered to the reset window by completion
-           time so a week Raider.IO has not rolled over yet cannot leak in. Raider.IO learns
-           runs from Blizzard and from its own crawls; a run it never saw is not counted.
+  Mythic+  Compare Raider.IO, Blizzard and Warcraft Logs independently for one character
+           and reset window. Show only the provider with the most +10 slots; never combine
+           providers' run counts. See vault_sources for source-specific coverage and dedup.
   Raid     Blizzard's per-character encounter profile (last kill per boss per difficulty)
            unioned with the guild's own Warcraft Logs kills in the window. Blizzard catches
            pug kills the guild never logged; the logs catch kills Blizzard has since
@@ -103,19 +101,35 @@ def _stamp(text):
 
 
 def mplus_levels(profile, start, end):
-    """Key levels of every completed run in the window, highest first, one per run."""
-    runs = {}
+    """Observed completed runs, highest first. Missing runs are not evidence of absence."""
+    runs = []
     for field in ("mythic_plus_previous_weekly_highest_level_runs",
                   "mythic_plus_weekly_highest_level_runs"):
         for run in (profile or {}).get(field) or []:
             try:
                 at = _stamp(run["completed_at"])
+                level = int(run["mythic_level"])
+                if at.tzinfo is None or level < 1:
+                    continue
             except (KeyError, TypeError, ValueError):
                 continue
             if start <= at < end:
-                runs[run.get("url") or f"{run.get('dungeon')}|{run['completed_at']}"] = int(
-                    run.get("mythic_level") or 0)
-    return sorted(runs.values(), reverse=True)
+                # URLs can change without changing the run. Repeated completions of
+                # the same dungeon still count separately, including untimed runs.
+                identities = {("completion", str(run.get("dungeon") or ""), at.isoformat())}
+                if run.get("keystone_run_id"):
+                    identities.add(("id", str(run["keystone_run_id"])))
+                if run.get("url"):
+                    identities.add(("url", run["url"]))
+                distinct = []
+                for known, previous_level in runs:
+                    if identities & known:
+                        identities |= known
+                        level = max(level, previous_level)
+                    else:
+                        distinct.append((known, previous_level))
+                runs = distinct + [(identities, level)]
+    return sorted((level for _, level in runs), reverse=True)
 
 
 def mplus_slots(levels, level=MPLUS_LEVEL):
@@ -341,7 +355,7 @@ def stale_since(profile, end):
 
 
 def build(members, mapping, profiles, encounters, raided, start, end, equipment=None,
-          gems=None, played=None, specs=None):
+          gems=None, played=None, specs=None, key_sources=None):
     """One row per prog raider, those with something to fix first.
 
     `members` are Discord guild-member objects already filtered to the role; `mapping` is
@@ -355,7 +369,9 @@ def build(members, mapping, profiles, encounters, raided, start, end, equipment=
     it is a different role from the raid one, the gear on is not the raid set, so it is not
     graded and the row carries "off_spec" instead.
     """
+    import vault_sources
     equipment, gems = equipment or {}, gems or {}
+    key_sources = key_sources or {}
     played, specs = played or {}, specs or {}
     best = best_gem_level(gems)
     rows = []
@@ -366,7 +382,10 @@ def build(members, mapping, profiles, encounters, raided, start, end, equipment=
         row = {"id": uid, "member": display_name(m), "character": name, "mapped": bool(chars)}
         if name:
             profile = profiles[fold(name)]
-            levels = mplus_levels(profile, start, end)
+            candidates = {"Raider.IO": (mplus_levels(profile, start, end)
+                                        if not profile.get("rio_unavailable") else None),
+                          **key_sources.get(fold(name), {})}
+            source, levels = vault_sources.best_source(candidates)
             slots, at = mplus_slots(levels)
             bosses = union_bosses(blizzard_bosses(encounters.get(fold(name)), start, end),
                                   raided.get(fold(name)))
@@ -381,8 +400,16 @@ def build(members, mapping, profiles, encounters, raided, start, end, equipment=
                 "spec": (raids or {}).get("spec") or now or profile.get("active_spec_name") or "",
                 "runs": len(levels), "runs_at_level": sum(1 for lv in levels if lv >= MPLUS_LEVEL),
                 "mplus_slots": slots, "mplus_levels": at,
+                "mplus_status": ("unavailable" if source is None else
+                                 "met" if slots >= MIN_MPLUS_SLOTS else "unverified"),
+                "mplus_source": source,
+                "mplus_sources": {s: {"slots": mplus_slots(v)[0],
+                                      "runs_at_level": sum(n >= MPLUS_LEVEL for n in v)}
+                                  if v is not None else None for s, v in candidates.items()},
+                "mplus_observed_slots": filled(len(levels), MPLUS_THRESHOLDS),
+                "source_updated_at": profile.get("last_crawled_at") if source == "Raider.IO" else None,
                 "bosses": len(bosses), "raid_slots": filled(len(bosses), RAID_THRESHOLDS),
-                "seen": stale_since(profile, end),
+                "seen": stale_since(profile, end) if source == "Raider.IO" else None,
                 "gear": (gear_check(equipment[fold(name)], gems, best)
                          if fold(name) in equipment and not off else None),
             })
@@ -391,6 +418,9 @@ def build(members, mapping, profiles, encounters, raided, start, end, equipment=
         else:
             row.update({"runs": 0, "runs_at_level": 0, "mplus_slots": 0,
                         "mplus_levels": [None] * 3, "bosses": 0, "raid_slots": 0,
+                        "mplus_status": "unavailable", "mplus_observed_slots": 0,
+                        "mplus_source": None, "mplus_sources": {},
+                        "source_updated_at": None,
                         "gear": None})
         row["flagged"] = row["mplus_slots"] < MIN_MPLUS_SLOTS
         row["issues"] = int(row["flagged"]) + sum(len(v) for v in (row["gear"] or {}).values())
@@ -417,7 +447,7 @@ def gear_text(gear):
 # ------------------------------------------------------------------ the post
 
 
-def payload(rows, start, end, team_name, has_card):
+def payload(rows, start, end, team_name, has_card, checked_at=None):
     """The Discord message. Every raider with something to fix is also listed as text with
     the slots behind the card's counts, mention-shaped so the names resolve in the client,
     with every mention suppressed -- the card is a report for officers, not a ping to the
@@ -425,18 +455,25 @@ def payload(rows, start, end, team_name, has_card):
     short = [r for r in rows if r["flagged"]]
     geared = [r for r in rows if (r["gear"] or {}) and any(r["gear"].values())]
     label = week_label(start, end)
-    lines = [f"**{len(short)} of {len(rows)}** short of {MIN_MPLUS_SLOTS} Mythic+ vault slots at "
-             f"+{MPLUS_LEVEL} · **{len(geared)}** with gems or enchants to fix."]
+    lines = [f"**{len(short)} of {len(rows)}** need verification for {MIN_MPLUS_SLOTS} Mythic+ "
+             f"vault slots at +{MPLUS_LEVEL} · **{len(geared)}** with gems or enchants to fix.",
+             "Vault counts are observed minimums. **? means unverified, not empty.** "
+             "Missing public data does not prove a missed requirement."]
     for r in rows:
-        if not r["issues"] and r.get("realm") and not r.get("off_spec"):
-            continue
         who = f"<@{r['id']}>" if r["id"] else r["member"]
         if not r.get("realm"):
-            lines.append(f"{who} → no character on file")
+            reason = "character data unavailable" if r.get("mapped") else "no character on file"
+            lines.append(f"{who} → {reason} · vault unverified")
             continue
         bits = []
-        if r["flagged"]:
-            vault_bit = f"M+ {r['runs_at_level']} of 4 at +{MPLUS_LEVEL}"
+        if r.get("mplus_status") == "unavailable":
+            bits.append("M+ unverified · sources unavailable")
+        else:
+            vault_bit = (f"M+ at least {r['mplus_slots']}/3 slots at +{MPLUS_LEVEL} "
+                         f"({r['runs_at_level']} qualifying runs seen) · "
+                         f"{r.get('mplus_source') or 'Raider.IO'}")
+            if r["flagged"]:
+                vault_bit += "; requirement unverified"
             if r.get("seen"):
                 seen = datetime.fromisoformat(r["seen"])
                 vault_bit += f" (Raider.IO last updated {seen:%b} {seen.day})"
@@ -450,7 +487,8 @@ def payload(rows, start, end, team_name, has_card):
     embed = {"title": f"Vault & gear check · {label}", "description": "\n".join(lines)[:4000],
              "color": 0x4493F8,
              "footer": {"text": f"{team_name} · vault: Heroic+ bosses and completed keys, "
-                                f"reset to reset · gear: as equipped at posting"}}
+                                f"reset to reset · gear: as equipped at posting"
+                                + (f" · checked {checked_at}" if checked_at else "")}}
     if has_card:
         embed["image"] = {"url": "attachment://vault.png"}
     return {"embeds": [embed], "allowed_mentions": {"parse": []}}
@@ -487,6 +525,8 @@ def fetch_profiles(characters, roster, logged, region, default_realm, get=raider
                           "mythic_plus_weekly_highest_level_runs,gear"})
         except raiderio.RaiderIOError as exc:
             log("vault_profile_missing", character=name, error=str(exc)[:120])
+            # Other providers must still get a chance when Raider.IO is unavailable.
+            out[fold(name)] = {"name": name, "realm": realm, "rio_unavailable": True}
     return out
 
 

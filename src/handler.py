@@ -2113,6 +2113,7 @@ def vault_week(event, cfg, now):
     """
     import vault
     import vault_card
+    import vault_sources
     dry, preview = bool(event.get("dry")), bool(event.get("preview"))
     channel = cfg.get("vault_channel") or ""
     if not (dry or preview) and not channel.isdecimal():
@@ -2144,40 +2145,64 @@ def vault_week(event, cfg, now):
 
     # Raid kills from the logs: the guild's reports and every team that logs under a
     # personal account, deduplicated by report.
-    token = wcl.get_token(cfg["wcl_client_id"], cfg["wcl_client_secret"],
-                          user_auth=cfg.get("wcl_user_auth"))
-    gid, _rate = guild_id(token, cfg)
-    lo, hi = start.timestamp() * 1000, end.timestamp() * 1000
-    listed = wcl.reports_in_window(token, gid, lo, hi, limit=100)[0]
-    for uid in sorted({str(c.get("wcl_user_id")) for _s, c in tenant_configs(cfg)
-                       if c.get("wcl_user_id")}):
-        listed += wcl.reports_in_window(token, None, lo, hi, limit=100, user_id=int(uid))[0]
-    codes = list(dict.fromkeys(r["code"] for r in listed))
-    reports = [wcl.report_detail(token, code)[0] for code in codes]
+    token, codes, reports, played = None, [], [], {}
+    try:
+        token = wcl.get_token(cfg["wcl_client_id"], cfg["wcl_client_secret"],
+                              user_auth=cfg.get("wcl_user_auth"))
+        gid, _rate = guild_id(token, cfg)
+        lo, hi = start.timestamp() * 1000, end.timestamp() * 1000
+        listed = wcl.reports_in_window(token, gid, lo, hi, limit=100)[0]
+        for uid in sorted({str(c.get("wcl_user_id")) for _s, c in tenant_configs(cfg)
+                           if c.get("wcl_user_id")}):
+            listed += wcl.reports_in_window(token, None, lo, hi, limit=100, user_id=int(uid))[0]
+        codes = list(dict.fromkeys(r["code"] for r in listed))
+        reports = [wcl.report_detail(token, code)[0] for code in codes]
+        played = vault.raid_specs([wcl.player_details(token, code, ids)[0]
+                                   for code, rep in zip(codes, reports)
+                                   if (ids := [f["id"] for f in vault.raid_fights(rep, start, end)])])
+    except wcl.WCLError:
+        log("vault_wcl_raid_data_unavailable")
     raided = vault.wcl_bosses(reports, start, end)
-    played = vault.raid_specs([wcl.player_details(token, code, ids)[0]
-                               for code, rep in zip(codes, reports)
-                               if (ids := [f["id"] for f in vault.raid_fights(rep, start, end)])])
 
-    guild_members = raiderio._get("https://raider.io/api/v1/guilds/profile", {
-        "region": cfg["guild_region"], "realm": cfg["guild_realm"],
-        "name": cfg["guild_name"], "fields": "members"}).get("members") or []
+    try:
+        guild_members = raiderio._get("https://raider.io/api/v1/guilds/profile", {
+            "region": cfg["guild_region"], "realm": cfg["guild_realm"],
+            "name": cfg["guild_name"], "fields": "members"}).get("members") or []
+    except raiderio.RaiderIOError:
+        guild_members = []
+        log("vault_roster_unavailable", source="Raider.IO")
     roster = {vault.fold(m["character"]["name"]): m["character"] for m in guild_members}
     characters = [c for m in members for c in mapping.get(m["user"]["id"], [])]
     profiles = vault.fetch_profiles(characters, roster, vault.wcl_realms(reports),
                                     cfg["guild_region"], cfg["guild_realm"])
-    encounters, equipment, gems, specs = {}, {}, {}, {}
+    chosen = {vault.fold(c): profiles[vault.fold(c)] for c in
+              (vault.choose(mapping.get(m["user"]["id"], []), raided, profiles)
+               for m in members) if c}
+    wcl_keys = (vault_sources.fetch_wcl(chosen, token, start, end,
+                                       region=cfg["guild_region"], extra_codes=codes) if token else {})
+    encounters, equipment, gems, specs, blizzard_keys = {}, {}, {}, {}, {}
     if cfg.get("blizzard_client_id") and cfg.get("blizzard_client_secret"):
-        btoken = blizzard.get_token(cfg["blizzard_client_id"], cfg["blizzard_client_secret"])
-        chosen = {vault.fold(c): profiles[vault.fold(c)] for c in
-                  (vault.choose(mapping.get(m["user"]["id"], []), raided, profiles)
-                   for m in members) if c}
-        encounters = vault.fetch_encounters(chosen, btoken, blizzard._get)
-        equipment = vault.fetch_equipment(chosen, btoken, blizzard._get)
-        gems = vault.fetch_gems(equipment, btoken, blizzard._get)
-        specs = vault.fetch_specs(chosen, btoken, blizzard._get)
+        try:
+            btoken = blizzard.get_token(cfg["blizzard_client_id"], cfg["blizzard_client_secret"])
+        except blizzard.BlizzardError:
+            btoken = None
+            log("vault_blizzard_unavailable")
+        if btoken:
+            # Independent reads overlap so the extra providers fit the scheduled check.
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                keys_job = pool.submit(vault_sources.fetch_blizzard, chosen, btoken,
+                                       blizzard._get, start, end)
+                encounters_job = pool.submit(vault.fetch_encounters, chosen, btoken, blizzard._get)
+                equipment_job = pool.submit(vault.fetch_equipment, chosen, btoken, blizzard._get)
+                specs_job = pool.submit(vault.fetch_specs, chosen, btoken, blizzard._get)
+                blizzard_keys, encounters = keys_job.result(), encounters_job.result()
+                equipment, specs = equipment_job.result(), specs_job.result()
+            gems = vault.fetch_gems(equipment, btoken, blizzard._get)
     rows = vault.build(members, mapping, profiles, encounters, raided, start, end,
-                       equipment=equipment, gems=gems, played=played, specs=specs)
+                       equipment=equipment, gems=gems, played=played, specs=specs,
+                       key_sources={k: {"Blizzard": blizzard_keys.get(k),
+                                        "Warcraft Logs": wcl_keys.get(k)} for k in chosen})
     summary = {"start": _iso(start), "end": _iso(end), "raiders": len(rows),
                "flagged": sum(1 for r in rows if r["flagged"]),
                "gear": sum(1 for r in rows if (r["gear"] or {}) and any(r["gear"].values())),
@@ -2195,7 +2220,7 @@ def vault_week(event, cfg, now):
     card = vault_card.render(rows, start, end, label, pictures)
     if not card:
         log("vault_card_failed", note="sending the list as text instead")
-    payload = vault.payload(rows, start, end, label, bool(card))
+    payload = vault.payload(rows, start, end, label, bool(card), checked_at=_iso(now))
     attachment = ("vault.png", card) if card else None
 
     if preview:

@@ -6,7 +6,7 @@ every row so they can be read straight down:
 
   RAID      three boxes, filled when that vault slot is filled by Heroic or Mythic bosses
   M+ 10+    three boxes holding the key level each slot pays out at; green at +10 and up,
-            amber below, an empty outline when the slot was never reached
+            amber below, a question mark when the source cannot confirm a slot
   GEMS      OK, or how many sockets are empty (red) or below the top gem rank (amber)
   ENCHANTS  OK, or how many enchants are missing (red) or below max rank (amber)
 
@@ -16,8 +16,7 @@ is wearing another set, so both gear columns say which spec and "not checked", i
 Raiders with anything to fix come first. The slot names behind a count are in the post's
 text, not on the card, which has room for a number and not a list.
 
-An amber "RIO <date>" beside a character means Raider.IO had not refreshed them for over a
-day before reset, so a short Mythic+ count may be Raider.IO's rather than theirs.
+Counts and levels are observed minimums. Public data cannot prove that a slot is empty.
 
 Pure drawing, like rollcall_card: pictures arrive as bytes and every failure returns None.
 """
@@ -30,9 +29,10 @@ import recap_page
 import vault
 from rollcall_card import ARROW, ROW, _clean, _chip_rows, _panel, _portrait
 
-WIDTH = 760
+WIDTH = 870
 BOX, BOX_GAP, COL_GAP = 22, 4, 16
 CELL = 88                          # the gems and enchants columns
+SOURCE_CELL = 94
 GOOD = (63, 185, 80)               # Primer success
 GOOD_BG = (18, 38, 26)
 LOW = (210, 153, 34)               # Primer attention
@@ -54,13 +54,13 @@ def _box(canvas, x, ry, text, colour, fill):
 def _vault(canvas, x, ry, raid_slots, levels):
     for i in range(3):
         on = i < raid_slots
-        _box(canvas, x + i * (BOX + BOX_GAP), ry, "H" if on else "",
-             GOOD if on else rc.LINE, GOOD_BG if on else None)
+        _box(canvas, x + i * (BOX + BOX_GAP), ry, "H" if on else "?",
+             GOOD if on else LOW, GOOD_BG if on else None)
     x += _group() + COL_GAP
     for i, level in enumerate(levels):
         bx = x + i * (BOX + BOX_GAP)
         if level is None:
-            _box(canvas, bx, ry, "", rc.LINE, None)
+            _box(canvas, bx, ry, "?", LOW, None)
         elif level >= vault.MPLUS_LEVEL:
             _box(canvas, bx, ry, str(level), GOOD, GOOD_BG)
         else:
@@ -92,14 +92,14 @@ def render(rows, start, end, team_name, pictures=None):
         full = WIDTH - 2 * rc.PAD
         short = sum(1 for r in rows if r["flagged"])
         geared = sum(1 for r in rows if r["gear"] and any(r["gear"].values()))
-        labels = [f"{len(rows)} raiders", f"{short} short on M+ {vault.MPLUS_LEVEL}+",
+        labels = [f"{len(rows)} raiders", f"{short} need M+ verification",
                   f"{geared} with gems or enchants to fix"]
         measure_image = Image.new("RGB", (1, 1))
         measure = rc._Canvas(measure_image, ImageDraw.Draw(measure_image), {})
         chips = _chip_rows(measure, labels, measure.font("semibold", 12), WIDTH)
 
         body = rc.COL_HEAD + 8 + (1 + max(len(rows), 1)) * ROW + 8
-        head = 24 + 18 + 34 + 22 + 30 * len(chips) + 8
+        head = 24 + 18 + 34 + 22 + 22 + 30 * len(chips) + 8
         height = rc.TOPBAR + head + body + rc.PAD
 
         image = Image.new("RGB", (WIDTH * rc.SCALE, int(height * rc.SCALE)), rc.BG)
@@ -124,6 +124,9 @@ def render(rows, start, end, team_name, pictures=None):
                f"  ·  Gear: missing or below max rank")
         canvas.text(rc.PAD, y, rc._ellipsis(canvas, sub, sub_font, full), sub_font, rc.MUTED)
         y += 22
+        canvas.text(rc.PAD, y, "Observed minimums only  ·  ? = unverified, not empty",
+                    sub_font, LOW)
+        y += 22
         chip = canvas.font("semibold", 12)
         for line in chips:
             for cx, cw, label in line:
@@ -138,7 +141,8 @@ def render(rows, start, end, team_name, pictures=None):
         left, edge = rc.PAD + 12, rc.PAD + full - 12
         enchants_x = edge - CELL
         gems_x = enchants_x - COL_GAP - CELL
-        mplus_x = gems_x - COL_GAP - _group()
+        source_x = gems_x - COL_GAP - SOURCE_CELL
+        mplus_x = source_x - COL_GAP - _group()
         raid_x = mplus_x - COL_GAP - _group()
         limit = raid_x - 16
 
@@ -146,13 +150,14 @@ def render(rows, start, end, team_name, pictures=None):
         ry = y + rc.COL_HEAD + 8
         for x, title in ((left, "RAIDER → CHARACTER"), (raid_x, "RAID"),
                          (mplus_x, f"M+ {vault.MPLUS_LEVEL}+"), (gems_x, "GEMS"),
-                         (enchants_x, "ENCHANTS")):
+                         (source_x, "SOURCE"), (enchants_x, "ENCHANTS")):
             canvas.text(x, ry + 7, title, small, rc.MUTED, spacing=1.2)
         ry += ROW
 
         for r in rows:
             _portrait(canvas, pictures.get(r["id"]), left, ry + 3, 20)
-            label = r.get("character") if r.get("realm") else "no character on file"
+            label = (r.get("character") if r.get("realm") else
+                     "data unavailable" if r.get("mapped") else "no character on file")
             want = 14 + gap + canvas.width(label or "", name_font)
             room = limit - left - 20 - gap - want - 2 * gap - canvas.width(ARROW, member_font)
             text = rc._ellipsis(canvas, _clean(r["member"]), member_font, max(room, 48))
@@ -170,13 +175,15 @@ def render(rows, start, end, team_name, pictures=None):
                 colour = rc._rgb(recap_page.class_color(r.get("class") or "") or "#f0f6fc")
                 name = rc._ellipsis(canvas, r["character"], name_font, limit - x)
                 canvas.text(x, ry + 5, name, name_font, colour)
-                if r.get("seen") and r["flagged"]:
+                if r.get("seen"):
                     seen = datetime.fromisoformat(r["seen"])
                     note = f"RIO {seen:%b} {seen.day}"
                     nx = x + canvas.width(name, name_font) + gap
                     if nx + canvas.width(note, small) <= limit:
                         canvas.text(nx, ry + 7, note, small, LOW)
             _vault(canvas, raid_x, ry, r["raid_slots"], r["mplus_levels"])
+            canvas.text(source_x, ry + 5, r.get("mplus_source") or "unavailable",
+                        small, rc.MUTED)
             off = r.get("off_spec")
             for cx, keys, note in ((gems_x, ("gem_empty", "gem_low"),
                                     f"{off['now']} gear" if off else ""),

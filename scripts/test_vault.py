@@ -63,6 +63,26 @@ class WeekTests(unittest.TestCase):
 
 
 class MythicPlusTests(unittest.TestCase):
+    def test_run_identity_preserves_repeats_and_untimed_completions(self):
+        first = {**run(10, "2026-09-21T23:00:00Z", "old-url"),
+                 "keystone_run_id": 1, "num_keystone_upgrades": 0}
+        repeat = {**run(10, "2026-09-22T01:00:00Z", "second-url"),
+                  "keystone_run_id": 2, "num_keystone_upgrades": 0}
+        profile = {"mythic_plus_previous_weekly_highest_level_runs": [first, repeat],
+                   "mythic_plus_weekly_highest_level_runs": [{**first, "url": "new-url"}]}
+        self.assertEqual(vault.mplus_levels(profile, START, END), [10, 10])
+        # Partial representations of the same completion must not invent an extra run.
+        without_id = {k: v for k, v in first.items() if k != "keystone_run_id"}
+        profile["mythic_plus_weekly_highest_level_runs"].append(without_id)
+        self.assertEqual(vault.mplus_levels(profile, START, END), [10, 10])
+
+    def test_reset_boundaries_and_malformed_evidence(self):
+        profile = {"mythic_plus_previous_weekly_highest_level_runs": [
+            run(10, START.isoformat()), run(11, END.isoformat()),
+            run(12, "2026-09-21T23:00:00"), run("bad", "2026-09-21T23:00:00Z"),
+            run(0, "2026-09-21T23:00:00Z")]}
+        self.assertEqual(vault.mplus_levels(profile, START, END), [10])
+
     def test_slots_are_the_first_fourth_and_eighth_best(self):
         levels = [15, 14, 13, 12, 11, 10, 9, 8]
         self.assertEqual(vault.mplus_slots(levels), (2, [15, 12, 8]))
@@ -193,10 +213,52 @@ class BuildTests(unittest.TestCase):
         message = vault.payload(rows, START, END, "Smoobies", has_card=True)
         text = message["embeds"][0]["description"]
         self.assertEqual(message["allowed_mentions"], {"parse": []})
-        self.assertIn("<@1> → Wholepie · enchants: missing Legs", text)
-        self.assertIn("<@2> → Visande · M+ 0 of 4 at +10", text)
+        self.assertIn("enchants: missing Legs", text)
+        self.assertIn("<@2> → Visande · M+ at least 0/3 slots at +10", text)
         self.assertIn("<@3> → no character on file", text)
         self.assertEqual(message["embeds"][0]["image"]["url"], "attachment://vault.png")
+
+    def test_seven_runs_do_not_claim_the_third_slot_is_empty(self):
+        profile = self.profiles["wholepie"]
+        profile["last_crawled_at"] = END.isoformat()  # Even a fresh crawl can omit a run.
+        profile["mythic_plus_previous_weekly_highest_level_runs"] = [
+            run(level, f"2026-09-21T0{i}:00:00Z")
+            for i, level in enumerate([15, 14, 12, 12, 12, 12, 11])]
+        rows = self.rows()
+        pie = next(r for r in rows if r["member"] == "Pie")
+        self.assertEqual(pie["mplus_levels"], [15, 12, None])
+        self.assertEqual(pie["mplus_status"], "met")
+        text = vault.payload(rows, START, END, "Test", False)["embeds"][0]["description"]
+        self.assertIn("Wholepie · M+ at least 2/3 slots at +10 (7 qualifying runs seen)", text)
+        self.assertIn("unverified, not empty", text)
+        self.assertNotIn("short of", text)
+        # A late upstream refresh supplies the eighth run, still from before reset.
+        profile["mythic_plus_previous_weekly_highest_level_runs"].append(
+            run(10, "2026-09-22T04:28:58Z"))
+        refreshed = next(r for r in self.rows() if r["member"] == "Pie")
+        self.assertEqual(refreshed["mplus_levels"], [15, 12, 10])
+        self.assertEqual(refreshed["mplus_slots"], 3)
+
+    def test_stale_data_is_disclosed_even_after_meeting_the_requirement(self):
+        self.profiles["wholepie"]["last_crawled_at"] = "2026-09-20T12:00:00Z"
+        text = vault.payload(self.rows(), START, END, "Test", False,
+                             checked_at="2026-09-22T15:30:00Z")["embeds"][0]
+        self.assertIn("Wholepie · M+ at least 2/3", text["description"])
+        self.assertIn("Raider.IO last updated Sep 20", text["description"])
+        self.assertIn("checked 2026-09-22T15:30:00Z", text["footer"]["text"])
+
+    def test_missing_profile_is_unavailable_not_a_missing_mapping_or_proven_failure(self):
+        del self.profiles["visande"]
+        rows = self.rows()
+        vis = next(r for r in rows if r["member"] == "Vis")
+        self.assertEqual(vis["mplus_status"], "unavailable")
+        text = vault.payload(rows, START, END, "Test", False)["embeds"][0]["description"]
+        self.assertIn("<@2> → character data unavailable · vault unverified", text)
+
+    def test_fewer_than_four_observed_runs_requires_verification(self):
+        vis = next(r for r in self.rows() if r["member"] == "Vis")
+        self.assertEqual(vis["mplus_status"], "unverified")
+        self.assertEqual(vis["mplus_observed_slots"], 0)
 
     def test_the_card_draws(self):
         rows = self.rows({"wholepie": full_kit(), "visande": full_kit()})
@@ -251,7 +313,8 @@ class RoleTests(unittest.TestCase):
         self.assertIsNone(dh["gear"])
         self.assertEqual(dh["off_spec"], {"now": "Havoc", "raids": "Vengeance"})
         text = vault.payload(list(rows.values()), START, END, "Smoobies", True)
-        self.assertIn("Thaydan · M+ 0 of 4 at +10 · gear not checked: logged out as Havoc, "
+        self.assertIn("Thaydan · M+ at least 0/3 slots at +10 (0 qualifying runs seen) · Raider.IO; "
+                      "requirement unverified · gear not checked: logged out as Havoc, "
                       "raids Vengeance", text["embeds"][0]["description"])
         png = vault_card.render(list(rows.values()), START, END, "Smoobies", {})
         self.assertTrue(png and png.startswith(b"\x89PNG"))
