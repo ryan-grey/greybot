@@ -18,6 +18,12 @@ an unconfirmed slot is shown as **?**, never as definitely empty. The text inclu
 with every character's selected source and observed +10 slot count.
 Mentions are suppressed, so it pings nobody.
 
+Edited/reposted cards must show a dated **What changed** section on the image and in
+the message text. `revision={"date":"Sep 30, 2026","changes":["Specific correction"]}`
+is supported by the renderer, message payload, and manual vault events. Preserve earlier
+correction notes and the actual data check time; annotation-only edits reuse the posted
+snapshot. See `AGENTS.md` for the policy across all recap cards.
+
 ## Rules and limits
 
 - The vault week runs reset to reset (Tuesday 15:00 UTC). Gear is read as equipped when

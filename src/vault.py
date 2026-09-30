@@ -470,7 +470,7 @@ def gear_text(gear):
 # ------------------------------------------------------------------ the post
 
 
-def payload(rows, start, end, team_name, has_card, checked_at=None):
+def payload(rows, start, end, team_name, has_card, checked_at=None, revision=None):
     """The Discord message. Every raider with something to fix is also listed as text with
     the slots behind the card's counts, mention-shaped so the names resolve in the client,
     with every mention suppressed -- the card is a report for officers, not a ping to the
@@ -514,6 +514,10 @@ def payload(rows, start, end, team_name, has_card, checked_at=None):
                                 + (f" · checked {checked_at}" if checked_at else "")}}
     if has_card:
         embed["image"] = {"url": "attachment://vault.png"}
+    if revision:
+        embed["fields"] = [{"name": f"Updated {revision['date']} · What changed",
+                            "value": "\n".join("• " + line for line in revision["changes"]),
+                            "inline": False}]
     return {"embeds": [embed], "allowed_mentions": {"parse": []}}
 
 

@@ -2221,10 +2221,12 @@ def vault_week(event, cfg, now):
     pictures = rollcall.pictures([{"id": m["user"]["id"], "avatar_url": vault.avatar_url(m, guild)}
                                   for m in members])
     label = tcfg.get("team_name") or setup.get("label") or cfg["guild_name"]
-    card = vault_card.render(rows, start, end, label, pictures)
+    revision = event.get("revision")
+    card = vault_card.render(rows, start, end, label, pictures, revision=revision)
     if not card:
         log("vault_card_failed", note="sending the list as text instead")
-    payload = vault.payload(rows, start, end, label, bool(card), checked_at=_iso(now))
+    payload = vault.payload(rows, start, end, label, bool(card), checked_at=_iso(now),
+                            revision=revision)
     attachment = ("vault.png", card) if card else None
 
     if preview:
