@@ -22,9 +22,6 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_logs as logs,
     aws_scheduler as scheduler,
-    aws_cloudwatch as cloudwatch,
-    aws_cloudwatch_actions as cloudwatch_actions,
-    aws_sns as sns,
 )
 from constructs import Construct
 
@@ -308,15 +305,10 @@ class GreybotStack(Stack):
                               architecture=lambda_.Architecture.ARM_64,
                               handler="vault_collect.handler", code=lambda_.Code.from_asset(_assert_package()),
                               memory_size=cfg.memory_mb, timeout=Duration.minutes(5),
-                              reserved_concurrent_executions=1, role=self.role,
+                              role=self.role,
                               environment={"STATE_TABLE": cfg.table_name,
                                            "SSM_PREFIX": cfg.ssm_prefix,
                                            "VAULT_HISTORY_TABLE": self.vault_history.table_name})
-        alarm = cloudwatch.Alarm(self, "VaultCollectorErrors", metric=fn.metric_errors(
-            period=Duration.hours(1)), threshold=1, evaluation_periods=1,
-            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING)
-        alarm.add_alarm_action(cloudwatch_actions.SnsAction(sns.Topic.from_topic_arn(
-            self, "VaultCollectorAlerts", f"arn:aws:sns:{Aws.REGION}:{Aws.ACCOUNT_ID}:{cfg.alerts_topic_name}")))
         return fn
 
     # ------------------------------------------------------------------ api

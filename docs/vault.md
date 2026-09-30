@@ -63,7 +63,8 @@ Mentions are suppressed, so it pings nobody.
   runs. Repeated observations merge by run ID or dungeon/completion time. Warcraft Logs
   uses dungeon, level, and a one-minute clock tolerance to deduplicate overlapping uploads.
 - `ryangrey-greybot-vault-collect` runs hourly at minute 10 UTC in its own five-minute
-  Lambda, with one concurrent execution and an error alarm on the existing alerts topic.
+  Lambda, with conditional writes protecting overlapping executions. Failures are recorded
+  in its CloudWatch logs and the collector's latest successful timestamp remains in history.
   It collects the current and previous reset weeks, checkpoints each provider, and never
   posts to Discord. Unlocked ambiguous mappings are skipped by the collector until given
   a prog-character lock; all 19 current prog members resolve without ambiguity.
