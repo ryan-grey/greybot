@@ -2114,6 +2114,7 @@ def vault_week(event, cfg, now):
     import vault
     import vault_card
     import vault_sources
+    import vault_history
     dry, preview = bool(event.get("dry")), bool(event.get("preview"))
     channel = cfg.get("vault_channel") or ""
     if not (dry or preview) and not channel.isdecimal():
@@ -2180,7 +2181,8 @@ def vault_week(event, cfg, now):
               (vault.choose(mapping.get(m["user"]["id"], []), raided, profiles)
                for m in members) if c}
     wcl_keys = (vault_sources.fetch_wcl(chosen, token, start, end,
-                                       region=cfg["guild_region"], extra_codes=codes) if token else {})
+                                       region=cfg["guild_region"], extra_codes=codes,
+                                       records=True) if token else {})
     encounters, equipment, gems, specs, blizzard_keys = {}, {}, {}, {}, {}
     if cfg.get("blizzard_client_id") and cfg.get("blizzard_client_secret"):
         try:
@@ -2193,17 +2195,18 @@ def vault_week(event, cfg, now):
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=4) as pool:
                 keys_job = pool.submit(vault_sources.fetch_blizzard, chosen, btoken,
-                                       blizzard._get, start, end)
+                                       blizzard._get, start, end, records=True)
                 encounters_job = pool.submit(vault.fetch_encounters, chosen, btoken, blizzard._get)
                 equipment_job = pool.submit(vault.fetch_equipment, chosen, btoken, blizzard._get)
                 specs_job = pool.submit(vault.fetch_specs, chosen, btoken, blizzard._get)
                 blizzard_keys, encounters = keys_job.result(), encounters_job.result()
                 equipment, specs = equipment_job.result(), specs_job.result()
             gems = vault.fetch_gems(equipment, btoken, blizzard._get)
+    key_sources = vault_history.for_profiles(scope, chosen, cfg["guild_region"], start, end,
+                                            blizzard_keys, wcl_keys, persist=not (dry or preview))
     rows = vault.build(members, mapping, profiles, encounters, raided, start, end,
                        equipment=equipment, gems=gems, played=played, specs=specs,
-                       key_sources={k: {"Blizzard": blizzard_keys.get(k),
-                                        "Warcraft Logs": wcl_keys.get(k)} for k in chosen})
+                       key_sources=key_sources)
     summary = {"start": _iso(start), "end": _iso(end), "raiders": len(rows),
                "flagged": sum(1 for r in rows if r["flagged"]),
                "gear": sum(1 for r in rows if (r["gear"] or {}) and any(r["gear"].values())),

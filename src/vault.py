@@ -101,11 +101,12 @@ def _stamp(text):
     return datetime.fromisoformat(str(text).replace("Z", "+00:00"))
 
 
-def mplus_levels(profile, start, end):
+def mplus_runs(profile, start, end):
     """Observed completed runs, highest first. Missing runs are not evidence of absence."""
     runs = []
     for field in ("mythic_plus_previous_weekly_highest_level_runs",
-                  "mythic_plus_weekly_highest_level_runs"):
+                  "mythic_plus_weekly_highest_level_runs", "mythic_plus_recent_runs",
+                  "mythic_plus_highest_level_runs"):
         for run in (profile or {}).get(field) or []:
             try:
                 at = _stamp(run["completed_at"])
@@ -123,14 +124,21 @@ def mplus_levels(profile, start, end):
                 if run.get("url"):
                     identities.add(("url", run["url"]))
                 distinct = []
-                for known, previous_level in runs:
+                for known, previous_level, previous_at, previous_dungeon in runs:
                     if identities & known:
                         identities |= known
                         level = max(level, previous_level)
                     else:
-                        distinct.append((known, previous_level))
-                runs = distinct + [(identities, level)]
-    return sorted((level for _, level in runs), reverse=True)
+                        distinct.append((known, previous_level, previous_at, previous_dungeon))
+                runs = distinct + [(identities, level, int(at.timestamp() * 1000),
+                                    str(run.get("dungeon") or ""))]
+    return [{"at": at, "level": level, "dungeon": dungeon,
+             "ids": sorted(str(value[1]) for value in ids if value[0] == "id")}
+            for ids, level, at, dungeon in runs]
+
+
+def mplus_levels(profile, start, end):
+    return sorted((r["level"] for r in mplus_runs(profile, start, end)), reverse=True)
 
 
 def mplus_slots(levels, level=MPLUS_LEVEL):
@@ -537,7 +545,8 @@ def fetch_profiles(characters, roster, logged, region, default_realm, get=raider
             out[fold(name)] = get("https://raider.io/api/v1/characters/profile", {
                 "region": region, "realm": realm, "name": name,
                 "fields": "mythic_plus_previous_weekly_highest_level_runs,"
-                          "mythic_plus_weekly_highest_level_runs,gear"})
+                          "mythic_plus_weekly_highest_level_runs,mythic_plus_recent_runs,"
+                          "mythic_plus_highest_level_runs,gear"})
         except raiderio.RaiderIOError as exc:
             log("vault_profile_missing", character=name, error=str(exc)[:120])
             # Other providers must still get a chance when Raider.IO is unavailable.

@@ -39,7 +39,7 @@ def _parallel(items, fn):
         return dict(pool.map(fn, items))
 
 
-def blizzard_levels(documents, start, end):
+def blizzard_runs(documents, start, end):
     lo, hi = start.timestamp() * 1000, end.timestamp() * 1000
     runs = {}
     for document in documents:
@@ -50,11 +50,17 @@ def blizzard_levels(documents, start, end):
             except (KeyError, TypeError, ValueError):
                 continue
             if lo <= at < hi and level > 0:
-                runs[(dungeon, at)] = max(level, runs.get((dungeon, at), 0))
-    return sorted(runs.values(), reverse=True)
+                key = (dungeon, at // 1000)
+                runs[key] = max(level, runs.get(key, 0))
+    return [{"dungeon": str(dungeon), "at": at * 1000, "level": level}
+            for (dungeon, at), level in runs.items()]
 
 
-def fetch_blizzard(profiles, token, get, start, end):
+def blizzard_levels(documents, start, end):
+    return sorted((r["level"] for r in blizzard_runs(documents, start, end)), reverse=True)
+
+
+def fetch_blizzard(profiles, token, get, start, end, *, records=False):
     """Read current-period and season best runs, discovering seasons from their dates."""
     seasons = []
     try:
@@ -88,7 +94,8 @@ def fetch_blizzard(profiles, token, get, start, end):
             except Exception as exc:
                 vault.log("vault_blizzard_keys_unavailable", character=profile["name"],
                           error=type(exc).__name__)
-        return key, blizzard_levels(docs, start, end) if docs else None
+        parse = blizzard_runs if records else blizzard_levels
+        return key, parse(docs, start, end) if docs else None
     return _parallel(profiles.items(), fetch)
 
 
@@ -107,7 +114,7 @@ KEY_REPORT = """query($code: String!) { reportData { report(code: $code) {
 }}}"""
 
 
-def wcl_levels(reports, profile, start, end):
+def wcl_runs(reports, profile, start, end):
     """Completed full keys only; deduplicate overlapping uploads of the same party/run."""
     lo, hi = start.timestamp() * 1000, end.timestamp() * 1000
     wanted = identity(profile["name"], profile["realm"])
@@ -131,10 +138,16 @@ def wcl_levels(reports, profile, start, end):
             if not any(encounter == e and level == lv and abs(at - t) <= 60_000
                        for e, lv, p, t in runs):
                 runs.append((encounter, level, party, at))
-    return sorted((level for _, level, _, _ in runs), reverse=True)
+    return [{"dungeon": str(dungeon), "level": level, "at": at}
+            for dungeon, level, _, at in runs]
 
 
-def fetch_wcl(profiles, token, start, end, region="us", query=wcl.query, extra_codes=()):
+def wcl_levels(reports, profile, start, end):
+    return sorted((r["level"] for r in wcl_runs(reports, profile, start, end)), reverse=True)
+
+
+def fetch_wcl(profiles, token, start, end, region="us", query=wcl.query, extra_codes=(),
+              records=False):
     lo, hi = start.timestamp() * 1000, end.timestamp() * 1000
 
     def discover(item):
@@ -174,6 +187,7 @@ def fetch_wcl(profiles, token, start, end, region="us", query=wcl.query, extra_c
             return code, None
 
     reports = _parallel(sorted(set().union(*(codes for codes, _ in found.values()))), detail)
-    return {key: (wcl_levels([reports[c] for c in codes if reports.get(c)], profiles[key], start, end)
+    parse = wcl_runs if records else wcl_levels
+    return {key: (parse([reports[c] for c in codes if reports.get(c)], profiles[key], start, end)
                   if successful or any(reports.get(c) for c in codes) else None)
             for key, (codes, successful) in found.items()}

@@ -35,6 +35,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 
 cp "$ROOT/src/"*.py "$OUT/"
+cp "$ROOT/assets/LICENSE-wowaudit.txt" "$OUT/"
 cp "$ROOT/assets/aotc-golden-dragon-frame.png" "$OUT/"
 mkdir -p "$OUT/role-icons"
 cp "$ROOT/assets/role-icons/"*.png "$OUT/role-icons/"

@@ -46,6 +46,10 @@ Mentions are suppressed, so it pings nobody.
   +10 slots wins; ties prefer more +10 runs, then Raider.IO, Blizzard, Warcraft Logs in
   that fixed order. The displayed slot levels all come from the selected source.
 - Blizzard supplies current-period and season best runs, with seasons discovered by date.
+  The hourly collector also discovers weekly periods and active dungeon leaderboards for
+  each prog character's connected realm. Matching party members are checked by name and
+  realm; profile and leaderboard observations share one Blizzard run history. Dungeon ID
+  plus completion second prevents overlap between these endpoints from counting twice.
   These lists are partial, not complete vault ledgers. Duplicate runs across its endpoints
   count once. Warcraft Logs discovers paged character reports as well as guild/team logs;
   full completed dungeon runs count, including untimed completions, but raid bosses and
@@ -55,6 +59,25 @@ Mentions are suppressed, so it pings nobody.
   counts for diagnosis; the published card and text name only the selected provider.
   Warcraft Logs discovery is bounded to five 100-report pages per character, and only
   reports accessible with the configured account grant can be read. No addon is required.
+- Raider.IO history includes previous/current weekly lists, recent runs, and season-highest
+  runs. Repeated observations merge by run ID or dungeon/completion time. Warcraft Logs
+  uses dungeon, level, and a one-minute clock tolerance to deduplicate overlapping uploads.
+- `ryangrey-greybot-vault-collect` runs hourly at minute 10 UTC in its own five-minute
+  Lambda, with one concurrent execution and an error alarm on the existing alerts topic.
+  It collects the current and previous reset weeks, checkpoints each provider, and never
+  posts to Discord. Unlocked ambiguous mappings are skipped by the collector until given
+  a prog-character lock; all 19 current prog members resolve without ambiguity.
+- History is private in the separate `ryangrey-greybot-vault-history` table. Keys include
+  tenant, region, realm, character, and week ending date. Provider histories remain separate;
+  only runs within a single provider are combined. Conditional version writes preserve
+  concurrent observations. Smaller responses and outages cannot erase saved runs. Retention
+  is 90 days after that week's reset via TTL on this new table only; the bot's dedupe table
+  is unchanged. Dry runs read history without writing it. Tuesday's recap merges saved and
+  fresh evidence, then displays the provider with the highest qualifying slot count.
+- Collection approach adapted from [WoWAudit's MIT-licensed collector](https://github.com/wowaudit/core/blob/89981788fe8b903d264ee4f6acec0529793234a6/lib/wowaudit/retrievers/keystones.rb).
+  Its copyright/license notice is retained in `assets/LICENSE-wowaudit.txt` and bundled in
+  both deployed Lambda packages. greyBot collects provider data directly, not from the
+  WoWAudit guild page. Leaderboards cannot expose every run; missing data remains unknown.
 - Blizzard keeps only the last kill per boss, so a boss killed again after reset hides its
   earlier kill. The Tuesday-morning run happens before any raid; a later re-run still counts
   guild-logged kills through Warcraft Logs.
@@ -96,11 +119,8 @@ returned eight +10-or-higher runs, with slot levels +15 / +12 / +10. This is con
 the reported two-slot card having used data before the final run appeared. The original raw
 profile was not retained, so its exact missing run and crawl time cannot be reconstructed.
 
-The current implementation is still one scheduled check, not automatic reconciliation.
-Further hardening should retain bounded, private evidence snapshots by region, realm,
-character and reset week; preserve the original gear snapshot; and recheck the same vault
-week later. Any reconciliation must update the original message without new pings, retain
-its message ID, and avoid treating a failed or smaller fetch as lost progress. Persisting
-observations improves coverage but cannot recover a run no source ever exposes. This
-implementation compares all three external sources without an addon; it does not add
-scheduled rechecks, saved evidence snapshots, or a manual correction workflow.
+The hourly collector now retains private run evidence and rechecks both the current and
+previous weeks. This improves coverage but cannot recover a run no source ever exposes.
+The Tuesday recap consumes this history at posting time. Automatic edits to an already
+posted recap and preservation of its original gear snapshot are separate future work;
+the collector does not send or edit Discord messages.

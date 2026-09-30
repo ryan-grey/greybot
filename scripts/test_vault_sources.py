@@ -146,7 +146,8 @@ class HandlerTests(unittest.TestCase):
         with ExitStack() as stack:
             def mock(obj, name, **kwargs):
                 return stack.enter_context(patch.object(obj, name, **kwargs))
-            mock(handler, "tenant_configs", return_value=[(SimpleNamespace(team=handler.VAULT_TEAM), cfg)])
+            mock(handler, "tenant_configs", return_value=[(SimpleNamespace(team=handler.VAULT_TEAM,
+                                                                           tenant="TENANT#test"), cfg)])
             shared = {"1": ["Alt", "Example"]}
             mock(handler.store, "get_rollcall_setup", return_value={"members": shared})
             mock(handler.store, "get_vault_characters", return_value={"1": "Example"})
@@ -155,7 +156,9 @@ class HandlerTests(unittest.TestCase):
             mock(handler.raiderio, "_get", side_effect=handler.raiderio.RaiderIOError("unavailable"))
             profiles = mock(vault, "fetch_profiles", return_value={"example": {**PROFILE, "rio_unavailable": True}})
             mock(handler.blizzard, "get_token", return_value="token")
-            mock(sources, "fetch_blizzard", return_value={"example": [10] * 8})
+            mock(sources, "fetch_blizzard", return_value={"example": [
+                {"level": 10, "dungeon": "1", "at": int(START.timestamp()*1000)+i*100_000}
+                for i in range(8)]})
             wcl_keys = mock(sources, "fetch_wcl")
             for name in ("fetch_encounters", "fetch_equipment", "fetch_specs", "fetch_gems"):
                 mock(vault, name, return_value={})

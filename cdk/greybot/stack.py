@@ -22,6 +22,9 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_logs as logs,
     aws_scheduler as scheduler,
+    aws_cloudwatch as cloudwatch,
+    aws_cloudwatch_actions as cloudwatch_actions,
+    aws_sns as sns,
 )
 from constructs import Construct
 
@@ -69,7 +72,17 @@ class GreybotStack(Stack):
 
         self.table = self._table()
         self.role = self._role()
+        self.vault_history = dynamodb.Table(
+            self, "VaultHistoryTable", table_name=f"{cfg.table_name}-vault-history",
+            partition_key=dynamodb.Attribute(name="pk", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="sk", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute="expiresAt", removal_policy=self.removal)
+        self.role.add_to_policy(iam.PolicyStatement(
+            actions=["dynamodb:GetItem", "dynamodb:PutItem"],
+            resources=[self.vault_history.table_arn]))
         self.function = self._function()
+        self.collector = self._vault_collector()
         self.api = self._api()
         self._schedule()
 
@@ -278,8 +291,33 @@ class GreybotStack(Stack):
                 # start rather than one pointed at the right tree.
                 **({} if cfg.is_prod else {"SSM_PREFIX": cfg.ssm_prefix}),
                 **dict(cfg.extra_env),
+                "VAULT_HISTORY_TABLE": self.vault_history.table_name,
             },
         )
+
+    def _vault_collector(self) -> lambda_.Function:
+        cfg = self.cfg
+        name = f"{cfg.function_name}-vault-collect"
+        logs.LogGroup(self, "VaultCollectorLogs", log_group_name=f"/aws/lambda/{name}",
+                      retention=logs.RetentionDays.ONE_MONTH, removal_policy=self.removal)
+        self.role.add_to_policy(iam.PolicyStatement(
+            actions=["logs:CreateLogStream", "logs:PutLogEvents"],
+            resources=[f"arn:aws:logs:{Aws.REGION}:{Aws.ACCOUNT_ID}:log-group:/aws/lambda/{name}:*"]))
+        fn = lambda_.Function(self, "VaultCollector", function_name=name,
+                              runtime=lambda_.Runtime.PYTHON_3_12,
+                              architecture=lambda_.Architecture.ARM_64,
+                              handler="vault_collect.handler", code=lambda_.Code.from_asset(_assert_package()),
+                              memory_size=cfg.memory_mb, timeout=Duration.minutes(5),
+                              reserved_concurrent_executions=1, role=self.role,
+                              environment={"STATE_TABLE": cfg.table_name,
+                                           "SSM_PREFIX": cfg.ssm_prefix,
+                                           "VAULT_HISTORY_TABLE": self.vault_history.table_name})
+        alarm = cloudwatch.Alarm(self, "VaultCollectorErrors", metric=fn.metric_errors(
+            period=Duration.hours(1)), threshold=1, evaluation_periods=1,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING)
+        alarm.add_alarm_action(cloudwatch_actions.SnsAction(sns.Topic.from_topic_arn(
+            self, "VaultCollectorAlerts", f"arn:aws:sns:{Aws.REGION}:{Aws.ACCOUNT_ID}:{cfg.alerts_topic_name}")))
+        return fn
 
     # ------------------------------------------------------------------ api
 
@@ -358,7 +396,7 @@ class GreybotStack(Stack):
         )
         scheduler_role.add_to_policy(iam.PolicyStatement(
             actions=["lambda:InvokeFunction"],
-            resources=[self.function.function_arn],
+            resources=[self.function.function_arn, self.collector.function_arn],
         ))
 
         scheduler.CfnSchedule(
@@ -381,6 +419,18 @@ class GreybotStack(Stack):
         # Recaps, the vault check and Mythic+: each a fixed Input to the same function
         # through the same role. They began as infra/ scripts and were adopted by
         # `cdk import`, so a stack rebuild brings every one of them back.
+        if cfg.is_prod:
+            scheduler.CfnSchedule(
+                self, "VaultCollectSchedule", name=f"{cfg.function_name}-vault-collect",
+                description="Hourly current and previous vault-week evidence; no Discord posting",
+                schedule_expression="cron(10 * * * ? *)", schedule_expression_timezone="UTC",
+                state="ENABLED",
+                flexible_time_window=scheduler.CfnSchedule.FlexibleTimeWindowProperty(mode="OFF"),
+                target=scheduler.CfnSchedule.TargetProperty(
+                    arn=self.collector.function_arn, role_arn=scheduler_role.role_arn, input="{}",
+                    retry_policy=scheduler.CfnSchedule.RetryPolicyProperty(
+                        maximum_event_age_in_seconds=1800, maximum_retry_attempts=1)),
+            ).apply_removal_policy(self.removal)
         for s in cfg.extra_schedules:
             scheduler.CfnSchedule(
                 self, s.logical_id,
