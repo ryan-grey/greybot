@@ -772,6 +772,17 @@ def claim_vault(scope, week_key):
         raise
 
 
+def get_vault_characters(scope):
+    """Independent prog-character locks; never rewrite shared attendance/alt mappings.
+
+    A missing record means no locks configured. Read errors and invalid JSON propagate,
+    rather than silently allowing an alt to replace a locked prog character.
+    """
+    item = ddb.get_item(TableName=TABLE, ConsistentRead=True,
+                        Key={"pk": _s(scope.tenant), "sk": _s("VAULT#CHARACTERS")}).get("Item")
+    return json.loads(item["members"]["S"]) if item else {}
+
+
 def get_rollcall_setup(scope):
     """{"voice_channel": id, "members": {discord_id: [character, ...]}} or None."""
     res = ddb.get_item(TableName=TABLE,

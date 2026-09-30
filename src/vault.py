@@ -33,9 +33,10 @@ WHERE THE NUMBERS COME FROM, and what each misses:
            re-run after Tuesday's raid still counts the week correctly for logged kills.
 
 WHO IS WHO. Prog Raiders are the members holding the prog role. Their characters come from the
-prog-raid roll call mapping (ROLLCALL#SETUP), the same one the attendance card uses -- one map,
-maintained once. A member with several characters is reported on the one that raided with the
-guild that week, falling back to the highest item level.
+prog-raid roll call mapping (ROLLCALL#SETUP). Separate VAULT#CHARACTERS locks narrow a
+member's candidates to their prog character before any provider lookup. Shared alt mappings
+remain available to attendance and Saturday reports. A locked character never falls back
+to an alt when its data is unavailable. Unlocked members retain the raid/gear selection.
 
 Pure functions above the fold, network below, so the tests can drive all of it offline.
 """
@@ -251,6 +252,20 @@ def avatar_url(member, guild_id):
     if user.get("avatar"):
         return f"https://cdn.discordapp.com/avatars/{user['id']}/{user['avatar']}.png?size=64"
     return ""
+
+
+def character_mapping(mapping, locks):
+    """Copy shared mappings, then restrict locked members to exactly one character.
+
+    Apply before fetching profiles as well as choosing rows, so alt runs and gear cannot
+    influence a locked member's report. Invalid stored locks fail rather than unlock.
+    """
+    if not isinstance(locks, dict) or not all(
+            isinstance(uid, str) and uid.isdecimal() and isinstance(name, str) and name.strip()
+            for uid, name in locks.items()):
+        raise ValueError("vault character locks must map Discord ids to character names")
+    return {**{uid: list(chars) for uid, chars in mapping.items()},
+            **{uid: [name.strip()] for uid, name in locks.items()}}
 
 
 def choose(characters, raided, profiles):

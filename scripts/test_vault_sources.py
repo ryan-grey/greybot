@@ -147,11 +147,13 @@ class HandlerTests(unittest.TestCase):
             def mock(obj, name, **kwargs):
                 return stack.enter_context(patch.object(obj, name, **kwargs))
             mock(handler, "tenant_configs", return_value=[(SimpleNamespace(team=handler.VAULT_TEAM), cfg)])
-            mock(handler.store, "get_rollcall_setup", return_value={"members": {"1": ["Example"]}})
+            shared = {"1": ["Alt", "Example"]}
+            mock(handler.store, "get_rollcall_setup", return_value={"members": shared})
+            mock(handler.store, "get_vault_characters", return_value={"1": "Example"})
             mock(vault, "fetch_members", return_value=[member("1", "Test")])
             mock(handler.wcl, "get_token", side_effect=handler.wcl.WCLError("unavailable"))
             mock(handler.raiderio, "_get", side_effect=handler.raiderio.RaiderIOError("unavailable"))
-            mock(vault, "fetch_profiles", return_value={"example": {**PROFILE, "rio_unavailable": True}})
+            profiles = mock(vault, "fetch_profiles", return_value={"example": {**PROFILE, "rio_unavailable": True}})
             mock(handler.blizzard, "get_token", return_value="token")
             mock(sources, "fetch_blizzard", return_value={"example": [10] * 8})
             wcl_keys = mock(sources, "fetch_wcl")
@@ -161,6 +163,8 @@ class HandlerTests(unittest.TestCase):
             result = handler.vault_week({"dry": True}, cfg, END)
         self.assertEqual(result["rows"][0]["mplus_source"], "Blizzard")
         self.assertEqual(result["rows"][0]["mplus_slots"], 3)
+        self.assertEqual(profiles.call_args.args[0], ["Example"])
+        self.assertEqual(shared, {"1": ["Alt", "Example"]})
         post.assert_not_called()
         wcl_keys.assert_not_called()
 

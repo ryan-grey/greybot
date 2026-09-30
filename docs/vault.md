@@ -22,9 +22,15 @@ Mentions are suppressed, so it pings nobody.
 
 - The vault week runs reset to reset (Tuesday 15:00 UTC). Gear is read as equipped when
   the report runs.
-- Prog Raiders are members holding the prog role. Their characters come from the prog-raid
-  roll call mapping (`ROLLCALL#SETUP`). A member with several characters is reported on the
-  one that raided with the guild most that week, then the highest item level.
+- Prog Raiders are members holding the prog role. Shared character/alt mappings remain in
+  `ROLLCALL#SETUP` for attendance and Saturday raid information. Vault-only prog-character
+  locks live separately in `VAULT#CHARACTERS` under the same tenant partition, with a
+  JSON-encoded `members` attribute mapping Discord IDs to one character name each.
+  Locks apply before any character profile or provider lookup: alts are not candidates,
+  even if they have more kills, higher gear, or more vault slots. Missing prog-character
+  data stays unavailable; it never falls back to an alt. Invalid/unreadable lock records
+  stop the check rather than silently ignoring the locks. Unlocked members retain the
+  previous most-raid-kills, then highest-item-level selection.
 - The role icon is the role raided that week (Warcraft Logs playerDetails over the week's
   Heroic and Mythic pulls, most pulls wins), else Blizzard's live active spec. Raider.IO's
   active spec is the last resort because it lags: it had a Protection paladin in his tank

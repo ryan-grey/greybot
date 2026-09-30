@@ -201,6 +201,30 @@ class BuildTests(unittest.TestCase):
         self.assertIsNone(by["Nobody"]["character"])
         self.assertEqual(rows[-1]["member"], "Pie")
 
+    def test_prog_lock_excludes_alt_even_with_more_kills_and_better_gear(self):
+        narrowed = vault.character_mapping(self.mapping, {"1": "Wholepie"})
+        self.profiles["deathbypie"]["gear"]["item_level_equipped"] = 999
+        rows = vault.build(self.members, narrowed, self.profiles, {},
+                           {"deathbypie": {"a", "b", "c"}}, START, END)
+        pie = next(r for r in rows if r["id"] == "1")
+        self.assertEqual(pie["character"], "Wholepie")
+        self.assertEqual(self.mapping["1"], ["Deathbypie", "Wholepie"])
+        self.assertEqual(narrowed["2"], ["Visande"])
+
+    def test_missing_locked_profile_never_falls_back_to_available_alt(self):
+        narrowed = vault.character_mapping(self.mapping, {"1": "Wholepie"})
+        del self.profiles["wholepie"]
+        rows = vault.build(self.members, narrowed, self.profiles, {}, {}, START, END)
+        pie = next(r for r in rows if r["id"] == "1")
+        self.assertIsNone(pie["character"])
+        self.assertTrue(pie["mapped"])
+        self.assertEqual(pie["mplus_status"], "unavailable")
+
+    def test_invalid_lock_cannot_silently_restore_alt_selection(self):
+        for locks in (None, [], {"1": ""}, {"1": ["Wholepie", "Deathbypie"]}):
+            with self.subTest(locks=locks), self.assertRaises(ValueError):
+                vault.character_mapping(self.mapping, locks)
+
     def test_gear_problems_put_an_otherwise_fine_raider_ahead(self):
         rows = self.rows({"wholepie": full_kit(LEGS=item("LEGS")), "visande": full_kit()})
         pie = next(r for r in rows if r["member"] == "Pie")

@@ -2132,7 +2132,8 @@ def vault_week(event, cfg, now):
     start, end = vault.week_window(at)
 
     setup = store.get_rollcall_setup(scope) or {}
-    mapping = setup.get("members") or {}
+    mapping = vault.character_mapping(setup.get("members") or {},
+                                      store.get_vault_characters(scope))
     guild = tcfg.get("discord_guild_id") or cfg["discord_guild_id"]
 
     def discord_get(path):
