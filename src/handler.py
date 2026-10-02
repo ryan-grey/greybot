@@ -1730,6 +1730,8 @@ def handle_admin(event, cfg, scope, now, now_iso):
                                                        forced=bool(event.get("notify")))}
     if action == "rollcall_setup":
         return rollcall_setup(event, cfg, now_iso)
+    if action == "glory_setup":
+        return glory_setup(event, cfg, now_iso)
     if action != "register_commands":
         raise RuntimeError(f"unknown admin action: {action}")
     if not cfg.get("bot_token"):
@@ -1839,6 +1841,8 @@ def handler(event, context):
             return mplus_service.handle(event, cfg, now, context)
         if event.get("mode") == "vault":
             return vault_week(event, cfg, now)
+        if event.get("mode") == "glory":
+            return glory_check(event, cfg, now)
 
     # Fan out. One poll per registered install, each on its own Scope and its own
     # merged config. A failure in one tenant is caught and logged rather than
@@ -2246,6 +2250,166 @@ def vault_week(event, cfg, now):
                              max_attempts=1, attachment=attachment)
     log("vault_posted", week=week, message=getattr(result, "message_id", None), **summary)
     return {"ok": True, "posted": True, "week": week, **summary}
+
+
+def glory_setup(event, cfg, now_iso):
+    """`{"admin":"glory_setup","team":"prog-raid","achievement":63254,"live":false,
+    "role":"<role id>","channel":"<channel id>"}` -- tell one install which raid meta
+    achievement to watch. `role` narrows the watched members to that role's holders and
+    `channel` posts somewhere other than the install's own channel; both are optional.
+    Replaces the row whole, so always send live again."""
+    wanted = event.get("team") or None
+    pairs = [(s, c) for s, c in tenant_configs(cfg) if (s.team or None) == wanted]
+    if not pairs:
+        raise RuntimeError(f"no registered install with team {wanted!r}")
+    achievement = event.get("achievement")
+    if not isinstance(achievement, int) or achievement <= 0:
+        raise RuntimeError("achievement must be the meta achievement's id")
+    role, channel = str(event.get("role") or ""), str(event.get("channel") or "")
+    if (role and not role.isdecimal()) or (channel and not channel.isdecimal()):
+        raise RuntimeError("role and channel must be Discord ids")
+    live = event.get("live") is True
+    store.put_glory_setup(pairs[0][0], achievement, now_iso, live=live, role=role,
+                          channel=channel)
+    log("glory_setup_saved", team=wanted, achievement=achievement, live=live)
+    return {"ok": True, "team": wanted, "achievement": achievement, "live": live}
+
+
+def glory_check(event, cfg, now):
+    """The raid meta achievement, for every install with a GLORY#SETUP row.
+
+      {"mode":"glory","dry":true}  what each watched achievement looks like now; no writes
+      {"mode":"glory"}             the half-hourly check -- posts only where the setup is live
+
+    The first live run SEEDS: whatever is already earned is recorded and not announced, as
+    a tier is seeded. `"backfill":true` on that first run announces it instead.
+    """
+    only, results = event.get("team"), []
+    for scope, tcfg in tenant_configs(cfg):
+        if only and scope.team != only:
+            continue
+        setup = store.get_glory_setup(scope)
+        if not setup:
+            continue
+        try:
+            results.append(glory_one(event, cfg, tcfg, scope, setup, now))
+        except Exception as exc:                                   # noqa: BLE001
+            log("glory_failed", team=scope.team, error=repr(exc))
+            results.append({"ok": False, "team": scope.team, "error": repr(exc)})
+    return {"ok": all(r["ok"] for r in results), "results": results}
+
+
+def glory_one(event, cfg, tcfg, scope, setup, now):
+    import glory
+    import vault
+    dry, now_iso = bool(event.get("dry")), _iso(now)
+    if not (dry or setup["live"]):
+        log("glory_not_live", team=scope.team)
+        return {"ok": True, "team": scope.team, "skipped": "glory_not_live"}
+    if not (cfg.get("blizzard_client_id") and cfg.get("blizzard_client_secret")):
+        raise RuntimeError("achievements need the Blizzard credentials")
+    btoken = blizzard.get_token(cfg["blizzard_client_id"], cfg["blizzard_client_secret"])
+    meta = glory.meta_definition(blizzard.achievement(btoken, setup["achievement"]))
+    order = [s["id"] for s in meta["subs"]] + [meta["id"]]
+
+    mapping = vault.character_mapping((store.get_rollcall_setup(scope) or {}).get("members") or {},
+                                      store.get_vault_characters(scope))
+    watched = sorted(mapping)
+    if setup["role"]:
+        def discord_get(path):
+            status, body = health._get(f"https://discord.com/api/v10{path}", token=cfg["bot_token"])
+            if status != 200:
+                raise RuntimeError(f"Discord {path.split('?')[0]} answered {status}")
+            return body
+        guild = tcfg.get("discord_guild_id") or cfg["discord_guild_id"]
+        holders = {m["user"]["id"] for m in vault.fetch_members(discord_get, guild, setup["role"])}
+        watched = [uid for uid in watched if uid in holders]
+    try:
+        members = raiderio._get("https://raider.io/api/v1/guilds/profile", {
+            "region": cfg["guild_region"], "realm": cfg["guild_realm"],
+            "name": cfg["guild_name"], "fields": "members"}).get("members") or []
+    except raiderio.RaiderIOError:
+        members = []
+        log("glory_roster_unavailable", source="Raider.IO")
+    roster = {glory.fold(m["character"]["name"]): m["character"] for m in members}
+
+    state = store.load_glory(scope, meta["id"])
+    seen = glory.scan(glory.people(watched, mapping, roster, cfg["guild_realm"]), btoken,
+                      blizzard._get, {} if (dry or state is None) else state["sigs"], order)
+    held = seen["holders"]
+    summary = {"team": scope.team, "meta": meta["name"], "members": len(watched),
+               "read": seen["read"], "unchanged": seen["unchanged"],
+               "missing": len(seen["missing"])}
+    log("glory_scan", **summary)
+    names = {s["id"]: s["name"] for s in meta["subs"]} | {meta["id"]: meta["name"]}
+    if dry:
+        announced = state["announced"] if state else set()
+        return {"ok": True, "dry": True, **summary, "missingCharacters": seen["missing"],
+                "seeded": state is not None,
+                "announced": [names[a] for a in order if a in announced],
+                "earned": {names[a]: glory.names_text(held[a], limit=99)
+                           for a in order if a in held},
+                "wouldAnnounce": [names[a] for a in glory.fresh(held, announced, order)]}
+
+    if state is None:
+        already = [] if event.get("backfill") else sorted(held)
+        store.seed_glory(scope, meta["id"], already, now_iso)
+        log("glory_seeded", team=scope.team, meta=meta["id"], already=already)
+        state = store.load_glory(scope, meta["id"])
+
+    who, posted, failed = clear_display_name(tcfg, scope), [], []
+    for aid in glory.fresh(held, state["announced"], order):
+        if not store.claim_glory(scope, meta["id"], aid):
+            continue
+        state["announced"].add(aid)
+        if aid == meta["id"]:
+            copy = glory.meta_copy(who, meta, held[aid])
+        else:
+            done = sum(1 for s in meta["subs"] if s["id"] in state["announced"])
+            copy = glory.sub_copy(who, names[aid], held[aid], done, len(meta["subs"]),
+                                  meta["name"])
+        # The meta wears the last boss, as an AOTC card does.
+        art = glory_art(tcfg, btoken, meta["subs"][-1]["id"] if aid == meta["id"] else aid,
+                        now_iso)
+        card = kill_card_url(tcfg, f"glory-{meta['id']}", str(aid), copy["name"],
+                             copy["headline"], copy["lines"], art,
+                             accent=kill_card.GOLD if aid == meta["id"] else None,
+                             team=scope.team, animated=aid == meta["id"])
+        when = _iso(_at(glory.first_at(held[aid])))
+        where = ({"bot_token": cfg["bot_token"], "channel": setup["channel"]}
+                 if setup["channel"] else destination(tcfg))
+        try:
+            sent = discord.post_to(where, glory.payload(copy, card, when))
+        except discord.DiscordError as exc:
+            # Hand it back so the next run retries. Its profile signature must not be
+            # saved either, or the unchanged character would never be read again.
+            store.release_glory(scope, meta["id"], aid)
+            state["announced"].discard(aid)
+            failed.append(names[aid])
+            log("glory_announce_failed", team=scope.team, achievement=aid, error=str(exc))
+            if aid != meta["id"]:
+                break              # keep the cards in the order they were earned
+            continue
+        _remember_post(scope, sent, "glory", now_iso)
+        posted.append(names[aid])
+        log("announced_glory", team=scope.team, achievement=aid, name=names[aid],
+            meta=aid == meta["id"], earnedAt=when, card=bool(card))
+    if not failed:
+        store.put_glory_sigs(scope, meta["id"], seen["sigs"], now_iso)
+    return {"ok": not failed, **summary, "posted": posted, "failed": failed}
+
+
+def glory_art(cfg, btoken, achievement_id, now_iso):
+    """The portrait of the boss an achievement is earned on, or None. Decoration: by the
+    time this runs the achievement is claimed, so nothing here may raise."""
+    import glory
+    try:
+        text = blizzard.achievement(btoken, achievement_id).get("description") or ""
+        boss = glory.boss_in(text, blizzard.raid_bosses(btoken, text))
+        return boss_art(cfg, boss, now_iso) if boss else None
+    except Exception as exc:                                       # noqa: BLE001
+        log("glory_art_failed", achievement=achievement_id, error=repr(exc))
+        return None
 
 
 def rollcall_setup(event, cfg, now_iso):

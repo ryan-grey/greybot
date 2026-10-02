@@ -130,3 +130,19 @@ def resolve(token, boss_name, normalize):
         return None, None
     display = creature_display_id(token, enc)
     return display, art_url(display)
+
+
+def achievement(token, achievement_id):
+    """One achievement: name, reward, and for a meta the achievements listed under it."""
+    return _get(token, f"/data/wow/achievement/{int(achievement_id)}")
+
+
+def raid_bosses(token, text):
+    """Boss names of the raid `text` mentions (an achievement's description names its
+    raid), or [] when it names none."""
+    for inst in (_get(token, "/data/wow/journal-instance/index").get("instances") or []):
+        name = _name_of(inst.get("name"))
+        if name and name.lower() in str(text).lower():
+            detail = _get(token, f"/data/wow/journal-instance/{int(inst['id'])}")
+            return [_name_of(e.get("name")) for e in (detail.get("encounters") or [])]
+    return []

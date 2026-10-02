@@ -783,6 +783,96 @@ def get_vault_characters(scope):
     return json.loads(item["members"]["S"]) if item else {}
 
 
+# The raid meta achievement. One setup row per install saying which meta to watch, and one
+# state row per meta: the same claim-before-post set a tier's bosses use, holding
+# achievement ids, plus the profile signatures that let an unchanged character be skipped.
+GLORY_SETUP_SK = "GLORY#SETUP"
+
+
+def glory_sk(meta_id):
+    return f"GLORY#{int(meta_id)}"
+
+
+def get_glory_setup(scope):
+    """{"achievement": id, "live": bool, "role": id or "", "channel": id or ""} or None."""
+    item = ddb.get_item(TableName=TABLE, ConsistentRead=True,
+                        Key={"pk": _s(scope.tenant), "sk": _s(GLORY_SETUP_SK)}).get("Item")
+    if not item:
+        return None
+    return {"achievement": int(item["achievement"]["N"]),
+            "live": bool((item.get("live") or {}).get("BOOL")),
+            "role": (item.get("role") or {}).get("S") or "",
+            "channel": (item.get("channel") or {}).get("S") or ""}
+
+
+def put_glory_setup(scope, achievement, now_iso, live=False, role="", channel=""):
+    """`live` defaults to off, as the roll call's does: a setup can be saved and dry-run
+    against real characters before the first card reaches a channel."""
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(scope.tenant), "sk": _s(GLORY_SETUP_SK), "achievement": _n(int(achievement)),
+        "live": {"BOOL": bool(live)}, "role": _s(role or ""), "channel": _s(channel or ""),
+        "updatedAt": _s(now_iso)})
+
+
+def load_glory(scope, meta_id):
+    """{"announced": {achievement id}, "sigs": {character: signature}}, or None before the
+    first live run has seeded it."""
+    item = ddb.get_item(TableName=TABLE, ConsistentRead=True,
+                        Key={"pk": _s(scope.tenant), "sk": _s(glory_sk(meta_id))}).get("Item")
+    if not item:
+        return None
+    return {"announced": {int(a) for a in (item.get("announced") or {}).get("NS") or []},
+            "sigs": json.loads((item.get("sigs") or {}).get("S") or "{}")}
+
+
+def seed_glory(scope, meta_id, already, now_iso):
+    """First live run: record what was earned before the bot was watching, announce none of
+    it. False when the row already exists."""
+    item = {"pk": _s(scope.tenant), "sk": _s(glory_sk(meta_id)), "seededAt": _s(now_iso)}
+    if already:                    # DynamoDB has no empty number set
+        item["announced"] = {"NS": sorted(str(int(a)) for a in already)}
+    try:
+        ddb.put_item(TableName=TABLE, Item=item,
+                     ConditionExpression="attribute_not_exists(pk)")
+        return True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def claim_glory(scope, meta_id, achievement_id):
+    """Atomically claim one achievement's announcement. Same discipline as claim_boss."""
+    try:
+        ddb.update_item(
+            TableName=TABLE, Key={"pk": _s(scope.tenant), "sk": _s(glory_sk(meta_id))},
+            UpdateExpression="ADD announced :a",
+            ConditionExpression=("attribute_exists(pk) AND "
+                                 "(attribute_not_exists(announced) OR NOT contains(announced, :k))"),
+            ExpressionAttributeValues={":a": {"NS": [str(int(achievement_id))]},
+                                       ":k": _n(int(achievement_id))})
+        return True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def release_glory(scope, meta_id, achievement_id):
+    """Undo a claim whose card never reached Discord, so the next run retries it."""
+    ddb.update_item(TableName=TABLE, Key={"pk": _s(scope.tenant), "sk": _s(glory_sk(meta_id))},
+                    UpdateExpression="DELETE announced :a",
+                    ExpressionAttributeValues={":a": {"NS": [str(int(achievement_id))]}})
+
+
+def put_glory_sigs(scope, meta_id, sigs, now_iso):
+    ddb.update_item(TableName=TABLE, Key={"pk": _s(scope.tenant), "sk": _s(glory_sk(meta_id))},
+                    UpdateExpression="SET sigs = :s, checkedAt = :t",
+                    ConditionExpression="attribute_exists(pk)",
+                    ExpressionAttributeValues={":s": _s(json.dumps(sigs, sort_keys=True)),
+                                               ":t": _s(now_iso)})
+
+
 def get_rollcall_setup(scope):
     """{"voice_channel": id, "members": {discord_id: [character, ...]}} or None."""
     res = ddb.get_item(TableName=TABLE,
