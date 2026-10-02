@@ -1,27 +1,32 @@
-"""The raid meta achievement: "Glory of the <tier> Raider" and the achievements under it.
+"""The raid meta achievement: "Glory of the <tier> Raider" and the achievements under it,
+tracked FOR THE GUILD.
 
-One card the first time anyone on the team holds each listed achievement, then a gold one
-the first time anyone holds the meta itself. Never one per raider: a ten-boss raid earning
-an achievement together is one piece of news, not twenty.
+One card when the guild earns each listed achievement, then a gold one when it has earned
+them all. Nobody is named: this is the guild's progress, not a raider's.
 
-WHERE IT COMES FROM. Blizzard's character achievements profile, the only source that has
-them -- Warcraft Logs and Raider.IO carry kills, not achievements. Two things about it
-shape everything below:
+THERE IS NO GUILD RECORD TO READ. Blizzard's guild achievements are the Guild Runs -- boss
+kills in a guild group -- and the Glory achievements are not among them. They exist only on
+characters. So "the guild earned it" is derived: GROUP_MIN or more watched raiders earning
+the same achievement within GROUP_WINDOW_MS of each other is a guild group doing it
+together. One raider picking it up in a pug is one timestamp on its own and counts for
+nothing, now or later -- that raider simply is not part of the group when the guild does it.
+
+WHERE IT COMES FROM. Blizzard's character achievements profile. Two things about it shape
+everything below:
 
   It is a SNAPSHOT TAKEN AT LOGOUT. An achievement earned at 9:40 appears when that
-  character next logs out, not at 9:40, and an alt that has not logged in since does not
-  show it at all even though it is account-wide. So every mapped character is read, not
-  one per member, and a card names whoever was visible when it was first seen.
+  character next logs out, and an alt that has not logged in since does not show it at all
+  even though it is account-wide. So every mapped character is read, and what each person
+  holds is KEPT between runs: the group fills in over the evening as people log out, and
+  the card goes out on the run that sees the tenth.
 
   It is ONE TO TWO MEGABYTES per character. The character summary is 4 KB and carries the
   achievement points and last login, which change whenever the big document could have.
   That pair is the signature: an unchanged one skips the download, so a quiet half hour
   costs a few small calls rather than forty megabytes.
 
-THE META IS THE NINTH ACHIEVEMENT, not a count of the other eight. Eight first entries can
-belong to eight different people, none of whom has the mount; "completed" is only true when
-somebody holds the meta. Whoever does holds all of its parts, so those are announced first,
-in the order they were earned, and the meta last.
+THE META IS THE GUILD'S TOO. It posts when every listed achievement has been earned by the
+guild, whether or not any one raider holds the meta and its mount yet.
 
 WHO IS WATCHED. The install's roll call mapping (ROLLCALL#SETUP) with the vault's character
 locks applied, narrowed to one role's holders when the setup names a role.
@@ -36,7 +41,8 @@ import raiderio
 
 BRAND_ACCENT = 0x5CA8F0
 GOLD = 0xE8B44A
-NAMES_ON_CARD = 4
+GROUP_MIN = 10                 # raiders earning it together before it is the guild's
+GROUP_WINDOW_MS = 60_000       # one kill stamps everyone within the same few seconds
 
 
 def log(event, **fields):
@@ -88,45 +94,53 @@ def people(member_ids, mapping, roster, default_realm):
     return out
 
 
-def merge(holders, person, name, got):
-    """Record one character's achievements against its player: one entry per person per
-    achievement, the earliest wins, so a main and an alt are not two names on the card."""
+def merge(held, person, got):
+    """Record one character's achievements against its player. One entry per person per
+    achievement and the earliest wins, so a main and an alt are one raider."""
     for aid, at in got.items():
-        mine = holders.setdefault(aid, {})
-        if person not in mine or at < mine[person]["at"]:
-            mine[person] = {"at": at, "name": name}
+        mine = held.setdefault(aid, {})
+        if person not in mine or at < mine[person]:
+            mine[person] = at
 
 
-def fresh(holders, announced, order):
-    """Achievement ids with a holder and no announcement, oldest first, the meta (last in
-    `order`) always last."""
-    new = [aid for aid in order if aid in holders and aid not in announced]
-    meta = order[-1]
-    return sorted(new, key=lambda aid: (aid == meta, first_at(holders[aid]), order.index(aid)))
+def combine(stored, scanned):
+    """What everyone is known to hold: what earlier runs saw plus what this one read."""
+    out = {aid: dict(entry) for aid, entry in stored.items()}
+    for aid, entry in scanned.items():
+        for person, at in entry.items():
+            merge(out, person, {aid: at})
+    return out
 
 
-def first_at(entry):
-    return min(h["at"] for h in entry.values())
+def group_at(entry, need=GROUP_MIN, window=GROUP_WINDOW_MS):
+    """When a guild group earned this: the first moment `need` people earned it within
+    `window` of each other, or None while no such group exists."""
+    times = sorted((entry or {}).values())
+    for i in range(len(times) - need + 1):
+        if times[i + need - 1] - times[i] <= window:
+            return times[i]
+    return None
 
 
-def names_text(entry, limit=NAMES_ON_CARD):
-    names = [h["name"] for h in sorted(entry.values(), key=lambda h: (h["at"], fold(h["name"])))]
-    if len(names) > limit:
-        return ", ".join(names[:limit]) + f" +{len(names) - limit} more"
-    if len(names) > 1:
-        return ", ".join(names[:-1]) + " and " + names[-1]
-    return names[0] if names else ""
+def guild_earned(held, ids, need=GROUP_MIN):
+    """{achievement id: when} for the listed achievements a guild group has earned."""
+    return {aid: at for aid in ids if (at := group_at(held.get(aid), need)) is not None}
 
 
-def sub_copy(who, name, entry, done, total, meta_name):
-    return {"headline": "Raid achievement earned", "name": name,
-            "lines": [f"First in {who}: {names_text(entry)}",
-                      f"{done} of {total} toward {meta_name}"],
-            "title": f"Raid achievement earned: {name}", "color": BRAND_ACCENT}
+def fresh(earned_at, announced):
+    """Guild-earned achievements not yet announced, in the order they were earned."""
+    return sorted((aid for aid in earned_at if aid not in announced),
+                  key=lambda aid: (earned_at[aid], aid))
 
 
-def meta_copy(who, meta, entry):
-    lines = [f"All {len(meta['subs'])} raid achievements, first: {names_text(entry)}"]
+def sub_copy(who, name, done, total, meta_name):
+    return {"headline": f"{who} earned", "name": name,
+            "lines": [f"{done} of {total} toward {meta_name}"],
+            "title": f"{who} earned {name}", "color": BRAND_ACCENT}
+
+
+def meta_copy(who, meta):
+    lines = [f"All {len(meta['subs'])} raid achievements earned"]
     if meta["reward"]:
         lines.append(meta["reward"])
     return {"headline": f"{who} completed", "name": meta["name"], "lines": lines,
@@ -176,7 +190,7 @@ def _path(realm, name):
 def scan(watched, token, get, sigs, ids):
     """Read every watched character whose signature moved.
 
-    {"holders": {achievement id: {person: {"at", "name"}}}, "sigs": {character: signature},
+    {"held": {achievement id: {person: earned ms}}, "sigs": {character: signature},
      "read": n, "unchanged": n, "missing": [character]}. A character Blizzard will not
     answer for (another realm, private, renamed) is `missing` and costs nothing else.
     """
@@ -197,7 +211,7 @@ def scan(watched, token, get, sigs, ids):
             return person, name, key, None, None
 
     jobs = [(p["id"], name, realm) for p in watched for name, realm in p["characters"]]
-    out = {"holders": {}, "sigs": {}, "read": 0, "unchanged": 0, "missing": []}
+    out = {"held": {}, "sigs": {}, "read": 0, "unchanged": 0, "missing": []}
     with ThreadPoolExecutor(max_workers=4) as pool:
         for person, name, key, sig, got in pool.map(one, jobs):
             if sig is None:
@@ -208,5 +222,5 @@ def scan(watched, token, get, sigs, ids):
                 out["unchanged"] += 1
                 continue
             out["read"] += 1
-            merge(out["holders"], person, name, got)
+            merge(out["held"], person, got)
     return out

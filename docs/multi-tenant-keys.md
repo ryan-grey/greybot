@@ -60,7 +60,7 @@ should see the same value.
 | `BOOTSTRAP` | has this install been seeded | a NEW tenant must not announce history it never saw |
 | `HEALTH` | this install's health | one tenant's bad channel is not another's problem |
 | `GLORY#SETUP` | which raid meta achievement to watch, live flag | a per-install choice |
-| `GLORY#<meta id>` | achievement dedupe set, profile signatures | two installs post to two channels |
+| `GLORY#<meta id>` | achievement dedupe set, who holds what, profile signatures | two installs post to two channels |
 
 `BOOTSTRAP` is the subtle one. It reads like a fact about the guild, but its job
 is "first run announces nothing". A second tenant joining a guild that is already

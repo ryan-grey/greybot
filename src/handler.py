@@ -2254,23 +2254,27 @@ def vault_week(event, cfg, now):
 
 def glory_setup(event, cfg, now_iso):
     """`{"admin":"glory_setup","team":"prog-raid","achievement":63254,"live":false,
-    "role":"<role id>","channel":"<channel id>"}` -- tell one install which raid meta
-    achievement to watch. `role` narrows the watched members to that role's holders and
-    `channel` posts somewhere other than the install's own channel; both are optional.
-    Replaces the row whole, so always send live again."""
+    "role":"<role id>","channel":"<channel id>","group":10}` -- tell one install which raid
+    meta achievement to watch. `role` narrows the watched members to that role's holders,
+    `channel` posts somewhere other than the install's own channel, and `group` is how many
+    of them must earn an achievement together before it is the guild's (default
+    glory.GROUP_MIN); all three are optional. Replaces the row whole, so always send live
+    again."""
     wanted = event.get("team") or None
     pairs = [(s, c) for s, c in tenant_configs(cfg) if (s.team or None) == wanted]
     if not pairs:
         raise RuntimeError(f"no registered install with team {wanted!r}")
-    achievement = event.get("achievement")
+    achievement, group = event.get("achievement"), event.get("group") or 0
     if not isinstance(achievement, int) or achievement <= 0:
         raise RuntimeError("achievement must be the meta achievement's id")
+    if not isinstance(group, int) or group < 0:
+        raise RuntimeError("group must be a number of raiders")
     role, channel = str(event.get("role") or ""), str(event.get("channel") or "")
     if (role and not role.isdecimal()) or (channel and not channel.isdecimal()):
         raise RuntimeError("role and channel must be Discord ids")
     live = event.get("live") is True
     store.put_glory_setup(pairs[0][0], achievement, now_iso, live=live, role=role,
-                          channel=channel)
+                          channel=channel, group=group)
     log("glory_setup_saved", team=wanted, achievement=achievement, live=live)
     return {"ok": True, "team": wanted, "achievement": achievement, "live": live}
 
@@ -2278,11 +2282,11 @@ def glory_setup(event, cfg, now_iso):
 def glory_check(event, cfg, now):
     """The raid meta achievement, for every install with a GLORY#SETUP row.
 
-      {"mode":"glory","dry":true}  what each watched achievement looks like now; no writes
+      {"mode":"glory","dry":true}  where each achievement stands for the guild; no writes
       {"mode":"glory"}             the half-hourly check -- posts only where the setup is live
 
-    The first live run SEEDS: whatever is already earned is recorded and not announced, as
-    a tier is seeded. `"backfill":true` on that first run announces it instead.
+    The first live run SEEDS: whatever the guild has already earned is recorded and not
+    announced, as a tier is seeded. `"backfill":true` on that first run announces it instead.
     """
     only, results = event.get("team"), []
     for scope, tcfg in tenant_configs(cfg):
@@ -2310,7 +2314,9 @@ def glory_one(event, cfg, tcfg, scope, setup, now):
         raise RuntimeError("achievements need the Blizzard credentials")
     btoken = blizzard.get_token(cfg["blizzard_client_id"], cfg["blizzard_client_secret"])
     meta = glory.meta_definition(blizzard.achievement(btoken, setup["achievement"]))
-    order = [s["id"] for s in meta["subs"]] + [meta["id"]]
+    subs = [s["id"] for s in meta["subs"]]
+    names = {s["id"]: s["name"] for s in meta["subs"]}
+    need = setup.get("group") or glory.GROUP_MIN
 
     mapping = vault.character_mapping((store.get_rollcall_setup(scope) or {}).get("members") or {},
                                       store.get_vault_characters(scope))
@@ -2335,67 +2341,71 @@ def glory_one(event, cfg, tcfg, scope, setup, now):
 
     state = store.load_glory(scope, meta["id"])
     seen = glory.scan(glory.people(watched, mapping, roster, cfg["guild_realm"]), btoken,
-                      blizzard._get, {} if (dry or state is None) else state["sigs"], order)
-    held = seen["holders"]
+                      blizzard._get, {} if (dry or state is None) else state["sigs"], subs)
+    held = glory.combine(state["held"] if state else {}, seen["held"])
+    earned_at = glory.guild_earned(held, subs, need)
     summary = {"team": scope.team, "meta": meta["name"], "members": len(watched),
-               "read": seen["read"], "unchanged": seen["unchanged"],
+               "group": need, "read": seen["read"], "unchanged": seen["unchanged"],
                "missing": len(seen["missing"])}
-    log("glory_scan", **summary)
-    names = {s["id"]: s["name"] for s in meta["subs"]} | {meta["id"]: meta["name"]}
+    log("glory_scan", **summary, earned=len(earned_at))
     if dry:
         announced = state["announced"] if state else set()
         return {"ok": True, "dry": True, **summary, "missingCharacters": seen["missing"],
                 "seeded": state is not None,
-                "announced": [names[a] for a in order if a in announced],
-                "earned": {names[a]: glory.names_text(held[a], limit=99)
-                           for a in order if a in held},
-                "wouldAnnounce": [names[a] for a in glory.fresh(held, announced, order)]}
+                "announced": [names.get(a, meta["name"]) for a in subs + [meta["id"]]
+                              if a in announced],
+                "raidersHolding": {names[a]: len(held.get(a) or {}) for a in subs},
+                "guildEarned": [names[a] for a in subs if a in earned_at],
+                "wouldAnnounce": [names[a] for a in glory.fresh(earned_at, announced)]}
 
     if state is None:
-        already = [] if event.get("backfill") else sorted(held)
+        already = [] if event.get("backfill") else sorted(earned_at)
+        if len(already) == len(subs):
+            already.append(meta["id"])
         store.seed_glory(scope, meta["id"], already, now_iso)
         log("glory_seeded", team=scope.team, meta=meta["id"], already=already)
         state = store.load_glory(scope, meta["id"])
+    # Before any post: the cards are decided from what is held, so once this is saved a
+    # refused post is retried from the row and never depends on reading a character again.
+    store.put_glory_progress(scope, meta["id"], held, seen["sigs"], now_iso)
 
-    who, posted, failed = clear_display_name(tcfg, scope), [], []
-    for aid in glory.fresh(held, state["announced"], order):
+    who, posted, failed = cfg["guild_name"], [], []
+    where = ({"bot_token": cfg["bot_token"], "channel": setup["channel"]}
+             if setup["channel"] else destination(tcfg))
+
+    def announce(aid, copy, when, art_of, **card):
+        """Claim, then post; hand the claim back if Discord refuses it."""
         if not store.claim_glory(scope, meta["id"], aid):
-            continue
+            return False
         state["announced"].add(aid)
-        if aid == meta["id"]:
-            copy = glory.meta_copy(who, meta, held[aid])
-        else:
-            done = sum(1 for s in meta["subs"] if s["id"] in state["announced"])
-            copy = glory.sub_copy(who, names[aid], held[aid], done, len(meta["subs"]),
-                                  meta["name"])
-        # The meta wears the last boss, as an AOTC card does.
-        art = glory_art(tcfg, btoken, meta["subs"][-1]["id"] if aid == meta["id"] else aid,
-                        now_iso)
-        card = kill_card_url(tcfg, f"glory-{meta['id']}", str(aid), copy["name"],
-                             copy["headline"], copy["lines"], art,
-                             accent=kill_card.GOLD if aid == meta["id"] else None,
-                             team=scope.team, animated=aid == meta["id"])
-        when = _iso(_at(glory.first_at(held[aid])))
-        where = ({"bot_token": cfg["bot_token"], "channel": setup["channel"]}
-                 if setup["channel"] else destination(tcfg))
+        url = kill_card_url(tcfg, f"glory-{meta['id']}", str(aid), copy["name"],
+                            copy["headline"], copy["lines"],
+                            glory_art(tcfg, btoken, art_of, now_iso), team=scope.team, **card)
         try:
-            sent = discord.post_to(where, glory.payload(copy, card, when))
+            sent = discord.post_to(where, glory.payload(copy, url, when))
         except discord.DiscordError as exc:
-            # Hand it back so the next run retries. Its profile signature must not be
-            # saved either, or the unchanged character would never be read again.
             store.release_glory(scope, meta["id"], aid)
             state["announced"].discard(aid)
-            failed.append(names[aid])
+            failed.append(copy["name"])
             log("glory_announce_failed", team=scope.team, achievement=aid, error=str(exc))
-            if aid != meta["id"]:
-                break              # keep the cards in the order they were earned
-            continue
+            return False
         _remember_post(scope, sent, "glory", now_iso)
-        posted.append(names[aid])
-        log("announced_glory", team=scope.team, achievement=aid, name=names[aid],
-            meta=aid == meta["id"], earnedAt=when, card=bool(card))
-    if not failed:
-        store.put_glory_sigs(scope, meta["id"], seen["sigs"], now_iso)
+        posted.append(copy["name"])
+        log("announced_glory", team=scope.team, achievement=aid, name=copy["name"],
+            meta=aid == meta["id"], earnedAt=when, card=bool(url))
+        return True
+
+    for aid in glory.fresh(earned_at, state["announced"]):
+        done = sum(1 for s in subs if s in state["announced"]) + 1
+        copy = glory.sub_copy(who, names[aid], done, len(subs), meta["name"])
+        if not announce(aid, copy, _iso(_at(earned_at[aid])), aid) and failed:
+            break                  # keep the cards in the order they were earned
+    if all(s in state["announced"] for s in subs) and meta["id"] not in state["announced"]:
+        # The meta wears the last boss, as an AOTC card does, and the date of the
+        # achievement that finished it.
+        announce(meta["id"], glory.meta_copy(who, meta),
+                 _iso(_at(max(earned_at.values()))) if earned_at else now_iso, subs[-1],
+                 accent=kill_card.GOLD, animated=True)
     return {"ok": not failed, **summary, "posted": posted, "failed": failed}
 
 

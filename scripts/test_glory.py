@@ -1,5 +1,5 @@
-"""Offline tests for the raid meta achievement: what counts as earned, who is credited,
-the order cards go out in, and that nothing is posted until the setup is live."""
+"""Offline tests for the raid meta achievement: what counts as earned by the guild, the
+order cards go out in, and that nothing is posted until the setup is live."""
 import os
 import sys
 import unittest
@@ -18,7 +18,7 @@ META = {"id": 900, "name": "Glory of the Test Raider", "reward_description": "Mo
             {"id": 1, "achievement": {"id": 101, "name": "First Thing"}},
             {"id": 2, "achievement": {"id": 102, "name": "Second Thing"}},
             {"id": 3, "description": "a criterion with no achievement"}]}}
-ORDER = [101, 102, 900]
+SUBS = [101, 102]
 NOW = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
 SCOPE = keys.Scope.build("us", "proudmoore", "Scrambled", "1", team="prog-raid")
 CFG = {"guild_region": "us", "guild_realm": "proudmoore", "guild_name": "Scrambled",
@@ -53,26 +53,35 @@ class PureTests(unittest.TestCase):
             glory.meta_definition({"id": 5, "name": "Not a meta"})
 
     def test_progress_is_not_earned(self):
-        got = glory.earned(profile(1, (101, 5000)), ORDER)
-        self.assertEqual(got, {101: 5000})
+        self.assertEqual(glory.earned(profile(1, (101, 5000)), SUBS), {101: 5000})
 
-    def test_one_entry_per_person_and_the_earliest_wins(self):
-        holders = {}
-        glory.merge(holders, "a", "Main", {101: 9000})
-        glory.merge(holders, "a", "Alt", {101: 8000})
-        glory.merge(holders, "b", "Other", {101: 8500})
-        self.assertEqual(holders[101]["a"], {"at": 8000, "name": "Alt"})
-        self.assertEqual(glory.names_text(holders[101]), "Alt and Other")
+    def test_a_main_and_an_alt_are_one_raider(self):
+        held = {}
+        glory.merge(held, "a", {101: 9000})
+        glory.merge(held, "a", {101: 8000})
+        glory.merge(held, "b", {101: 8500})
+        self.assertEqual(held, {101: {"a": 8000, "b": 8500}})
 
-    def test_long_name_lists_are_cut(self):
-        entry = {str(i): {"at": i, "name": f"N{i}"} for i in range(6)}
-        self.assertEqual(glory.names_text(entry), "N0, N1, N2, N3 +2 more")
+    def test_a_guild_group_is_many_raiders_at_one_moment(self):
+        together = {str(i): 1_000_000 + i * 1000 for i in range(10)}
+        self.assertEqual(glory.group_at(together), 1_000_000)
+        # Nine is not a group, and neither are ten who each got it on a different day.
+        self.assertIsNone(glory.group_at(dict(list(together.items())[:9])))
+        self.assertIsNone(glory.group_at({str(i): i * 86_400_000 for i in range(10)}))
+        # A raider who had it from a pug last week is simply not part of the group.
+        self.assertEqual(glory.group_at({**together, "pug": 5}), 1_000_000)
+        self.assertEqual(glory.group_at({"a": 1, "b": 2}, need=2), 1)
 
-    def test_oldest_first_and_the_meta_last(self):
-        holders = {900: {"a": {"at": 1, "name": "A"}}, 102: {"a": {"at": 5, "name": "A"}},
-                   101: {"a": {"at": 9, "name": "A"}}}
-        self.assertEqual(glory.fresh(holders, set(), ORDER), [102, 101, 900])
-        self.assertEqual(glory.fresh(holders, {102}, ORDER), [101, 900])
+    def test_holdings_accumulate_across_runs(self):
+        first = {101: {str(i): 1000 for i in range(6)}}
+        later = {101: {str(i): 1000 for i in range(6, 10)}}
+        self.assertEqual(glory.guild_earned(first, SUBS), {})
+        self.assertEqual(glory.guild_earned(glory.combine(first, later), SUBS), {101: 1000})
+        self.assertEqual(first[101], {str(i): 1000 for i in range(6)})
+
+    def test_announced_in_the_order_earned(self):
+        self.assertEqual(glory.fresh({101: 9, 102: 5}, set()), [102, 101])
+        self.assertEqual(glory.fresh({101: 9, 102: 5}, {102}), [101])
 
     def test_boss_from_a_description(self):
         bosses = ["Nek'zali the Soulcoiler", "The Lost Explorers", "Vashnik the Malignant",
@@ -85,11 +94,10 @@ class PureTests(unittest.TestCase):
                          "The Twin Fangs")
         self.assertIsNone(glory.boss_in("Defeat the raid.", bosses))
 
-    def test_the_message_pings_nobody_and_never_says_it_twice(self):
-        copy = glory.sub_copy("Prog Raid", "First Thing", {"a": {"at": 1, "name": "A"}}, 1, 2,
-                              "Glory of the Test Raider")
-        self.assertEqual(copy["lines"], ["First in Prog Raid: A",
-                                         "1 of 2 toward Glory of the Test Raider"])
+    def test_the_message_credits_the_guild_and_pings_nobody(self):
+        copy = glory.sub_copy("Scrambled", "First Thing", 1, 2, "Glory of the Test Raider")
+        self.assertEqual(copy["title"], "Scrambled earned First Thing")
+        self.assertEqual(copy["lines"], ["1 of 2 toward Glory of the Test Raider"])
         plain = glory.payload(copy)
         self.assertEqual(plain["allowed_mentions"], {"parse": []})
         self.assertIn("description", plain["embeds"][0])
@@ -102,16 +110,16 @@ class ScanTests(unittest.TestCase):
 
     def test_reads_every_character_and_reports_the_missing(self):
         get = getter({"main": profile(10), "alt": profile(20, (101, 7000))})
-        seen = glory.scan(self.WATCHED, "t", get, {}, ORDER)
-        self.assertEqual(seen["holders"], {101: {"a": {"at": 7000, "name": "Alt"}}})
+        seen = glory.scan(self.WATCHED, "t", get, {}, SUBS)
+        self.assertEqual(seen["held"], {101: {"a": 7000}})
         self.assertEqual((seen["read"], seen["unchanged"], seen["missing"]), (2, 0, ["Gone"]))
 
     def test_an_unchanged_signature_skips_the_download(self):
         calls = []
         get = getter({"main": profile(10), "alt": profile(20, (101, 7000))}, calls)
-        sigs = glory.scan(self.WATCHED, "t", get, {}, ORDER)["sigs"]
+        sigs = glory.scan(self.WATCHED, "t", get, {}, SUBS)["sigs"]
         del calls[:]
-        seen = glory.scan(self.WATCHED, "t", get, sigs, ORDER)
+        seen = glory.scan(self.WATCHED, "t", get, sigs, SUBS)
         self.assertEqual((seen["read"], seen["unchanged"]), (0, 2))
         self.assertFalse([c for c in calls if c.endswith("/achievements")])
         self.assertEqual(seen["sigs"], sigs)
@@ -121,14 +129,17 @@ class Store:
     """The state row, in memory, with the same claim semantics."""
 
     def __init__(self, state=None):
-        self.state, self.sigs_saved = state, 0
+        self.state = state
 
     def load(self, _scope, _meta):
-        return None if self.state is None else {"announced": set(self.state["announced"]),
-                                                "sigs": dict(self.state["sigs"])}
+        if self.state is None:
+            return None
+        return {"announced": set(self.state["announced"]),
+                "held": {aid: dict(e) for aid, e in self.state.get("held", {}).items()},
+                "sigs": dict(self.state.get("sigs", {}))}
 
     def seed(self, _scope, _meta, already, _now):
-        self.state = {"announced": set(already), "sigs": {}}
+        self.state = {"announced": set(already), "held": {}, "sigs": {}}
         return True
 
     def claim(self, _scope, _meta, aid):
@@ -140,8 +151,13 @@ class Store:
     def release(self, _scope, _meta, aid):
         self.state["announced"].discard(aid)
 
-    def put_sigs(self, _scope, _meta, sigs, _now):
-        self.state["sigs"], self.sigs_saved = sigs, self.sigs_saved + 1
+    def progress(self, _scope, _meta, held, sigs, _now):
+        self.state["held"], self.state["sigs"] = held, sigs
+
+
+def raid(*done, who="abcdefghij"):
+    """{character: profile} for a raid group that all earned `done` together."""
+    return {name: profile(i + 1, *done) for i, name in enumerate(who)}
 
 
 class FlowTests(unittest.TestCase):
@@ -151,8 +167,8 @@ class FlowTests(unittest.TestCase):
         def post_to(where, payload, **_kw):
             self.posts.append((where, payload["embeds"][0]["title"]))
             return None
-        setup = {"achievement": 900, "live": live, "role": "", "channel": ""}
-        rollcall = {"members": {"a": ["Main"], "b": ["Other"]}}
+        setup = {"achievement": 900, "live": live, "role": "", "channel": "", "group": 0}
+        rollcall = {"members": {name: [name] for name in "abcdefghijkl"}}
         s = handler.store
         with patch.object(handler, "tenant_configs", return_value=[(SCOPE, CFG)]), \
                 patch.object(s, "get_glory_setup", return_value=setup), \
@@ -162,7 +178,7 @@ class FlowTests(unittest.TestCase):
                 patch.object(s, "seed_glory", self.store.seed), \
                 patch.object(s, "claim_glory", self.store.claim), \
                 patch.object(s, "release_glory", self.store.release), \
-                patch.object(s, "put_glory_sigs", self.store.put_sigs), \
+                patch.object(s, "put_glory_progress", self.store.progress), \
                 patch.object(s, "record_post"), \
                 patch.object(handler.blizzard, "get_token", return_value="t") as token, \
                 patch.object(handler.blizzard, "achievement", return_value=META), \
@@ -170,7 +186,8 @@ class FlowTests(unittest.TestCase):
                 patch.object(handler.blizzard, "_get", getter(characters)), \
                 patch.object(handler.raiderio, "_get", return_value={"members": []}), \
                 patch.object(handler, "kill_card_url", return_value=None), \
-                patch.object(handler.discord, "post_to", post or post_to):
+                patch.object(handler.discord, "post_to", post or post_to), \
+                patch("builtins.print"):
             self.token = token
             return handler.glory_check(event or {"mode": "glory"}, CFG, NOW)["results"][0]
 
@@ -178,59 +195,69 @@ class FlowTests(unittest.TestCase):
         return [title for _where, title in self.posts]
 
     def test_nothing_runs_until_the_setup_is_live(self):
-        got = self.run_check({"main": profile(1, (101, 5))}, None, live=False)
+        got = self.run_check(raid((101, 5)), None, live=False)
         self.assertEqual(got, {"ok": True, "team": "prog-raid", "skipped": "glory_not_live"})
         self.token.assert_not_called()
         self.assertEqual(self.posts, [])
         self.assertIsNone(self.store.state)
 
     def test_a_dry_run_writes_nothing(self):
-        got = self.run_check({"main": profile(1, (101, 5))}, None, {"mode": "glory", "dry": True},
-                             live=False)
-        self.assertEqual(got["earned"], {"First Thing": "Main"})
+        got = self.run_check(raid((101, 5)), None, {"mode": "glory", "dry": True}, live=False)
+        self.assertEqual(got["raidersHolding"], {"First Thing": 10, "Second Thing": 0})
         self.assertEqual(got["wouldAnnounce"], ["First Thing"])
-        self.assertEqual(got["missingCharacters"], ["Other"])
+        self.assertEqual(sorted(got["missingCharacters"]), ["k", "l"])
         self.assertIsNone(self.store.state)
         self.assertEqual(self.posts, [])
 
     def test_the_first_live_run_seeds_and_says_nothing(self):
-        got = self.run_check({"main": profile(1, (101, 5))}, None)
+        got = self.run_check(raid((101, 5)), None)
         self.assertEqual(got["posted"], [])
         self.assertEqual(self.store.state["announced"], {101})
-        self.assertEqual(self.store.sigs_saved, 1)
+        self.assertEqual(len(self.store.state["held"][101]), 10)
+
+    def test_a_tier_already_finished_seeds_the_meta_too(self):
+        self.run_check(raid((101, 5), (102, 9)), None)
+        self.assertEqual((self.store.state["announced"], self.posts), ({101, 102, 900}, []))
 
     def test_backfill_announces_what_was_already_earned(self):
-        got = self.run_check({"main": profile(1, (101, 5))}, None,
-                             {"mode": "glory", "backfill": True})
+        got = self.run_check(raid((101, 5)), None, {"mode": "glory", "backfill": True})
         self.assertEqual(got["posted"], ["First Thing"])
 
-    def test_each_achievement_is_announced_once(self):
-        state = {"announced": {101}, "sigs": {}}
-        chars = {"main": profile(1, (101, 5), (102, 9)), "other": profile(2, (102, 9))}
-        got = self.run_check(chars, state)
-        self.assertEqual(self.titles(), ["Raid achievement earned: Second Thing"])
+    def test_one_raider_alone_is_not_the_guild(self):
+        got = self.run_check(raid((101, 5), who="abc"), {"announced": set()})
+        self.assertEqual((got["posted"], self.posts), ([], []))
+        self.assertEqual(self.store.state["held"], {101: {"a": 5, "b": 5, "c": 5}})
+
+    def test_the_card_waits_for_the_group_to_log_out(self):
+        # Six are visible on the first run; the other four log out before the second.
+        early = {**raid((101, 5), who="abcdef"),
+                 **{n: profile(50 + i) for i, n in enumerate("ghij")}}
+        self.run_check(early, {"announced": set()})
+        self.assertEqual(self.posts, [])
+        late = {**early, **{n: profile(90 + i, (101, 5)) for i, n in enumerate("ghij")}}
+        got = self.run_check(late, self.store.state)
+        self.assertEqual((got["read"], got["unchanged"]), (4, 6))
+        self.assertEqual(self.titles(), ["Scrambled earned First Thing"])
         self.assertEqual(self.posts[0][0], {"bot_token": "t", "channel": "55"})
-        self.assertEqual(got["posted"], ["Second Thing"])
-        again = self.run_check(chars, self.store.state)
+        again = self.run_check(late, self.store.state)
         self.assertEqual((again["posted"], again["read"], self.posts), ([], 0, []))
 
-    def test_the_meta_follows_its_parts(self):
-        chars = {"main": profile(1, (900, 9), (102, 9), (101, 5))}
-        self.run_check(chars, {"announced": set(), "sigs": {}})
-        self.assertEqual(self.titles(), ["Raid achievement earned: First Thing",
-                                         "Raid achievement earned: Second Thing",
-                                         "Prog Raid completed Glory of the Test Raider"])
+    def test_the_meta_follows_the_last_achievement(self):
+        self.run_check(raid((102, 9), (101, 5)), {"announced": set()})
+        self.assertEqual(self.titles(), ["Scrambled earned First Thing",
+                                         "Scrambled earned Second Thing",
+                                         "Scrambled completed Glory of the Test Raider"])
+        self.assertEqual(self.store.state["announced"], {101, 102, 900})
 
-    def test_a_failed_post_is_handed_back_and_retried(self):
+    def test_a_failed_post_is_handed_back_and_retried_without_a_new_read(self):
         def refuse(*_a, **_kw):
             raise handler.discord.DiscordError("no")
-        chars = {"main": profile(1, (101, 5), (102, 9))}
-        got = self.run_check(chars, {"announced": set(), "sigs": {}}, post=refuse)
+        chars = raid((101, 5), (102, 9))
+        got = self.run_check(chars, {"announced": set()}, post=refuse)
         self.assertEqual((got["ok"], got["failed"]), (False, ["First Thing"]))
         self.assertEqual(self.store.state["announced"], set())
-        self.assertEqual(self.store.sigs_saved, 0)
-        self.run_check(chars, self.store.state)
-        self.assertEqual(len(self.posts), 2)
+        got = self.run_check(chars, self.store.state)
+        self.assertEqual((got["read"], len(self.posts)), (0, 3))
 
 
 if __name__ == "__main__":
