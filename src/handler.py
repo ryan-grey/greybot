@@ -1954,7 +1954,8 @@ def poll_one(event, cfg, scope, now, now_iso, started):
     if isinstance(event, dict) and str(event.get("mode") or "").lower() == "rollcall":
         return {"ok": True, "rollcall": roll_call(cfg, scope, token, gid, now,
                                                   dry=bool(event.get("dry", True)),
-                                                  hours=event.get("hours"))}
+                                                  hours=event.get("hours"),
+                                                  revision=event.get("revision"))}
 
     # Recorded first clears retry even after their kills leave the lookback window.
     retry_aotc_events(cfg, scope)
@@ -2311,7 +2312,7 @@ def rollcall_click(body, cfg):
     return answer(f"Posted to <#{tcfg.get('channel_id')}>.")
 
 
-def roll_call(cfg, scope, token, gid, now, dry=False, hours=None):
+def roll_call(cfg, scope, token, gid, now, dry=False, hours=None, revision=None):
     """rollcall.run with this install's name, channel and publisher filled in."""
     def publish(key, body):
         publish_bytes(cfg, key, body, "image/png")
@@ -2334,7 +2335,8 @@ def roll_call(cfg, scope, token, gid, now, dry=False, hours=None):
                         team_name=cfg.get("team_name") or "",
                         destination=None if dry else destination(cfg),
                         publish=publish, post=post, review=review, dry=dry,
-                        max_age_hours=float(hours) if hours else rollcall.MAX_AGE_HOURS)
+                        max_age_hours=float(hours) if hours else rollcall.MAX_AGE_HOURS,
+                        revision=revision if dry else None)
 
 
 def announce_difficulty(token, gid, cfg, scope, profile, index, expansions, kills,

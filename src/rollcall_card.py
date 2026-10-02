@@ -96,11 +96,12 @@ def _chip_rows(canvas, labels, font, width):
     return out
 
 
-def render(team_name, boss, sub, lineup, members, pictures=None):
+def render(team_name, boss, sub, lineup, members, pictures=None, revision=None):
     """PNG bytes, or None.
 
     `lineup` is wcl.pull_lineup's list. `members` is rollcall.assign's output: [{"id", "name",
     "character": the lineup row they played, or None}]. `pictures` maps member id to bytes.
+    `revision` is {"date", "changes": [...]} on a corrected card, drawn as a dated note.
     """
     try:
         from PIL import Image, ImageDraw
@@ -118,6 +119,19 @@ def render(team_name, boss, sub, lineup, members, pictures=None):
         measure_image = Image.new("RGB", (1, 1))
         measure = rc._Canvas(measure_image, ImageDraw.Draw(measure_image), {})
         chips = _chip_rows(measure, labels, measure.font("semibold", 12), WIDTH)
+        revision_lines = []
+        if revision:
+            for note in revision["changes"]:
+                line = "•"
+                for word in note.split():
+                    candidate = line + " " + word
+                    if measure.width(candidate, measure.font("regular", 13)) > full - 24:
+                        revision_lines.append(line)
+                        line = "  " + word
+                    else:
+                        line = candidate
+                revision_lines.append(line)
+        revision_height = 42 + 19 * len(revision_lines) if revision_lines else 0
 
         def box(count):
             return rc.COL_HEAD + 8 + max(count, 1) * ROW + 8
@@ -127,8 +141,8 @@ def render(team_name, boss, sub, lineup, members, pictures=None):
         tails = [(title, people) for title, people in ((NOT_IN_DISCORD, unclaimed),
                                                        (NOT_IN_PULL, outside)) if people]
         head = 24 + 18 + 34 + 22 + 30 * len(chips) + 8
-        height = (rc.TOPBAR + head + body + sum(rc.COL_GAP + box(len(p)) for _t, p in tails)
-                  + rc.PAD)
+        height = (rc.TOPBAR + head + revision_height + body
+                  + sum(rc.COL_GAP + box(len(p)) for _t, p in tails) + rc.PAD)
 
         image = Image.new("RGB", (WIDTH * rc.SCALE, int(height * rc.SCALE)), rc.BG)
         canvas = rc._Canvas(image, ImageDraw.Draw(image), {})
@@ -158,6 +172,15 @@ def render(team_name, boss, sub, lineup, members, pictures=None):
                 canvas.text(cx + 10, y + 7, label, chip, rc.ACCENT)
             y += 30
         y += 8
+
+        if revision_lines:
+            canvas.rect(rc.PAD, y, rc.PAD + full, y + revision_height - 10,
+                        fill=rc.CHIP_ACCENT_BG, radius=8)
+            canvas.text(rc.PAD + 12, y + 9, f"UPDATED {revision['date']} · WHAT CHANGED",
+                        canvas.font("semibold", 12), rc.ACCENT)
+            for index, line in enumerate(revision_lines):
+                canvas.text(rc.PAD + 12, y + 30 + index * 19, line, sub_font, rc.INK)
+            y += revision_height
 
         name_font, small = canvas.font("semibold", 13), canvas.font("regular", 11)
         member_font = canvas.font("regular", 13)

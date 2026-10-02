@@ -166,7 +166,7 @@ def pictures(voice, opener=urllib.request.urlopen):
 # ------------------------------------------------------------------ the post
 
 
-def embed(team_name, pull, lineup, voice, image_url):
+def embed(team_name, pull, lineup, voice, image_url, revision=None):
     # The public wording is the card's: "Discord", never the channel or how members were found.
     _rows, unclaimed, outside = rollcall_card.pair(lineup, voice)
     text = f"{len(lineup)} in the pull"
@@ -175,12 +175,17 @@ def embed(team_name, pull, lineup, voice, image_url):
         text += f"\n{rollcall_card.NOT_IN_PULL}: {names}"[:600]
     if unclaimed:
         text += f"\n{rollcall_card.NOT_IN_DISCORD}: {', '.join(p['name'] for p in unclaimed)}"[:600]
+    card = {"title": f"Roll call · {pull['name']}", "description": text,
+            "color": CARD_COLOR, "image": {"url": image_url},
+            "footer": {"text": "greyBot · attendance at the night's first pull"}}
+    if revision:
+        card["fields"] = [{"name": f"Updated {revision['date']} · What changed",
+                           "value": "\n".join("• " + line for line in revision["changes"]),
+                           "inline": False}]
     return {"allowed_mentions": {"parse": []},
             "nonce": hashlib.sha256(f"rollcall:{team_name}:{pull['night']}".encode()).hexdigest()[:24],
             "enforce_nonce": True,
-            "embeds": [{"title": f"Roll call · {pull['name']}", "description": text,
-                        "color": CARD_COLOR, "image": {"url": image_url},
-                        "footer": {"text": "greyBot · attendance at the night's first pull"}}]}
+            "embeds": [card]}
 
 
 CLICK = "greybot:rollcall:"
@@ -200,13 +205,15 @@ def review_message(team, team_name, pull, payload):
 
 
 def run(cfg, scope, token, fetch_pulls, now, tz, *, team_name, destination, publish, post,
-        review=None, dry=False, max_age_hours=MAX_AGE_HOURS):
+        review=None, dry=False, max_age_hours=MAX_AGE_HOURS, revision=None):
     """Post the roll call for any raid night whose first real pull has just been seen.
 
     `fetch_pulls(since_ms)` returns this install's boss pulls, asked for only once there is a
     setup to use them. `publish(key, bytes)` returns the public URL; `post(destination, payload)` sends it;
     `review(user_id, payload)` DMs the reviewer when the install has one. A dry run draws and
-    publishes under a preview key, claims nothing and posts nothing.
+    publishes under a preview key, claims nothing and posts nothing. `revision` is a dry
+    run's correction note ({"date", "changes"}): it is drawn on the card, and the result then
+    carries the embed so the posted message can be edited to match.
     """
     if not cfg.get("rollcall_secret") or not cfg.get("recap_page_bucket") or not cfg.get("recap_page_url"):
         return []
@@ -238,7 +245,8 @@ def run(cfg, scope, token, fetch_pulls, now, tz, *, team_name, destination, publ
             local = datetime.fromtimestamp(pull["startedAtMs"] / 1000, timezone.utc).astimezone(ZoneInfo(tz))
             sub = (f"{pull['difficulty'].capitalize()} {pull.get('zoneName') or ''}".strip()
                    + f" · {local:%a %b} {local.day} · {local.hour % 12 or 12}:{local:%M %p %Z}")
-            card = rollcall_card.render(team_name, pull["name"], sub, lineup, voice, pictures(voice))
+            card = rollcall_card.render(team_name, pull["name"], sub, lineup, voice,
+                                        pictures(voice), revision=revision)
             if not card:
                 raise RuntimeError("the roll call card could not be drawn")
             # Per team in both cases: two teams raid the same night, and their cards are drawn
@@ -249,7 +257,7 @@ def run(cfg, scope, token, fetch_pulls, now, tz, *, team_name, destination, publ
                       "inKill": len(lineup),
                       "inVoice": len(voice), "notInKill": sum(1 for m in voice if not m["character"]),
                       "url": url, "dry": dry}
-            payload = embed(team_name, pull, lineup, voice, url)
+            payload = embed(team_name, pull, lineup, voice, url, revision=revision)
             outcome = "rollcall_preview"
             if not dry and setup.get("review"):
                 # Held, not posted: the reviewer gets it as a DM and the channel gets it only
@@ -263,6 +271,8 @@ def run(cfg, scope, token, fetch_pulls, now, tz, *, team_name, destination, publ
                 post(destination, payload)
                 outcome = "rollcall_posted"
             log(outcome, team=scope.team, **result)
+            if dry and revision:
+                result = {**result, "embeds": payload["embeds"]}
             results.append(result)
         except Exception as exc:                               # noqa: BLE001
             log("rollcall_failed", team=scope.team, night=pull["night"], boss=pull["name"],

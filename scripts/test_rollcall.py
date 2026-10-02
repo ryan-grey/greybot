@@ -125,7 +125,7 @@ class RunTests(unittest.TestCase):
     CFG = {"rollcall_secret": "s", "recap_page_bucket": "b", "recap_page_url": "https://raids.example"}
     SCOPE = SimpleNamespace(team=None, tenant="T")
 
-    def run_it(self, voice, dry=False, setup=True, claim=True, lineup=LINEUP, live=True):
+    def run_it(self, voice, dry=False, setup=True, claim=True, lineup=LINEUP, live=True, revision=None):
         calls = {"posts": [], "published": [], "released": [], "claimed": []}
         with patch.object(rollcall.store, "get_rollcall_setup", return_value={"voice_channel": "10", "members": {}, "label": "Smoobies", "live": live} if setup else None), \
              patch.object(rollcall.store, "claim_rollcall", side_effect=lambda s, n: calls["claimed"].append(n) or claim), \
@@ -136,7 +136,8 @@ class RunTests(unittest.TestCase):
             results = rollcall.run(self.CFG, self.SCOPE, "token", lambda since: [pull("Altar", MS(2026, 9, 18, 2, 15))], NOW, TZ,
                                    team_name="", destination={"channel": "c"},
                                    publish=lambda key, body: calls["published"].append(key) or "https://raids.example/" + key,
-                                   post=lambda where, payload: calls["posts"].append(payload), dry=dry)
+                                   post=lambda where, payload: calls["posts"].append(payload), dry=dry,
+                                   revision=revision)
         return results, calls
 
     def test_posts_once_with_the_card_and_names_who_was_not_in_the_pull(self):
@@ -176,6 +177,15 @@ class RunTests(unittest.TestCase):
         self.assertEqual((calls["posts"], calls["claimed"], calls["released"]), ([], [], []))
         self.assertTrue(calls["published"][0].startswith("rollcall/preview/guild/"))
         self.assertTrue(results[0]["dry"])
+
+    def test_a_corrected_dry_run_carries_its_dated_note_in_the_message_text(self):
+        note = {"date": "2026-10-02", "changes": ["Dae now paired with Footballbat"]}
+        results, calls = self.run_it(VOICE, dry=True, revision=note)
+        self.assertEqual(calls["posts"], [])
+        self.assertEqual(results[0]["embeds"][0]["fields"],
+                         [{"name": "Updated 2026-10-02 · What changed",
+                           "value": "• Dae now paired with Footballbat", "inline": False}])
+        self.assertNotIn("embeds", self.run_it(VOICE, dry=True)[0][0])
 
     def test_a_post_discord_may_have_accepted_is_never_retried(self):
         with patch.object(rollcall.store, "get_rollcall_setup", return_value={"voice_channel": "10", "members": {}, "label": "", "live": True}), \
@@ -266,6 +276,8 @@ class CardTests(unittest.TestCase):
         everyone = rollcall.assign(LINEUP, VOICE[:4], {"4": ["Deathbrewst"]})
         short = Image.open(io.BytesIO(rollcall_card.render("", "Boss", "", LINEUP, everyone))).size
         self.assertEqual((tall[0], short[0], tall[1] > short[1]), (880, 880, True))   # no leftovers, no bottom panels
+        noted = Image.open(io.BytesIO(rollcall_card.render("", "Boss", "", LINEUP, everyone, revision={"date": "2026-10-02", "changes": ["Dae now paired with Footballbat"]}))).size
+        self.assertEqual((noted[0], noted[1] > short[1]), (880, True))   # the dated note takes its own room
         self.assertEqual(rollcall_card.render("", "Boss", "", [], [])[:4], b"\x89PNG")
         self.assertIsNone(rollcall_card.render("", "Boss", "", object(), []))
 
