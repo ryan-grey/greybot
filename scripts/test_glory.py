@@ -161,7 +161,7 @@ def raid(*done, who="abcdefghij"):
 
 
 class FlowTests(unittest.TestCase):
-    def run_check(self, characters, state, event=None, live=True, post=None):
+    def run_check(self, characters, state, event=None, live=True, post=None, cfg=CFG):
         self.store, self.posts = Store(state), []
 
         def post_to(where, payload, **_kw):
@@ -170,7 +170,7 @@ class FlowTests(unittest.TestCase):
         setup = {"achievement": 900, "live": live, "role": "", "channel": "", "group": 0}
         rollcall = {"members": {name: [name] for name in "abcdefghijkl"}}
         s = handler.store
-        with patch.object(handler, "tenant_configs", return_value=[(SCOPE, CFG)]), \
+        with patch.object(handler, "tenant_configs", return_value=[(SCOPE, cfg)]), \
                 patch.object(s, "get_glory_setup", return_value=setup), \
                 patch.object(s, "get_rollcall_setup", return_value=rollcall), \
                 patch.object(s, "get_vault_characters", return_value={}), \
@@ -189,7 +189,7 @@ class FlowTests(unittest.TestCase):
                 patch.object(handler.discord, "post_to", post or post_to), \
                 patch("builtins.print"):
             self.token = token
-            return handler.glory_check(event or {"mode": "glory"}, CFG, NOW)["results"][0]
+            return handler.glory_check(event or {"mode": "glory"}, cfg, NOW)["results"][0]
 
     def titles(self):
         return [title for _where, title in self.posts]
@@ -217,7 +217,7 @@ class FlowTests(unittest.TestCase):
 
     def test_a_tier_already_finished_seeds_the_meta_too(self):
         self.run_check(raid((101, 5), (102, 9)), None)
-        self.assertEqual((self.store.state["announced"], self.posts), ({101, 102, 900}, []))
+        self.assertEqual((self.store.state["announced"], self.posts), ({101, 102, 900, -900}, []))
 
     def test_backfill_announces_what_was_already_earned(self):
         got = self.run_check(raid((101, 5)), None, {"mode": "glory", "backfill": True})
@@ -248,6 +248,35 @@ class FlowTests(unittest.TestCase):
                                          "Scrambled earned Second Thing",
                                          "Scrambled completed Glory of the Test Raider"])
         self.assertEqual(self.store.state["announced"], {101, 102, 900})
+
+    def test_the_meta_card_alone_also_reaches_general(self):
+        home = dict(CFG, discord_guild_id=handler.SOCIAL_GENERAL_GUILD)
+        general = {"bot_token": "t", "channel": handler.SOCIAL_GENERAL_CHANNEL}
+        self.run_check(raid((102, 9), (101, 5)), {"announced": set()}, cfg=home)
+        self.assertEqual([w["channel"] for w, _t in self.posts], ["55", "55", "55", general["channel"]])
+        self.assertEqual(self.posts[-1], (general, "Scrambled completed Glory of the Test Raider"))
+        self.assertEqual(self.store.state["announced"], {101, 102, 900, -900})
+        self.run_check(raid((102, 9), (101, 5)), self.store.state, cfg=home)
+        self.assertEqual(self.posts, [])
+
+    def test_general_is_retried_without_repeating_the_team_card(self):
+        home = dict(CFG, discord_guild_id=handler.SOCIAL_GENERAL_GUILD)
+
+        def refuse_general(where, payload, **_kw):
+            if where["channel"] == handler.SOCIAL_GENERAL_CHANNEL:
+                raise handler.discord.DiscordError("no")
+            self.posts.append((where, payload["embeds"][0]["title"]))
+        chars = raid((101, 5), (102, 9))
+        got = self.run_check(chars, {"announced": set()}, post=refuse_general, cfg=home)
+        self.assertEqual((got["ok"], self.store.state["announced"]), (False, {101, 102, 900}))
+        self.run_check(chars, self.store.state, cfg=home)
+        self.assertEqual([w["channel"] for w, _t in self.posts], [handler.SOCIAL_GENERAL_CHANNEL])
+
+    def test_a_tier_finished_before_the_bot_watched_never_reaches_general(self):
+        home = dict(CFG, discord_guild_id=handler.SOCIAL_GENERAL_GUILD)
+        self.run_check(raid((101, 5), (102, 9)), None, cfg=home)
+        self.run_check(raid((101, 5), (102, 9)), self.store.state, cfg=home)
+        self.assertEqual(self.posts, [])
 
     def test_a_failed_post_is_handed_back_and_retried_without_a_new_read(self):
         def refuse(*_a, **_kw):

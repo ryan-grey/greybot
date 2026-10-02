@@ -5,7 +5,8 @@ id 63254, this tier) **for the guild** and posts:
 
 - one blue card when the guild earns each achievement listed under it: the achievement and
   "N of 8 toward" the meta;
-- one gold card when the guild has earned all of them.
+- one gold card when the guild has earned all of them. That card alone is also posted to
+  #general, as the Heroic clear card is, once the team's channel has it.
 
 No raider is named and nothing pings.
 

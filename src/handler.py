@@ -2361,7 +2361,7 @@ def glory_one(event, cfg, tcfg, scope, setup, now):
     if state is None:
         already = [] if event.get("backfill") else sorted(earned_at)
         if len(already) == len(subs):
-            already.append(meta["id"])
+            already += [meta["id"], -meta["id"]]
         store.seed_glory(scope, meta["id"], already, now_iso)
         log("glory_seeded", team=scope.team, meta=meta["id"], already=already)
         state = store.load_glory(scope, meta["id"])
@@ -2372,27 +2372,32 @@ def glory_one(event, cfg, tcfg, scope, setup, now):
     who, posted, failed = cfg["guild_name"], [], []
     where = ({"bot_token": cfg["bot_token"], "channel": setup["channel"]}
              if setup["channel"] else destination(tcfg))
+    # The gold card also goes to General, as an AOTC card does. Its claim is the meta's id
+    # negated: a second entry in the same set, so the two posts are retried apart.
+    general = str(tcfg.get("discord_guild_id")) == SOCIAL_GENERAL_GUILD and cfg.get("bot_token")
 
-    def announce(aid, copy, when, art_of, **card):
+    def announce(aid, copy, when, art_of, to=None, claim=None, **card):
         """Claim, then post; hand the claim back if Discord refuses it."""
-        if not store.claim_glory(scope, meta["id"], aid):
+        claim, to = claim or aid, to or where
+        if not store.claim_glory(scope, meta["id"], claim):
             return False
-        state["announced"].add(aid)
+        state["announced"].add(claim)
         url = kill_card_url(tcfg, f"glory-{meta['id']}", str(aid), copy["name"],
                             copy["headline"], copy["lines"],
                             glory_art(tcfg, btoken, art_of, now_iso), team=scope.team, **card)
         try:
-            sent = discord.post_to(where, glory.payload(copy, url, when))
+            sent = discord.post_to(to, glory.payload(copy, url, when))
         except discord.DiscordError as exc:
-            store.release_glory(scope, meta["id"], aid)
-            state["announced"].discard(aid)
+            store.release_glory(scope, meta["id"], claim)
+            state["announced"].discard(claim)
             failed.append(copy["name"])
-            log("glory_announce_failed", team=scope.team, achievement=aid, error=str(exc))
+            log("glory_announce_failed", team=scope.team, achievement=aid, error=str(exc),
+                general=to is not where)
             return False
         _remember_post(scope, sent, "glory", now_iso)
         posted.append(copy["name"])
         log("announced_glory", team=scope.team, achievement=aid, name=copy["name"],
-            meta=aid == meta["id"], earnedAt=when, card=bool(url))
+            meta=aid == meta["id"], earnedAt=when, card=bool(url), general=to is not where)
         return True
 
     for aid in glory.fresh(earned_at, state["announced"]):
@@ -2400,12 +2405,17 @@ def glory_one(event, cfg, tcfg, scope, setup, now):
         copy = glory.sub_copy(who, names[aid], done, len(subs), meta["name"])
         if not announce(aid, copy, _iso(_at(earned_at[aid])), aid) and failed:
             break                  # keep the cards in the order they were earned
-    if all(s in state["announced"] for s in subs) and meta["id"] not in state["announced"]:
+    if all(s in state["announced"] for s in subs):
         # The meta wears the last boss, as an AOTC card does, and the date of the
         # achievement that finished it.
-        announce(meta["id"], glory.meta_copy(who, meta),
-                 _iso(_at(max(earned_at.values()))) if earned_at else now_iso, subs[-1],
-                 accent=kill_card.GOLD, animated=True)
+        gold = (meta["id"], glory.meta_copy(who, meta),
+                _iso(_at(max(earned_at.values()))) if earned_at else now_iso, subs[-1])
+        if meta["id"] not in state["announced"]:
+            announce(*gold, accent=kill_card.GOLD, animated=True)
+        # Only after the team's own channel has it, and only the gold card.
+        if general and meta["id"] in state["announced"] and -meta["id"] not in state["announced"]:
+            announce(*gold, to={"bot_token": cfg["bot_token"], "channel": SOCIAL_GENERAL_CHANNEL},
+                     claim=-meta["id"], accent=kill_card.GOLD, animated=True)
     return {"ok": not failed, **summary, "posted": posted, "failed": failed}
 
 
