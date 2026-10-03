@@ -88,6 +88,55 @@ class RaidDiscordTests(unittest.TestCase):
         self.assertTrue(options and any(o["value"] for o in options))
         self.assertFalse(any(o.get("default") for o in options))
 
+    def test_late_and_tentative_ask_for_a_role_and_spec(self):
+        event = {"title": "Raid", "leaderId": "3", "channelId": "2", "startTime": 9999999999,
+                 "closingTime": 9999999999, "state": "open", "signUps": [],
+                 "classes": [{"name": role, "specs": [{"name": role + str(i), "roleName": role} for i in range(3)]}
+                             for role in ("Tank", "Melee", "Ranged", "Healer")]}
+        eid = raids.create(self.store, "1", "3", "late-test", event)
+        packet = {**self.packet, "type": 3, "message": {"author": {"id": "9"}, "flags": 64}}
+
+        def press(custom, packet_id="123", **data):
+            return service.receive(self.cfg, self.store, {**packet, "id": packet_id,
+                                                          "data": {"custom_id": service.PREFIX + custom, **data}})
+        for status in ("Late", "Tentative"):
+            roles = press("set-status:" + eid + ":" + status)["data"]
+            self.assertIn("as **" + status + "**", roles["content"])
+            self.assertEqual([b["custom_id"] for b in roles["components"][0]["components"]],
+                             [service.PREFIX + "group:" + eid + ":" + r + "/" + status for r in service.ROLE_EMOJIS])
+            menu = press("group:" + eid + ":Ranged/" + status)["data"]["components"][0]["components"][0]
+            self.assertEqual(menu["custom_id"], service.PREFIX + "choose:" + eid + ":" + status)
+            self.assertEqual([o["value"] for o in menu["options"]], ["2:0", "2:1", "2:2"])
+        self.assertEqual(self.store.jobs("1"), [])
+        press("choose:" + eid + ":Late", "124", values=["2:1"])
+        press("set-status:" + eid + ":Absence", "125")
+        queued = {j["id"]: json.loads(j["body"]) for j in self.store.jobs("1")}
+        self.assertEqual(queued["raid-124"], {"operation": "status", "raid_id": eid,
+                                              "value": {"status": "Late", "choice": "2:1"}})
+        self.assertEqual(queued["raid-125"]["value"], "Absence")
+        with self.assertRaises(Denied):
+            press("group:" + eid + ":Ranged/Bench")
+
+    def test_a_status_without_specs_needs_no_spec(self):
+        event = {**service.template(self.store, "1", "standard"), "title": "Example", "description": "",
+                 "leaderId": "3", "channelId": "2", "startTime": 9999999999, "closingTime": 9999999999}
+        eid = raids.create(self.store, "1", "3", "plain", event)
+        packet = {**self.packet, "type": 3, "message": {"author": {"id": "9"}, "flags": 64},
+                  "data": {"custom_id": service.PREFIX + "set-status:" + eid + ":Late"}}
+        service.receive(self.cfg, self.store, packet)
+        self.assertEqual(json.loads(self.store.jobs("1")[0]["body"])["value"], "Late")
+        raids.mutate(self.store, "1", "4", "plain-late", eid, 1, "status", "Late", now=1000)
+        self.assertEqual(raids.read(self.store, "1", eid)["body"]["signUps"][0]["className"], "Late")
+
+    def test_a_late_signup_is_listed_under_late_with_its_spec(self):
+        event = {'title': 'Raid', 'leaderId': '3', 'startTime': 9999999999, 'closingTime': 9999999999, 'state': 'open',
+                 'classes': [{'name': 'Death Knight', 'specs': [{'name': 'Frost1', 'roleName': 'Melee'}]}],
+                 'signUps': [{'userId': '4', 'name': 'Example', 'className': 'Death Knight', 'specName': 'Frost1',
+                              'roleName': 'Late', 'status': 'secondary'}]}
+        embed = service.card(self.cfg, {'id': 'abc', 'body': event}, {})['embeds'][0]
+        self.assertTrue(embed['description'].startswith('**Signups: 0 (+1)**'))
+        self.assertEqual((embed['fields'][0]['name'], embed['fields'][0]['value']), ('Late · 1', '1. Example · Frost'))
+
     def test_event_can_be_edited_from_discord(self):
         event = {"title": "Old title", "description": "d", "leaderId": "3", "channelId": "2",
                  "startTime": 9999999999, "closingTime": 9999999999, "state": "open", "signUps": [],

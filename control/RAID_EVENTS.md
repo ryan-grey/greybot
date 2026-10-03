@@ -13,7 +13,9 @@ the public repository contains no server exports or member fixtures.
 - Dashboard → Raid events opens the same member-authenticated page. The rest of
   the administration site retains its separate Administrator requirement.
 - Card controls support signup/spec changes, Bench/Late/Tentative/Absence,
-  notes and withdrawal. Web controls also provide event editing and closing/reopening.
+  notes and withdrawal. On an event that offers specializations, Late and
+  Tentative ask for the class and spec as a signup does; the member is listed
+  under the status with that spec and holds no roster slot. Web controls also provide event editing and closing/reopening.
 - Each event has an authenticated calendar download with UTC times; roster
   channel access is checked again before the download is returned.
 

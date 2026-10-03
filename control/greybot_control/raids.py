@@ -61,6 +61,16 @@ def choices(event):
     return result
 
 
+STATUSES = ("Bench", "Late", "Tentative", "Absence")
+
+
+def needs_spec(event, status):
+    """Late and Tentative raiders are still expected, so on an event that offers
+    specializations the roster has to know what they would bring."""
+    return status in {"Late", "Tentative"} and any(
+        c["specName"] for c in choices({**event, "classes": event.get("classes", [])}))
+
+
 async def authorize(cfg, store, api, actor, event, *, manage=False, create=False):
     """Refresh membership and channel permissions even for signed button requests."""
     member = await api.request("GET", f"/guilds/{cfg.guild_id}/members/{actor}")
@@ -174,18 +184,29 @@ def mutate(store, guild, actor, action_id, event_id, revision, operation, value,
                     raise Denied("Keep your note within 500 characters")
                 existing["note"] = value
             elif operation == "status":
-                if value not in {"Bench", "Late", "Tentative", "Absence"}:
+                # A plain status name, or {"status", "choice"} when a spec comes with it.
+                picked = value.get("choice") if isinstance(value, dict) else None
+                value = value.get("status") if isinstance(value, dict) else value
+                if value not in STATUSES:
                     raise Denied("Choose a valid signup status")
+                brings = {"className": value, "specName": ""}
+                if needs_spec(event, value):
+                    choice = next((c for c in choices(event) if c["value"] == picked), None)
+                    if not choice:
+                        raise Denied("Choose your class and specialization to sign up as " + value)
+                    brings = {k: choice[k] for k in ("className", "specName")}
                 if not existing:
                     existing = {"userId": actor, "entryTime": now, "position": len(roster) + 1}
                     roster.append(existing)
-                existing.update({"className": value, "specName": "", "roleName": value, "status": "secondary"})
+                existing.update({**brings, "roleName": value, "status": "secondary"})
             else:
                 choice = next((c for c in choices(event) if c["value"] == value), None)
                 if not choice:
                     raise Denied("This signup choice is unavailable")
                 primary_classes = {c["name"] for c in event["classes"] if c.get("type", "primary") == "primary"}
-                attending = [s for s in roster if str(s["userId"]) != actor and s.get("className") in primary_classes]
+                # A Late or Tentative raider keeps their class but holds no slot.
+                attending = [s for s in roster if str(s["userId"]) != actor
+                             and s.get("className") in primary_classes and s.get("roleName") not in STATUSES]
                 cls = event["classes"][choice["class_index"]]
                 spec = cls.get("specs", [])[choice["spec_index"]] if choice["spec_index"] is not None else {}
                 full = len(attending) >= _limit(settings, "limit", 9999)

@@ -23,9 +23,9 @@ def combat_role(choice):
     return {"Tanks": "Tank", "Healers": "Healer"}.get(name, name)
 
 
-def role_buttons(event, event_id):
+def role_buttons(event, event_id, suffix=""):
     available = {combat_role(c) for c in raids.choices({**event, "classes": event.get("classes", [])})}
-    return [{**button(role, "group", event_id + ":" + role),
+    return [{**button(role, "group", event_id + ":" + role + suffix),
              "emoji": EMOJIS.get(emoji, {"id": emoji, "name": role})} for role, emoji in ROLE_EMOJIS.items() if role in available]
 
 
@@ -148,14 +148,26 @@ def receive(cfg, store, packet):
                     raise Denied("Unrecognized raid message")
                 if not int(message.get("flags", 0)) & 64 and message.get("id") != row["message"]:
                     raise Denied("This raid card has been replaced")
+            # Late and Tentative go through the same role and spec menus as a signup,
+            # carrying the status behind a "/" so the final pick records both.
+            arg, wanted = parts[2] if len(parts) == 3 else "", ""
+            if operation in {"page", "group"}:
+                arg, _, wanted = arg.partition("/")
+                if wanted and not raids.needs_spec(event, wanted):
+                    raise Denied("Choose a valid signup status")
+            elif operation == "set-status" and packet["type"] == 3 and raids.needs_spec(event, arg):
+                operation, arg, wanted = "signup", "", arg
+            suffix, signing = "/" + wanted if wanted else "", " as **" + wanted + "**" if wanted else ""
             if operation in {"signup", "page", "group"} and packet["type"] == 3:
                 if operation != "group" and role_buttons(event, row["id"]):
-                    return reply("Choose your combat role for **" + safe(event["title"]) + "**.",
-                                 [{"type": 1, "components": role_buttons(event, row["id"])}])
-                group = parts[2] if operation == "group" and len(parts) == 3 else None
+                    return reply("Choose your combat role for **" + safe(event["title"]) + "**" + signing + ".",
+                                 [{"type": 1, "components": role_buttons(event, row["id"], suffix)}])
+                group = arg if operation == "group" and arg else None
                 if operation == "group" and group not in ROLE_EMOJIS:
                     raise Denied("Choose a valid combat role")
-                page = int(parts[2]) if operation == "page" and len(parts) == 3 else 0
+                if operation == "page" and not arg.isdecimal():
+                    arg = "0"
+                page = int(arg) if operation == "page" else 0
                 available = raids.choices(event)
                 if group:
                     available = [c for c in available if combat_role(c) == group]
@@ -167,19 +179,19 @@ def receive(cfg, store, packet):
                 # member re-choosing last week's spec (still shown selected) silently did
                 # nothing until they withdrew first. The roster card already shows each
                 # member's current pick, so the dropdown does not need to echo it.
-                components = [{"type": 1, "components": [{"type": 3, "custom_id": PREFIX + "choose:" + row["id"],
+                components = [{"type": 1, "components": [{"type": 3, "custom_id": PREFIX + "choose:" + row["id"] + (":" + wanted if wanted else ""),
                     "placeholder": "Choose your " + group.lower() + " specialization" if group else "Choose your class / specialization", "options": [
                         {"label": c["label"][:100], "value": c["value"],
                          **({"emoji": EMOJIS[c["emoji_id"]]} if c.get("emoji_id") in EMOJIS else {})} for c in selected]}]}]
-                pages = [button(str(p + 1), "page", row["id"] + ":" + str(p)) for p in range((len(available) + 24) // 25)]
+                pages = [button(str(p + 1), "page", row["id"] + ":" + str(p) + suffix) for p in range((len(available) + 24) // 25)]
                 if len(pages) > 1:
                     components.append({"type": 1, "components": pages[:5]})
-                return reply("Choose your " + (group.lower() + " specialization" if group else "signup") + " for **" + safe(event["title"]) + "**.", components)
+                return reply("Choose your " + (group.lower() + " specialization" if group else "signup") + " for **" + safe(event["title"]) + "**" + signing + ".", components)
             if operation == "note" and packet["type"] == 3:
                 return modal(PREFIX + "save-note:" + row["id"], "Your raid note", [("note", "Note (leave empty to remove)", 2, False, 500)])
             if operation == "status" and packet["type"] == 3:
                 return reply("Choose your attendance status.", [{"type": 1, "components": [
-                    button(s, "set-status", row["id"] + ":" + s) for s in ("Bench", "Late", "Tentative", "Absence")]}])
+                    button(s, "set-status", row["id"] + ":" + s) for s in raids.STATUSES]}])
             if operation == "edit-open" and packet["type"] == 3:
                 # Managers/leaders can fix the title, date or details without the web
                 # panel. Authorization is re-checked when the edit is applied; this is
@@ -197,6 +209,8 @@ def receive(cfg, store, packet):
                 if len(values) != 1:
                     raise Denied("Choose one signup")
                 operation, value = "signup", values[0]
+                if len(parts) == 3:
+                    operation, value = "status", {"status": parts[2], "choice": values[0]}
             elif operation == "save-note" and packet["type"] == 5:
                 operation, value = "note", fields.get("note", "")
             elif operation == "set-status" and packet["type"] == 3 and len(parts) == 3:

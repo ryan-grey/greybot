@@ -73,9 +73,21 @@ class RaidTests(unittest.TestCase):
         self.change("4", "spec", "signup", "0:1")
         self.assertEqual(self.roster()[0]["specName"], "Shadow")
         self.assertEqual(self.roster()[0]["note"], "Late by ten minutes")
-        self.change("4", "late", "status", "Late")
+        with self.assertRaises(Denied):  # Late and Tentative say what they would bring
+            self.change("4", "late-bare", "status", "Late")
+        with self.assertRaises(Denied):
+            self.change("4", "late-bad", "status", {"status": "Tentative", "choice": "0:9"})
+        self.assertEqual(self.roster()[0]["roleName"], "Ranged")
+        self.change("4", "late", "status", {"status": "Late", "choice": "0:0"})
         self.assertEqual(len(self.roster()), 1)
-        self.assertEqual(self.roster()[0]["className"], "Late")
+        self.assertEqual([self.roster()[0][k] for k in ("className", "specName", "roleName", "status")],
+                         ["Priest", "Holy", "Late", "secondary"])
+        self.assertEqual(self.roster()[0]["note"], "Late by ten minutes")
+        self.change("5", "takes-slot", "signup", "0:0")  # the limit of one is still free
+        self.assertEqual(self.roster()[1]["roleName"], "Healers")
+        self.change("4", "absent", "status", "Absence")
+        self.assertEqual([self.roster()[0][k] for k in ("className", "specName")], ["Absence", ""])
+        self.change("5", "withdraw-5", "withdraw")
         self.change("4", "withdraw", "withdraw")
         self.assertEqual(self.roster(), [])
 
