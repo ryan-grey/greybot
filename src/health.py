@@ -70,6 +70,10 @@ SOURCE_BLIND = "source_blind"
 # line; this is what turns a streak of them into something a person hears about.
 POLL_FAILING = "poll_failing"
 
+# The polls run, but on the app's public token: the account grant was rejected and could
+# not be renewed. Public reports are read as usual and private ones are not seen at all.
+WCL_PUBLIC_ONLY = "wcl_public_only"
+
 # Worst first. Several of these go wrong at the same instant -- removing the app fails the
 # commands fetch AND deletes any webhook the app created -- so the mail has to lead with
 # the cause rather than whichever symptom happened to be probed first.
@@ -86,6 +90,7 @@ HEADLINE = {
     WEBHOOK_GONE: "greyBot's announcement webhook no longer exists",
     SOURCE_BLIND: "greyBot cannot see any Warcraft Logs reports",
     POLL_FAILING: "greyBot's polls are failing",
+    WCL_PUBLIC_ONLY: "greyBot can only read public Warcraft Logs reports",
 }
 
 # What Ryan should actually do about it, which is the entire reason the mail is worth
@@ -137,6 +142,14 @@ ADVICE = {
                    "Warcraft Logs is rejecting the account grant: renew it with "
                    "scripts/connect-wcl.py --refresh, or reconnect in Chrome if that is "
                    "refused."),
+    WCL_PUBLIC_ONLY: ("Warcraft Logs is rejecting the account grant and greyBot could not "
+                      "renew it, so it has fallen back to public reports. Teams whose logs "
+                      "are public carry on exactly as before. A team that logs PRIVATELY "
+                      "(Saturday Raid) is invisible until this is fixed: no kill card, roll "
+                      "call or recap for a private night, and nothing wrong is posted in "
+                      "its place. Renew with scripts/connect-wcl.py --refresh, or reconnect "
+                      "in Chrome if that is refused; the bot goes back to the grant by "
+                      "itself on the next poll."),
 }
 
 
@@ -408,7 +421,8 @@ ALERT, REMINDER, RECOVERY, TEST = "alert", "reminder", "recovery", "test"
 
 def poll_result(status, failed_polls, threshold, errors):
     """A check() result describing the poll itself, one probe line per failing install."""
-    probes = [{"probe": "poll", "verdict": "raising" if status != OK else OK,
+    verdict = {OK: OK, WCL_PUBLIC_ONLY: "public_only"}.get(status, "raising")
+    probes = [{"probe": "poll", "verdict": verdict,
                "consecutivePolls": failed_polls, "threshold": threshold}]
     for tenant, error in sorted((errors or {}).items()):
         probes.append({"probe": "install", "verdict": "failed",

@@ -9,7 +9,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import wcl
 
 
+def reset_wcl():
+    wcl._renewed.clear()
+    wcl._public_since.clear()
+    wcl._app.update(client_id=None, client_secret=None)
+    wcl.public_only.update(active=False, why="")
+
+
 class UserGrantTests(unittest.TestCase):
+    def setUp(self):
+        reset_wcl()
+        self.addCleanup(reset_wcl)
+
     def grant(self, **changes):
         return {"client_id": "client", "access_token": "test-user-token",
                 "expires_at": 2000, **changes}
@@ -24,14 +35,22 @@ class UserGrantTests(unittest.TestCase):
             wcl.query("app-token", "{rateLimitData{limitPerHour}}")
             self.assertEqual(post.call_args.args[0], wcl.API_URL)
 
-    def test_bad_grant_never_silently_falls_back_to_public(self):
+    def test_bad_grant_falls_back_to_public_and_says_so(self):
+        """A dead grant costs only what it alone could see, and never silently."""
         for grant in (self.grant(expires_at=1060), self.grant(client_id="another-client"),
                       self.grant(access_token=""), self.grant(expires_at="invalid"), {}):
-            with self.subTest(grant_fields=sorted(grant)), patch.object(wcl, "_post") as post:
-                with self.assertRaises(wcl.WCLError) as exc:
-                    wcl.get_token("client", "secret", now=1000, user_auth=grant)
-                self.assertNotIn("test-user-token", str(exc.exception))
-                post.assert_not_called()
+            reset_wcl()
+            with self.subTest(grant_fields=sorted(grant)), \
+                    patch.dict(wcl._token, {"value": None, "expires_at": 0}), \
+                    patch.object(wcl, "_post", return_value={
+                        "access_token": "app-token", "expires_in": 3600}) as post:
+                token = wcl.get_token("client", "secret", now=1000, user_auth=grant)
+                self.assertEqual(token, "app-token")
+                self.assertNotIsInstance(token, wcl.UserToken)
+                self.assertIn(b"client_credentials", post.call_args.args[1])
+                self.assertTrue(wcl.public_only["active"])
+                # Nothing private can be mistaken for publishable on the public token.
+                self.assertTrue(wcl.reports_are_public(token, [{}]))
 
     def test_existing_app_auth_is_unchanged(self):
         with patch.dict(wcl._token, {"value": None, "expires_at": 0}), \
@@ -67,8 +86,8 @@ class RejectedGrantTests(unittest.TestCase):
     """Warcraft Logs rejected a grant eleven days into a year. The 401 is the fact."""
 
     def setUp(self):
-        wcl._renewed.clear()
-        self.addCleanup(wcl._renewed.clear)
+        reset_wcl()
+        self.addCleanup(reset_wcl)
 
     def rejected(self):
         err = wcl.WCLError("HTTP 401 from /api/v2/user: ")
@@ -98,7 +117,43 @@ class RejectedGrantTests(unittest.TestCase):
         self.assertEqual(calls, ["Bearer old-user-token", "Bearer new-user-token",
                                  "Bearer new-user-token"])
 
-    def test_no_renewal_means_the_rejection_stands(self):
+    def test_unrenewable_grant_reads_public_reports_instead_of_failing(self):
+        grant = {"client_id": "client", "access_token": "old-user-token", "expires_at": 2000}
+        seen = []
+
+        def post(url, body, headers, timeout=20):
+            seen.append((url, headers["Authorization"]))
+            if url == wcl.TOKEN_URL:
+                return {"access_token": "app-token", "expires_in": 3600}
+            if headers["Authorization"] == "Bearer old-user-token":
+                raise self.rejected()
+            return {"data": {"ok": True}}
+
+        with patch.dict(wcl._token, {"value": None, "expires_at": 0}), \
+                patch.object(wcl, "_post", side_effect=post), \
+                patch.object(wcl, "renew_user_auth", return_value=None) as renew:
+            token = wcl.get_token("client", "secret", now=1000, user_auth=grant)
+            self.assertIsInstance(token, wcl.UserToken)
+            self.assertFalse(wcl.public_only["active"])
+            self.assertEqual(wcl.query(token, "{a}"), {"ok": True})
+            self.assertTrue(wcl.public_only["active"])
+            self.assertEqual(seen[-1], (wcl.API_URL, "Bearer app-token"))
+            # The rest of the run, and the next one in this container, stay on public
+            # without asking the provider or the renewer again.
+            self.assertEqual(wcl.query(token, "{b}"), {"ok": True})
+            wcl.public_only.update(active=False, why="")
+            again = wcl.get_token("client", "secret", now=1000, user_auth=grant)
+            self.assertEqual(again, "app-token")
+            self.assertTrue(wcl.public_only["active"])
+            renew.assert_called_once()
+            self.assertEqual([a for _u, a in seen].count("Bearer old-user-token"), 1)
+            # ...until an hour has passed, when renewal gets another chance.
+            wcl._public_since["old-user-token"] -= wcl._RETRY_RENEWAL_SECONDS + 1
+            renew.return_value = "new-user-token"
+            self.assertEqual(wcl.query(token, "{c}"), {"ok": True})
+            self.assertEqual(seen[-1], (wcl.USER_API_URL, "Bearer new-user-token"))
+
+    def test_no_renewal_and_no_app_credentials_means_the_rejection_stands(self):
         for renewer in (None, lambda rejected: None, lambda rejected: rejected,
                         lambda rejected: 1 / 0):
             with self.subTest(renewer=renewer), \
@@ -124,10 +179,12 @@ class RejectedGrantTests(unittest.TestCase):
         with patch.object(wcl, "renew_user_auth", return_value="new-user-token"):
             self.assertEqual(wcl.get_token("client", "secret", now=1000, user_auth=grant),
                              "new-user-token")
-        with patch.object(wcl, "renew_user_auth") as renew:
-            with self.assertRaises(wcl.WCLError):
-                wcl.get_token("client", "secret", now=1000,
-                              user_auth=dict(grant, client_id="another-client"))
+        with patch.object(wcl, "renew_user_auth") as renew, \
+                patch.dict(wcl._token, {"value": "app-token", "expires_at": 9e12}):
+            # Another client's grant is not this app's to renew.
+            self.assertEqual(wcl.get_token("client", "secret", now=1000,
+                                           user_auth=dict(grant, client_id="another-client")),
+                             "app-token")
             renew.assert_not_called()
 
 

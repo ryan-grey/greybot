@@ -75,19 +75,57 @@ def _post(url, data, headers, timeout=20):
 renew_user_auth = None
 _renewed = {}
 
+# When the grant cannot be renewed either, the app's own token still reads every PUBLIC
+# report, and that week (2026-10-07) every report two of the three teams needed was public.
+# A dead grant must cost only what it alone could see. Ryan, 2026-10-09: "if the private
+# key breaks ... but there's public logs, obviously use those instead of breaking the whole
+# process". It is never silent: `public_only` is raised for the run, handler.py mails on
+# it, and private reports are simply not seen rather than guessed at.
+_PUBLIC = object()
+_RETRY_RENEWAL_SECONDS = 3600  # a warm container must not stay public-only on one bad minute
+_public_since = {}
+_app = {"client_id": None, "client_secret": None}
+public_only = {"active": False, "why": ""}
 
-def _renew(rejected):
-    """The replacement for a rejected or expired account token, or None."""
-    if renew_user_auth is None:
+
+def _public_token(why):
+    """The app token standing in for a dead account grant, or None without credentials."""
+    if not (_app["client_id"] and _app["client_secret"]):
         return None
-    try:
-        fresh = renew_user_auth(str(rejected))
-    except Exception:                                              # noqa: BLE001
-        return None  # the renewer logs for itself; errors here may carry token material
-    if not fresh or fresh == rejected:
-        return None
-    _renewed[str(rejected)] = UserToken(fresh)
-    return _renewed[str(rejected)]
+    token = get_token(_app["client_id"], _app["client_secret"])
+    if not public_only["active"]:
+        print(json.dumps({"event": "wcl_public_only", "why": why,
+                          "note": "account grant unusable; reading public reports only"}))
+    public_only.update(active=True, why=why)
+    return token
+
+
+def _replacement(rejected, why):
+    """What to use instead of a rejected or expired account token, or None.
+
+    A renewed account token when the grant can be renewed, the public app token when it
+    cannot. Remembered by the token it replaces, because callers keep theirs all run.
+    """
+    known = _renewed.get(str(rejected))
+    if known is _PUBLIC and time.time() - _public_since.get(str(rejected), 0) \
+            < _RETRY_RENEWAL_SECONDS:
+        return _public_token(why)
+    if known is not None and known is not _PUBLIC:
+        return known
+    fresh = None
+    if renew_user_auth is not None:
+        try:
+            fresh = renew_user_auth(str(rejected))
+        except Exception:                                          # noqa: BLE001
+            fresh = None  # the renewer logs for itself; errors may carry token material
+    if fresh and fresh != rejected:
+        _renewed[str(rejected)] = UserToken(fresh)
+        return _renewed[str(rejected)]
+    public = _public_token(why)
+    if public is not None:
+        _renewed[str(rejected)] = _PUBLIC
+        _public_since[str(rejected)] = time.time()
+    return public
 
 
 def get_token(client_id, client_secret, now=None, user_auth=None):
@@ -99,6 +137,7 @@ def get_token(client_id, client_secret, now=None, user_auth=None):
     """
     now = now if now is not None else time.time()
     if user_auth is not None:
+        _app.update(client_id=client_id, client_secret=client_secret)
         try:
             usable = (user_auth.get("client_id") == client_id
                       and isinstance(user_auth.get("access_token"), str)
@@ -106,9 +145,11 @@ def get_token(client_id, client_secret, now=None, user_auth=None):
             valid = usable and float(user_auth["expires_at"]) > now + 60
         except (TypeError, ValueError, KeyError, AttributeError):
             usable = valid = False
-        if valid:
-            return _renewed.get(user_auth["access_token"], UserToken(user_auth["access_token"]))
-        fresh = _renew(user_auth["access_token"]) if usable else None
+        if valid and user_auth["access_token"] not in _renewed:
+            return UserToken(user_auth["access_token"])
+        why = "rejected earlier" if valid else "expired" if usable else "invalid"
+        fresh = (_replacement(user_auth["access_token"], why) if usable
+                 else _public_token(why))
         if fresh is None:
             raise WCLError("Warcraft Logs account grant expired or invalid; reconnect or renew it")
         return fresh
@@ -139,12 +180,13 @@ def query(token, document, variables=None):
             "Content-Type": "application/json",
         })
 
-    if isinstance(token, UserToken):
-        token = _renewed.get(token, token)
+    if isinstance(token, UserToken) and token in _renewed:
+        token = _replacement(token, "rejected earlier") or token
     try:
         payload = send(token)
     except WCLError as exc:
-        fresh = _renew(token) if isinstance(token, UserToken) and exc.status == 401 else None
+        fresh = (_replacement(token, "rejected with a 401")
+                 if isinstance(token, UserToken) and exc.status == 401 else None)
         if fresh is None:
             raise
         payload = send(fresh)

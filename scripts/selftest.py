@@ -3342,6 +3342,24 @@ def test_poll_failures():
     check("a failed recap run mails at once: there is no next attempt",
           len(SENT) == 1, SENT)
 
+    # The grant is dead but the polls got through on public reports: degraded, not failing.
+    FAKE_DDB.items.clear()
+    SENT.clear()
+    public = {handler.WCL_GRANT: "rejected with a 401; reading public reports only"}
+    for i in range(2):
+        t = now + timedelta(minutes=15 * i)
+        handler.run_poll_failure_check(cfg, pk, t, _iso(t), public)
+    check("running on public reports only mails once, under its own name",
+          len(SENT) == 1 and "public Warcraft Logs" in SENT[0]["subject"], SENT)
+    check("...saying which team goes unseen", "Saturday Raid" in SENT[0]["body"])
+    t = now + timedelta(minutes=30)
+    handler.run_poll_failure_check(cfg, pk, t, _iso(t), dict(public, **errors))
+    check("an install raising on top of that is its own alert",
+          len(SENT) == 2 and "polls are failing" in SENT[1]["subject"], SENT)
+    t = now + timedelta(minutes=45)
+    handler.run_poll_failure_check(cfg, pk, t, _iso(t), {})
+    check("...and the grant coming back sends the all-clear", len(SENT) == 3, SENT)
+
 
 def _src(report="R1", actors=None, elig=None, fids=None,
          damage=None, deaths=(), rankings=None, playerDetails=None):

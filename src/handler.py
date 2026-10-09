@@ -1446,6 +1446,9 @@ def _alert_kind(prev, status, now, forced=False):
     return None
 
 
+WCL_GRANT = "warcraft-logs-account-grant"
+
+
 def run_poll_failure_check(cfg, scope, now, now_iso, errors, immediate=False):
     """Is the poll itself raising, run after run?
 
@@ -1465,7 +1468,11 @@ def run_poll_failure_check(cfg, scope, now, now_iso, errors, immediate=False):
     if errors and immediate:
         streak = max(streak, POLL_FAILING_POLLS)
 
-    status = health.POLL_FAILING if streak >= POLL_FAILING_POLLS else health.OK
+    # A run that only got through on the public token is degraded, not failing, and says
+    # so under its own name. An install raising outranks it: that one posts nothing at all.
+    degraded = set(errors or {}) == {WCL_GRANT}
+    bad = health.WCL_PUBLIC_ONLY if degraded else health.POLL_FAILING
+    status = bad if streak >= POLL_FAILING_POLLS else health.OK
     prev_status = prev.get("status") or ""
     changed = status != prev_status
     since = now_iso if changed else (prev.get("since") or now_iso)
@@ -1899,6 +1906,7 @@ def handler(event, context):
     # exception escaping here would stop every OTHER tenant being polled too --
     # one server's revoked channel must not silence the rest.
     results, failed, errors = [], [], {}
+    wcl.public_only.update(active=False, why="")
     # A manual invocation may name one team, so a hand-run recap or preview lands in
     # that team's channel alone rather than in every install's. The schedules send no
     # such field and fan out to everyone.
@@ -1916,6 +1924,8 @@ def handler(event, context):
     # Only what a schedule sends counts: a hand-run preview that raises on a bad argument
     # is not an outage. A one-team run can report a failure but cannot clear the streak,
     # because it says nothing about the installs it skipped.
+    if wcl.public_only["active"]:
+        errors[WCL_GRANT] = f"{wcl.public_only['why']}; reading public reports only"
     spec = event if isinstance(event, dict) else {}
     by_hand = {"dry", "preview", "manual", "hours", "backfill", "revision", "end"}
     if spec.get("mode") in (None, "recap") and not by_hand & set(spec) \
