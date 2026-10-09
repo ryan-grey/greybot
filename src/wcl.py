@@ -31,7 +31,7 @@ _token = {"value": None, "expires_at": 0.0}
 
 
 class WCLError(RuntimeError):
-    pass
+    status = None  # the HTTP status, when the failure was one
 
 
 class UserToken(str):
@@ -59,9 +59,35 @@ def _post(url, data, headers, timeout=20):
             return json.loads(res.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")[:400]
-        raise WCLError(f"HTTP {exc.code} from {urllib.parse.urlparse(url).path}: {body}") from exc
+        err = WCLError(f"HTTP {exc.code} from {urllib.parse.urlparse(url).path}: {body}")
+        err.status = exc.code
+        raise err from exc
     except urllib.error.URLError as exc:
         raise WCLError(f"network error calling {urllib.parse.urlparse(url).path}: {exc.reason}") from exc
+
+
+# Warcraft Logs can reject an account grant long before its stored expiry: it did on
+# 2026-10-07, eleven days into a year, and every poll raised for a day and a half. The
+# stored expiry is therefore a hint and the 401 is the fact. config.py installs the
+# renewer; this module stays free of AWS so the tests can run it offline. Callers keep
+# the token they were handed for a whole run, so a renewal is remembered by the token it
+# replaced rather than returned to anyone.
+renew_user_auth = None
+_renewed = {}
+
+
+def _renew(rejected):
+    """The replacement for a rejected or expired account token, or None."""
+    if renew_user_auth is None:
+        return None
+    try:
+        fresh = renew_user_auth(str(rejected))
+    except Exception:                                              # noqa: BLE001
+        return None  # the renewer logs for itself; errors here may carry token material
+    if not fresh or fresh == rejected:
+        return None
+    _renewed[str(rejected)] = UserToken(fresh)
+    return _renewed[str(rejected)]
 
 
 def get_token(client_id, client_secret, now=None, user_auth=None):
@@ -74,15 +100,18 @@ def get_token(client_id, client_secret, now=None, user_auth=None):
     now = now if now is not None else time.time()
     if user_auth is not None:
         try:
-            valid = (user_auth.get("client_id") == client_id
-                     and isinstance(user_auth.get("access_token"), str)
-                     and bool(user_auth["access_token"])
-                     and float(user_auth["expires_at"]) > now + 60)
-        except (TypeError, ValueError, KeyError):
-            valid = False
-        if not valid:
+            usable = (user_auth.get("client_id") == client_id
+                      and isinstance(user_auth.get("access_token"), str)
+                      and bool(user_auth["access_token"]))
+            valid = usable and float(user_auth["expires_at"]) > now + 60
+        except (TypeError, ValueError, KeyError, AttributeError):
+            usable = valid = False
+        if valid:
+            return _renewed.get(user_auth["access_token"], UserToken(user_auth["access_token"]))
+        fresh = _renew(user_auth["access_token"]) if usable else None
+        if fresh is None:
             raise WCLError("Warcraft Logs account grant expired or invalid; reconnect or renew it")
-        return UserToken(user_auth["access_token"])
+        return fresh
     if _token["value"] and now < _token["expires_at"] - 60:
         return _token["value"]
 
@@ -103,10 +132,22 @@ def get_token(client_id, client_secret, now=None, user_auth=None):
 
 def query(token, document, variables=None):
     body = json.dumps({"query": document, "variables": variables or {}}).encode()
-    payload = _post(USER_API_URL if isinstance(token, UserToken) else API_URL, body, {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    })
+
+    def send(bearer):
+        return _post(USER_API_URL if isinstance(bearer, UserToken) else API_URL, body, {
+            "Authorization": f"Bearer {bearer}",
+            "Content-Type": "application/json",
+        })
+
+    if isinstance(token, UserToken):
+        token = _renewed.get(token, token)
+    try:
+        payload = send(token)
+    except WCLError as exc:
+        fresh = _renew(token) if isinstance(token, UserToken) and exc.status == 401 else None
+        if fresh is None:
+            raise
+        payload = send(fresh)
     if payload.get("errors"):
         msgs = "; ".join(e.get("message", "?") for e in payload["errors"])
         raise WCLError(f"GraphQL errors: {msgs}")

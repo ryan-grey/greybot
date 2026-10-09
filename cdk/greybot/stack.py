@@ -201,6 +201,21 @@ class GreybotStack(Stack):
                 resources=[f"arn:aws:kms:{Aws.REGION}:{Aws.ACCOUNT_ID}:"
                            f"key/{cfg.kms_key_id}"],
             ),
+            # The ONE parameter the runtime may write: the Warcraft Logs account grant,
+            # which the provider can reject long before its expiry and which only a
+            # stored renewal repairs. Every other parameter stays read-only. Inert until
+            # ryangrey-app-boundary allows the same two actions; config.py proves it can
+            # save before it spends the refresh token.
+            iam.PolicyStatement(
+                actions=["ssm:PutParameter"],
+                resources=[f"arn:aws:ssm:{Aws.REGION}:{Aws.ACCOUNT_ID}:"
+                           f"parameter{cfg.ssm_prefix}/wcl/user_auth"],
+            ),
+            iam.PolicyStatement(
+                actions=["kms:Encrypt"],
+                resources=[f"arn:aws:kms:{Aws.REGION}:{Aws.ACCOUNT_ID}:"
+                           f"key/{cfg.kms_key_id}"],
+            ),
             # Self-invoke: the interactions handler hands slow work to a second
             # asynchronous invocation of itself, because Discord requires a
             # response within 3 seconds.

@@ -19,12 +19,16 @@ Fetched once per container and cached. The seven required names arrive in a sing
 GetParameters call; the optional ones follow in chunks of ten, which is that call's limit.
 """
 
+import base64
 import json
 import os
 import time
+import urllib.parse
 
 import boto3
 from botocore.config import Config
+
+import wcl
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 PREFIX = os.environ.get("SSM_PREFIX", "/greybot")
@@ -294,3 +298,118 @@ def redacted(cfg):
             "overlapLow": cfg.get("overlap_low"),
             "progTag": cfg.get("prog_tag") or None,
             "alertsEnabled": bool(cfg.get("alert_topic_arn"))}
+
+
+def _renewal_log(event, **fields):
+    # Never the exception text or a response body: either may carry token material.
+    print(json.dumps({"event": event, **fields}))
+
+
+def _stored_wcl_user_auth():
+    raw = ssm.get_parameter(Name=WCL_USER_AUTH, WithDecryption=True)["Parameter"]["Value"]
+    bundle = json.loads(raw)
+    if not isinstance(bundle, dict):
+        raise ValueError("invalid account grant")
+    return raw, bundle
+
+
+def _save_wcl_user_auth(value):
+    # No KeyId: the parameter is under the account's default SSM key, which is what an
+    # overwrite without one keeps.
+    ssm.put_parameter(Name=WCL_USER_AUTH, Type="SecureString", Value=value, Overwrite=True,
+                      Description="Operator-authorized Warcraft Logs account grant")
+
+
+def _adopt_wcl_user_auth(bundle):
+    if _cache:
+        _cache["wcl_user_auth"] = bundle
+    return bundle["access_token"]
+
+
+def renew_wcl_user_auth(rejected):
+    """Replace an account token Warcraft Logs will not accept. Returns it, or None.
+
+    The stored expiry is a year out and Warcraft Logs has rejected a grant eleven days in,
+    so the runtime renews on the 401 instead of waiting for a person to notice.
+
+    THE ORDER IS THE SAFETY. A refresh spends the refresh token: the provider hands back a
+    new one and the old one may stop working. Renewing and then failing to save would turn
+    a grant one command could fix into one that needs a browser. So the stored value is
+    written back unchanged FIRST, and a role that may not write never gets as far as the
+    refresh.
+
+    Several runs can meet the same 401 inside a minute -- the poll, a recap, the vault
+    collector. Whoever is second finds a different token already stored and takes it; if
+    its own refresh loses the race it looks once more before giving up.
+    """
+    try:
+        raw, stored = _stored_wcl_user_auth()
+
+        def other_run_renewed(bundle):
+            try:
+                return (bool(bundle.get("access_token")) and bundle["access_token"] != rejected
+                        and float(bundle.get("expires_at") or 0) > time.time() + 60)
+            except (TypeError, ValueError):
+                return False
+
+        if other_run_renewed(stored):
+            _renewal_log("wcl_user_auth_adopted", note="another run had already renewed it")
+            return _adopt_wcl_user_auth(stored)
+
+        ids = ssm.get_parameters(Names=[WCL_CLIENT_ID, WCL_CLIENT_SECRET], WithDecryption=True)
+        got = {p["Name"]: p["Value"].strip() for p in ids.get("Parameters", [])}
+        client_id, client_secret = got.get(WCL_CLIENT_ID), got.get(WCL_CLIENT_SECRET)
+        if not stored.get("refresh_token") or not client_secret \
+                or stored.get("client_id") != client_id:
+            _renewal_log("wcl_user_auth_renewal_unavailable",
+                         why="no refresh token for this client; reconnect in the browser")
+            return None
+
+        try:
+            _save_wcl_user_auth(raw)
+        except Exception as exc:                                   # noqa: BLE001
+            _renewal_log("wcl_user_auth_renewal_unavailable", error=type(exc).__name__,
+                         why="this role cannot save a renewed grant, so it will not spend "
+                             "the refresh token; renew with scripts/connect-wcl.py --refresh")
+            return None
+
+        basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        form = urllib.parse.urlencode({"grant_type": "refresh_token",
+                                       "refresh_token": stored["refresh_token"]}).encode()
+        try:
+            payload = wcl._post(wcl.TOKEN_URL, form, {
+                "Authorization": f"Basic {basic}",
+                "Content-Type": "application/x-www-form-urlencoded"})
+            token = payload.get("access_token")
+            lifetime = float(payload.get("expires_in") or 0)
+            if not token or lifetime <= 0:
+                raise ValueError("no expiring access token returned")
+        except Exception as exc:                                   # noqa: BLE001
+            _raw, again = _stored_wcl_user_auth()
+            if other_run_renewed(again):
+                _renewal_log("wcl_user_auth_adopted", note="another run renewed it first")
+                return _adopt_wcl_user_auth(again)
+            _renewal_log("wcl_user_auth_renewal_failed", error=type(exc).__name__,
+                         status=getattr(exc, "status", None),
+                         why="the provider refused the refresh; reconnect in the browser")
+            return None
+
+        bundle = dict(stored, access_token=token, expires_at=time.time() + lifetime,
+                      refresh_token=payload.get("refresh_token") or stored["refresh_token"])
+        try:
+            _save_wcl_user_auth(json.dumps(bundle))
+        except Exception as exc:                                   # noqa: BLE001
+            _renewal_log("wcl_user_auth_save_failed", error=type(exc).__name__,
+                         why="renewed but not stored; this container keeps working and the "
+                             "next one will need scripts/connect-wcl.py or a reconnect")
+        _renewal_log("wcl_user_auth_renewed", expiresAt=bundle["expires_at"],
+                     refreshRotated=bool(payload.get("refresh_token")))
+        return _adopt_wcl_user_auth(bundle)
+    except Exception as exc:                                       # noqa: BLE001
+        _renewal_log("wcl_user_auth_renewal_failed", error=type(exc).__name__)
+        return None
+
+
+# Installed here rather than in handler.py so every entry point that loads configuration
+# -- the poller, the vault collector -- renews the same way.
+wcl.renew_user_auth = renew_wcl_user_auth
