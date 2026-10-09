@@ -140,6 +140,10 @@ PROD_SCHEDULES = (
                   '{"mode":"recap","team":"saturday-raid"}', _RAID_DAY, 2,
                   "Saturday Raid recap, 1:00 AM Eastern Sunday (the raid runs past "
                   "midnight), team-only"),
+    ExtraSchedule("RecapRecheckSchedule", "recap-recheck", "cron(0 10 * * ? *)", _ET,
+                  '{"mode":"recap_recheck"}', _RAID_DAY, 1,
+                  "One second look at the last two nights' recaps, 10 AM Eastern: a fuller "
+                  "log that arrived after the post corrects it in place"),
     ExtraSchedule("VaultSchedule", "vault", "cron(30 11 ? * TUE *)", _ET,
                   '{"mode":"vault"}', _RAID_DAY, 1),
     ExtraSchedule("GlorySchedule", "glory", "rate(30 minutes)", "UTC",

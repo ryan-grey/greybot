@@ -3452,6 +3452,40 @@ def test_fuller_logs():
           (kept and kept[0]["code"], dropped))
 
 
+def test_recap_recheck_notes():
+    """What the bot says when it corrects its own recap, and what it remembers."""
+    print("\nThe morning's second look at a posted recap")
+    import handler
+
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
+    FAKE_DDB.items.clear()
+    chosen = [{"meta": {"code": "GUILD", "title": "WTF Zat?"},
+               "raidScope": {"fightIDs": [1]}}]
+    handler.remember_recap(pk, "2026-10-06", "111", chosen, {"bosses": ["Nek'zali"]}, "t0")
+    posted = store.get_recap_post(pk, "2026-10-06")
+    check("a posted recap records its message, logs, pulls and kills",
+          posted == {"message": "111", "at": "t0", "reports": ["GUILD"], "pulls": 1,
+                     "bosses": ["Nek'zali"], "notes": [], "rechecked": False}, posted)
+
+    fuller = [{"meta": {"code": "FULL", "title": "Tuesday Reclear"},
+               "raidScope": {"fightIDs": list(range(13))}}]
+    notes = handler.recheck_notes(posted, fuller, {"bosses": ["Nek'zali", "The Coiled Altar"]}, 13)
+    check("the correction names the log that turned up", "Tuesday Reclear" in notes[0], notes)
+    check("...and gives before and after", "was 1. Now 13." in notes[1]
+          and notes[2] == "Kills: was 1 (Nek'zali). Now 2 (Nek'zali, The Coiled Altar).", notes)
+    same = handler.recheck_notes(posted, [dict(chosen[0], raidScope={"fightIDs": [1, 2]})],
+                                 {"bosses": ["Nek'zali"]}, 2)
+    check("a log that simply grew says so, and that the kills did not change",
+          "same log" in same[0] and same[2] == "Kills: unchanged at 1.", same)
+
+    handler.remember_recap(pk, "2026-10-06", "111", fuller, {"bosses": ["a", "b"]}, "t1",
+                           notes=["2026-10-07: " + n for n in notes], rechecked=True)
+    again = store.get_recap_post(pk, "2026-10-06")
+    check("the record keeps the first post time, the notes, and that it was rechecked",
+          again["at"] == "t0" and len(again["notes"]) == 3 and again["rechecked"]
+          and again["pulls"] == 13 and again["reports"] == ["FULL"], again)
+
+
 def _src(report="R1", actors=None, elig=None, fids=None,
          damage=None, deaths=(), rankings=None, playerDetails=None):
     """One report's worth of blobs, in the shape recap.py aggregates over."""
@@ -4347,6 +4381,7 @@ def main():
                test_source_blind,
                test_poll_failures,
                test_fuller_logs,
+               test_recap_recheck_notes,
                test_iam_grant_covers_config,
                test_recap_parsers, test_end_to_end,
                test_team_install,

@@ -440,6 +440,14 @@ and touches nothing else; the same event without `dry` and with `"message":"<id>
 that message in place and republishes the page. The dated What-changed note is drawn on
 the card and repeated on the page and in the message.
 
+A log can also arrive after the recap has fired, so every posted night gets one second
+look: `ryangrey-greybot-recap-recheck` runs `{"mode":"recap_recheck"}` at 10 AM Eastern,
+re-reads the last two nights from the record each post leaves behind (`RECAP#POST#<night>`:
+message, reports, pulls, kills, notes) and runs the same search. Only a night that now
+holds MORE pulls than the recap covered is corrected, through the same edit-in-place path,
+with before and after pulls and kills written by the bot; earlier notes stay on the card.
+`{"mode":"recap_recheck","team":"<team>","dry":true}` previews it.
+
 ### Why the roster is derived and not written down
 
 A hand-maintained roster goes stale the first time somebody transfers, and a stale roster

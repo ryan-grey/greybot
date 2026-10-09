@@ -2015,6 +2015,11 @@ def poll_one(event, cfg, scope, now, now_iso, started):
         return recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started,
                            dry=bool(event.get("dry")), hours=event.get("hours"),
                            manual=bool(event.get("manual")), revise=event.get("revise"))
+    if isinstance(event, dict) and str(event.get("mode") or "").lower() == "recap_recheck":
+        if not scope.team or not store.is_bootstrapped(scope):
+            return {"ok": True, "skipped": "nothing to recheck"}
+        return recap_recheck(token, cfg, scope, now, now_iso, gid, profile, index, started,
+                             dry=bool(event.get("dry")))
 
     # The first-run branch. Nothing below this line can run until a bootstrap has been
     # recorded, so there is no ordering in which run one announces anything.
@@ -2911,6 +2916,76 @@ def night_difficulty(cfg, fights):
     return wcl.DIFFICULTY_IDS[best], best
 
 
+def remember_recap(scope, night_key, message_id, chosen, summary, now_iso, notes=None,
+                   rechecked=False):
+    """Record what a posted recap was built from, for the morning's second look."""
+    before = store.get_recap_post(scope, night_key) or {}
+    store.put_recap_post(scope, night_key, {
+        "message": str(message_id), "at": before.get("at") or now_iso,
+        "reports": [c["meta"]["code"] for c in chosen],
+        "pulls": sum(len(c["raidScope"]["fightIDs"]) for c in chosen),
+        "bosses": list(summary.get("bosses") or []),
+        # Every note the card has carried, oldest first: a later correction redraws the
+        # card from nothing and must not quietly drop an earlier one.
+        "notes": list(before.get("notes") or []) + list(notes or []),
+        "rechecked": bool(rechecked or before.get("rechecked"))})
+
+
+def recheck_notes(posted, chosen, summary, pulls_now):
+    """The What-changed lines for a recap the bot corrected by itself."""
+    was, now = list(posted.get("bosses") or []), list(summary.get("bosses") or [])
+    new_logs = [c for c in chosen if c["meta"]["code"] not in (posted.get("reports") or [])]
+    notes = []
+    if new_logs:
+        titles = ", ".join(f'"{c["meta"].get("title") or c["meta"]["code"]}"' for c in new_logs)
+        notes.append(f"Source log: a fuller log of this night turned up after the recap was "
+                     f"posted ({titles}), so the recap now uses it.")
+    else:
+        notes.append("Source log: the same log had more of the night in it than when the "
+                     "recap was posted.")
+    notes.append(f"Pulls covered: was {int(posted.get('pulls') or 0)}. Now {pulls_now}.")
+    if was != now:
+        notes.append(f"Kills: was {len(was)} ({', '.join(was) or 'none'}). "
+                     f"Now {len(now)} ({', '.join(now) or 'none'}).")
+    else:
+        notes.append(f"Kills: unchanged at {len(now)}.")
+    return notes
+
+
+RECAP_RECHECK_NIGHTS = 2  # last night and the one before: Tuesday's, looked at on Wednesday
+
+
+def recap_recheck(token, cfg, scope, now, now_iso, gid, profile, index, started, dry=False):
+    """Look once more at the recaps posted in the last two nights, and correct a short one.
+
+    A recap fires minutes after the raid ends. A raider who uploads their log the next
+    morning, or a live log that had not finished uploading, arrives after it -- and the
+    recap then says one kill for a night with two until a person notices. So each posted
+    night gets exactly one second look, hours later, through the same code a hand-run
+    correction uses: same classifier, same fuller-log search, edit in place, dated note.
+    It changes a recap only when the night now holds MORE pulls than the recap covered.
+    """
+    out = []
+    for back in range(1, RECAP_RECHECK_NIGHTS + 1):
+        night_key = (_local(now) - timedelta(days=back)).strftime("%Y-%m-%d")
+        posted = store.get_recap_post(scope, night_key)
+        if not posted or posted.get("rechecked") or not posted.get("reports"):
+            continue
+        result = recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started,
+                             dry=dry, revise={
+                                 "night": night_key, "reports": posted["reports"],
+                                 "date": _local(now).strftime("%Y-%m-%d"),
+                                 "message": posted["message"], "posted": posted})
+        if not dry and result.get("ok") and not result.get("revised"):
+            store.put_recap_post(scope, night_key, {**posted, "rechecked": True})
+        out.append({k: result.get(k) for k in ("ok", "night", "revised", "unchanged", "card",
+                                               "skipped", "wrongNight")})
+        log("recap_rechecked", team=scope.team, night=night_key,
+            revised=bool(result.get("revised")), unchanged=bool(result.get("unchanged")),
+            ok=bool(result.get("ok")), dry=bool(dry))
+    return {"ok": True, "rechecked": out}
+
+
 FULLER_LOG_CANDIDATES = 3      # report details read, at ~225KB each
 FULLER_LOG_ROSTER_PCT = 70.0   # of the smaller raid, in both logs
 FULLER_LOG_PULL_SECONDS = 90   # two loggers' clocks on the same pull
@@ -3031,8 +3106,11 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     if revise:
         codes = [str(c) for c in (revise.get("reports") or []) if c]
         changes = [str(c) for c in (revise.get("changes") or []) if c]
-        if not (scope.team and codes and changes and revise.get("date") and revise.get("night")
-                and (dry or revise.get("message"))):
+        # `posted` is the recheck's form: no notes are written in advance, because whether
+        # anything changed -- and what -- is only known once the night has been re-read.
+        posted = revise.get("posted")
+        if not (scope.team and codes and (changes or posted) and revise.get("date")
+                and revise.get("night") and (dry or revise.get("message"))):
             raise RuntimeError("a recap revision needs a team, night, reports, date, changes "
                                "and, unless dry, the message to edit")
         revision = {"date": str(revise["date"]), "changes": changes}
@@ -3208,7 +3286,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
                        "end": int(detail.get("endTime") or meta.get("endTime") or base),
                        "heroicFights": len(raid_scope["fightIDs"])})
 
-    if chosen and not revise:
+    if chosen and (not revise or revise.get("posted")):
         # Never worth a recap: any failure here leaves the night exactly as it was found.
         try:
             chosen += fuller_logs(token, cfg, chosen, {r["code"] for r in reports}, tier,
@@ -3240,6 +3318,13 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     if revise and night_key != str(revise["night"]):
         log("recap_revision_wrong_night", asked=revise["night"], found=night_key)
         return {"ok": False, "night": night_key, "posted": False, "wrongNight": True}
+    pulls_now = sum(len(c["raidScope"]["fightIDs"]) for c in chosen)
+    if revise and revise.get("posted") and pulls_now <= int(revise["posted"].get("pulls") or 0):
+        # The only thing a recheck corrects is a night that turned out to be longer than
+        # the recap said. Same pulls, or fewer, is the recap already being right.
+        log("recap_recheck_unchanged", night=night_key, pulls=pulls_now,
+            reports=[c["code"] for c in chosen])
+        return {"ok": True, "night": night_key, "posted": False, "unchanged": True}
     if not dry and not revise and not store.claim_recap(scope, night_key):
         log("recap_already_posted", night=night_key, note="claimed by an earlier run")
         return {"ok": True, "night": night_key, "posted": False, "duplicate": True}
@@ -3303,6 +3388,14 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     summary["worldBosses"] = tier.get("worldBosses") or []
     diff_label = diff_name.title()
     who = display_name(cfg)
+    fresh_notes = []
+    if revise:
+        # Earlier corrections stay on the card: it is redrawn from nothing each time, and
+        # a second correction must not quietly erase what the first one admitted.
+        earlier = list((store.get_recap_post(scope, night_key) or {}).get("notes") or [])
+        fresh_notes = (recheck_notes(revise["posted"], chosen, summary, pulls_now)
+                       if revise.get("posted") else list(revision["changes"]))
+        revision["changes"] = earlier + fresh_notes
 
     # The full recap page. Built unconditionally: it is pure computation over blobs
     # already in memory and it is what the dry run has to show; PUBLISHING it is what the
@@ -3397,6 +3490,12 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
             card=card_url, reports=[c["meta"]["code"] for c in chosen], skipped=skipped,
             bosses=summary.get("bosses"), raiders=summary.get("raiders"),
             changes=revision["changes"])
+        try:
+            remember_recap(scope, night_key, str(revise["message"]), chosen, summary, now_iso,
+                           notes=[f"{revision['date']}: {c}" for c in fresh_notes],
+                           rechecked=bool(revise.get("posted")))
+        except Exception as exc:                                   # noqa: BLE001
+            log("recap_post_record_failed", night=night_key, error=repr(exc))
         return {"ok": True, "night": night_key, "posted": False, "revised": True,
                 "card": card_url, "page": page_url}
     if dry:
@@ -3428,6 +3527,11 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         log("recap_failed", night=night_key, error=str(exc))
         return {"ok": False, "night": night_key, "posted": False}
     _remember_post(scope, sent, "recap", now_iso)
+    try:
+        if getattr(sent, "message_id", None) and not discord_only:
+            remember_recap(scope, night_key, sent.message_id, chosen, summary, now_iso)
+    except Exception as exc:                                       # noqa: BLE001
+        log("recap_post_record_failed", night=night_key, error=repr(exc))
 
     # The night's grey parses, privately, to the one person who asked for them. After the
     # card is posted and wrapped, because a failed DM must never cost the recap: the card

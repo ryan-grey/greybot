@@ -722,6 +722,32 @@ def release_recap(scope, night_key):
                     ExpressionAttributeValues={":b": {"SS": [night_key]}})
 
 
+def _recap_post_sk(night_key):
+    return f"RECAP#POST#{night_key}"
+
+
+def put_recap_post(scope, night_key, record):
+    """What one night's posted recap was built from, so it can be looked at again.
+
+    The message to edit, the reports used, how many pulls and which kills they held, and
+    every correction note it has carried. Overwritten whole: one writer at a time, the
+    post and then at most a recheck hours later.
+    """
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(scope.tenant), "sk": _s(_recap_post_sk(night_key)),
+        "record": _s(json.dumps(record, sort_keys=True))})
+
+
+def get_recap_post(scope, night_key):
+    res = ddb.get_item(TableName=TABLE, ConsistentRead=True,
+                       Key={"pk": _s(scope.tenant), "sk": _s(_recap_post_sk(night_key))})
+    raw = ((res.get("Item") or {}).get("record") or {}).get("S")
+    try:
+        return json.loads(raw) if raw else None
+    except ValueError:
+        return None
+
+
 # The roll call: one card per raid night, posted when the night's first boss dies. Two rows
 # per install. ROLLCALL holds the claimed nights, exactly as RECAPS does. ROLLCALL#SETUP holds
 # what the operator told the bot: which voice channel is this team's, and which characters
