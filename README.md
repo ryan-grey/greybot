@@ -422,6 +422,24 @@ It runs on a second EventBridge schedule pointed at the **same** Lambda with
 Scrambled runs two raid teams into one Warcraft Logs guild, an A team and a B team, and
 only the A team gets recapped. Nothing in the API says which is which.
 
+### A log that stopped early, and correcting a posted recap
+
+The guild's own log of a night can stop after the first boss while a raider's personal
+log has all of it; on 2026-10-06 the recap said one kill for a night with two and nine
+more pulls. Before posting, the recap asks the raiders in the logs it chose what else they
+were logged in that night (one query), reads up to three of those reports, and accepts one
+only when it is provably the same raid: a boss pull at the same moment and at least 70% of
+the same people. The existing duplicate rule then keeps the most complete log
+(`recap_raider_log_checked`, `recap_duplicate_logs`). Uploaders an install never reads
+stay unread, and a failure in the search leaves the night as it was found.
+
+A recap that is already posted is corrected by hand, never reposted:
+`{"mode":"recap","team":"<team>","dry":true,"revise":{"night":"YYYY-MM-DD",
+"reports":["<code>"],"date":"YYYY-MM-DD","changes":["..."]}}` publishes a preview card
+and touches nothing else; the same event without `dry` and with `"message":"<id>"` edits
+that message in place and republishes the page. The dated What-changed note is drawn on
+the card and repeated on the page and in the message.
+
 ### Why the roster is derived and not written down
 
 A hand-maintained roster goes stale the first time somebody transfers, and a stale roster

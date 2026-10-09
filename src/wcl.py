@@ -527,6 +527,56 @@ USER_NIGHT_REPORTS_Q = NIGHT_REPORTS_Q.replace("$guildID: Int!", "$userID: Int!"
     "guildID: $guildID", "userID: $userID")
 
 
+def server_slug(server):
+    """A log's realm name ("EmeraldDream", "Aman'Thul", "Area52") as the API's slug.
+
+    Good enough rather than exact: a realm with a lower-case word inside it ("AltarofStorms")
+    comes out wrong, the lookup answers null, and that raider is simply not asked.
+    """
+    import re
+    text = re.sub(r"['’](\w)", lambda m: m.group(1).lower(), str(server or ""))
+    text = re.sub(r"['’\s]", "", text)
+    text = re.sub(r"(?<=[a-z])(?=[A-Z0-9])|(?<=[A-Za-z])(?=[0-9])", "-", text)
+    return text.lower()
+
+
+RAIDER_REPORTS_LIMIT = 20  # raiders asked in the one query, and it is one query
+
+
+def raider_reports(token, raiders, region, start_ms, end_ms, per_raider=8):
+    """Reports a night's raiders appear in, whoever filed them, started inside a window.
+
+    The guild's own log of a night can stop after the first boss while a raider's personal
+    log has all of it, and a personal log is invisible to reports(guildID:). Every raider's
+    recent reports are, however, listed on the raider -- so the people in the log that WAS
+    found are asked, in a single aliased query, what else they were logged in that night.
+
+    `raiders` is [(name, server)]. Returns ([report meta], rate); characters the API does
+    not know are skipped. Each meta carries `raiders`, how many of those asked are in it:
+    the raid's own log is the one nearly all of them share, a pug's is one person's.
+    """
+    asked = [(n, server_slug(s)) for n, s in raiders if n and s][:RAIDER_REPORTS_LIMIT]
+    if not asked:
+        return [], None
+    parts, variables = [], {}
+    for i, (name, slug) in enumerate(asked):
+        variables[f"n{i}"], variables[f"s{i}"] = name, slug
+        parts.append(
+            f"c{i}: character(name: $n{i}, serverSlug: $s{i}, serverRegion: $region) "
+            f"{{ recentReports(limit: {int(per_raider)}) {{ data {{ code title startTime "
+            f"endTime visibility zone {{ id name }} owner {{ id name }} }} }} }}")
+    args = ", ".join(f"$n{i}: String!, $s{i}: String!" for i in range(len(asked)))
+    doc = (f"query($region: String!, {args}) {{ {RATE} "
+           f"characterData {{ {' '.join(parts)} }} }}")
+    data = query(token, doc, {**variables, "region": str(region or "us")})
+    found = {}
+    for character in ((data.get("characterData") or {}).values()):
+        for r in (((character or {}).get("recentReports") or {}).get("data") or []):
+            if r and r.get("code") and start_ms <= int(r.get("startTime") or 0) <= end_ms:
+                found.setdefault(r["code"], {**r, "raiders": 0})["raiders"] += 1
+    return list(found.values()), rate_limit(data)
+
+
 def reports_in_window(token, guild_id, start_ms, end_ms, limit=10, user_id=None):
     """Reports the guild -- or, with `user_id`, one user -- filed in one raid night's
     window. Deliberately cheap: no fights, so this costs a fraction of what the

@@ -2911,6 +2911,83 @@ def night_difficulty(cfg, fights):
     return wcl.DIFFICULTY_IDS[best], best
 
 
+FULLER_LOG_CANDIDATES = 3      # report details read, at ~225KB each
+FULLER_LOG_ROSTER_PCT = 70.0   # of the smaller raid, in both logs
+FULLER_LOG_PULL_SECONDS = 90   # two loggers' clocks on the same pull
+
+
+def fuller_logs(token, cfg, chosen, known, tier, night_diff, profile, index):
+    """Other people's logs of the SAME raid as the night's chosen reports.
+
+    On 2026-10-06 the guild's log stopped after the first boss and the recap said one
+    kill; two raiders' personal logs held all thirteen pulls. This asks the raiders in the
+    chosen logs what else they were logged in that night and returns the reports that are
+    provably the same raid, as `chosen` entries. Deciding which log is the most complete
+    is not done here: drop_duplicate_logs already keeps the fuller of two overlapping
+    logs, and a log that covers a part of the night the others missed is summed like any
+    restarted log.
+
+    "Provably the same raid" is two things at once, because either alone can be a pug in
+    the same instance: a boss pull at the same wall-clock moment as one in a chosen log,
+    and most of the same people. Uploaders the install is told never to read stay unread.
+    """
+    start = min(c["start"] for c in chosen)
+    end = max(c["end"] for c in chosen)
+    raiders, people = set(), []
+    for c in chosen:
+        for i in c["raidScope"]["raiderIDs"]:
+            a = c["actors"].get(i)
+            if a and team.player_key(a["name"], a["server"]) not in raiders:
+                raiders.add(team.player_key(a["name"], a["server"]))
+                people.append((a["name"], a["server"]))
+    listed, _rate = wcl.raider_reports(token, people, cfg.get("guild_region"),
+                                       start - 3 * 3600 * 1000, end)
+    excluded = excluded_owners(cfg)
+    zone = ((chosen[0]["detail"].get("zone") or {}).get("id"))
+    candidates = [r for r in listed
+                  if r["code"] not in known
+                  and str(((r.get("owner") or {}).get("id")) or "") not in excluded
+                  and (not zone or ((r.get("zone") or {}).get("id")) in (None, zone))]
+    # Most of the night's raiders first, then longest: the few details read should be the
+    # raid's other logs, not whichever raider ran the longest pug that afternoon.
+    candidates.sort(key=lambda r: (-int(r.get("raiders") or 0),
+                                   int(r.get("startTime") or 0) - int(r.get("endTime") or 0)))
+    pulls = {(int(f.get("encounterID") or 0), c["base"] + int(f.get("startTime") or 0))
+             for c in chosen for f in c["raidScope"]["fights"]}
+
+    found = []
+    for meta in candidates[:FULLER_LOG_CANDIDATES]:
+        detail, _rate = wcl.report_detail(token, meta["code"])
+        raid_scope = recap_mod.raid_scope(detail.get("fights"), night_diff)
+        if not raid_scope["fightIDs"]:
+            continue
+        base = int(detail.get("startTime") or meta.get("startTime") or 0)
+        slug, _meta, _how, raid_scope, _worlds = report_tier(
+            detail, raid_scope, base, cfg, profile, index, difficulty=night_diff)
+        if slug != tier["slug"]:
+            continue
+        same_pull = any(
+            enc == int(f.get("encounterID") or 0)
+            and abs(at - (base + int(f.get("startTime") or 0))) <= FULLER_LOG_PULL_SECONDS * 1000
+            for f in raid_scope["fights"] for enc, at in pulls)
+        actors = recap_mod.actor_index(detail.get("masterData"))
+        theirs = {team.player_key(actors[i]["name"], actors[i]["server"])
+                  for i in raid_scope["raiderIDs"] if i in actors}
+        shared = 100.0 * len(raiders & theirs) / max(1, min(len(raiders), len(theirs)))
+        verdict = same_pull and shared >= FULLER_LOG_ROSTER_PCT
+        log("recap_raider_log_checked", report=meta["code"], title=meta.get("title"),
+            owner=(meta.get("owner") or {}).get("name"), samePull=same_pull,
+            rosterShared=round(shared, 1), fights=len(raid_scope["fightIDs"]),
+            sameRaid=verdict)
+        if verdict:
+            found.append({"meta": {**meta, "title": detail.get("title") or meta.get("title")},
+                          "detail": detail, "raidScope": raid_scope, "actors": actors,
+                          "base": base, "code": meta["code"], "start": base,
+                          "end": int(detail.get("endTime") or meta.get("endTime") or base),
+                          "heroicFights": len(raid_scope["fightIDs"]), "found": True})
+    return found
+
+
 def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, dry=False,
                 hours=None, manual=False, revise=None):
     """Post one raid night's recap, or post nothing and say why.
@@ -3131,6 +3208,14 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
                        "end": int(detail.get("endTime") or meta.get("endTime") or base),
                        "heroicFights": len(raid_scope["fightIDs"])})
 
+    if chosen and not revise:
+        # Never worth a recap: any failure here leaves the night exactly as it was found.
+        try:
+            chosen += fuller_logs(token, cfg, chosen, {r["code"] for r in reports}, tier,
+                                  night_diff, profile, index)
+        except Exception as exc:                                   # noqa: BLE001
+            log("recap_fuller_log_search_failed", error=repr(exc))
+
     # Two people in the guild both log, so one night routinely produces two reports of the
     # same pulls. Summing those doubles every number on the card.
     chosen, duplicates = recap_mod.drop_duplicate_logs(chosen)
@@ -3229,7 +3314,8 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
                      "url": report_url(c["meta"]["code"]),
                      "owner": (c["meta"].get("owner") or {}).get("name"),
                      # A named log may be a raider's own, not the guild's: no guild link.
-                     "ownerUrl": None if revise else recap_page.guild_reports_url(gid),
+                     "ownerUrl": (None if revise or c.get("found")
+                                  else recap_page.guild_reports_url(gid)),
                      "when": _iso(_at(c["base"]))} for c in chosen]
     # A team's page lives under its slug. Two teams raid the same Tuesday, and one night
     # key for both would have the second recap overwrite the first's page.

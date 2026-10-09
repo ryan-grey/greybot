@@ -3361,6 +3361,97 @@ def test_poll_failures():
     check("...and the grant coming back sends the all-clear", len(SENT) == 3, SENT)
 
 
+def test_fuller_logs():
+    """The guild's log stopped after the first boss; a raider's own log had the night."""
+    print("\nA raider's fuller log of the same raid")
+    import handler
+
+    check("realm names become the API's slugs",
+          [wcl.server_slug(s) for s in ("EmeraldDream", "Aman'Thul", "Area52", "Proudmoore")]
+          == ["emerald-dream", "amanthul", "area-52", "proudmoore"])
+
+    asked = {}
+
+    def fake_query(token, doc, variables=None):
+        asked.update(doc=doc, variables=variables)
+        night = lambda code, at: {"code": code, "startTime": at, "endTime": at + 10,
+                                  "owner": {"id": 1, "name": "x"}}
+        return {"characterData": {
+            "c0": {"recentReports": {"data": [night("FULL", 1000), night("OLD", 10)]}},
+            "c1": None,
+            "c2": {"recentReports": {"data": [night("FULL", 1000)]}}}}
+
+    saved = wcl.query
+    wcl.query = fake_query
+    try:
+        listed, _rate = wcl.raider_reports("tok", [("Ana", "EmeraldDream"), ("Bo", "Proudmoore"),
+                                                   ("Cy", "Aman'Thul")], "us", 500, 2000)
+    finally:
+        wcl.query = saved
+    check("every raider is asked in ONE query", asked["doc"].count("recentReports(") == 3
+          and asked["variables"]["s0"] == "emerald-dream", asked.get("variables"))
+    check("...and only that night's reports come back, once each",
+          [(r["code"], r["raiders"]) for r in listed] == [("FULL", 2)], listed)
+
+    people = {i: {"name": f"Raider{i}", "server": "Proudmoore"} for i in range(1, 11)}
+
+    def fight(fid, enc, at, kill=True, who=range(1, 11)):
+        return {"id": fid, "encounterID": enc, "startTime": at, "endTime": at + 300000,
+                "kill": kill, "difficulty": wcl.HEROIC, "friendlyPlayers": list(who)}
+
+    def entry(code, base, fights):
+        return {"code": code, "base": base, "start": base, "end": base + 400000,
+                "actors": people, "detail": {"zone": {"id": 53}},
+                "raidScope": recap.raid_scope(fights, wcl.HEROIC)}
+
+    short = entry("GUILD", 1_000_000, [fight(1, 3470, 60_000)])
+    details = {
+        # Thirty seconds later on another logger's clock, and the rest of the night.
+        "FULL": {"startTime": 1_000_000 - 600_000, "endTime": 9_000_000, "title": "Reclear",
+                 "fights": [fight(1, 3470, 690_000), fight(2, 3471, 1_500_000),
+                            fight(3, 3472, 3_000_000, kill=False)]},
+        # The same boss in the same instance an hour later with other people: a pug.
+        "PUG": {"startTime": 1_000_000, "endTime": 9_000_000,
+                "fights": [fight(1, 3470, 3_600_000, who=range(20, 30))]},
+        # The same pull, logged by somebody the install is told never to read.
+        "BANNED": {"startTime": 1_000_000, "endTime": 9_000_000,
+                   "fights": [fight(1, 3470, 60_000)]}}
+    for d in details.values():
+        d["masterData"] = {"actors": [{"id": i, "name": f"Raider{i}" if i < 20 else f"Pug{i}",
+                                       "server": "Proudmoore", "type": "Player",
+                                       "subType": "Mage"} for i in range(1, 30)]}
+    metas = [{"code": c, "startTime": details[c]["startTime"],
+              "endTime": details[c]["endTime"], "zone": {"id": 53},
+              "owner": {"id": 40245 if c == "BANNED" else 7, "name": "someone"}}
+             for c in ("FULL", "PUG", "BANNED")] + [
+             {"code": "GUILD", "startTime": 1_000_000, "endTime": 1_400_000,
+              "zone": {"id": 53}, "owner": {"id": 7, "name": "someone"}}]
+    read = []
+    keep = (handler.wcl.raider_reports, handler.wcl.report_detail, handler.report_tier)
+    handler.wcl.raider_reports = lambda *a, **kw: (metas, None)
+    handler.wcl.report_detail = lambda token, code: (read.append(code) or details[code], None)
+    handler.report_tier = lambda detail, scope, base, *a, **kw: (
+        "the-venomous-abyss", {}, "test", scope, {})
+    try:
+        found = handler.fuller_logs("tok", {"guild_region": "us",
+                                            "wcl_exclude_owner_ids": "40245"},
+                                    [short], {"GUILD"}, {"slug": "the-venomous-abyss"},
+                                    wcl.HEROIC, None, None)
+    finally:
+        handler.wcl.raider_reports, handler.wcl.report_detail, handler.report_tier = keep
+    check("the same raid in a raider's own log is found",
+          [f["code"] for f in found] == ["FULL"], [f["code"] for f in found])
+    check("...a pug on the same boss that night is not", "PUG" in read and len(found) == 1)
+    check("...an uploader this install never reads stays unread",
+          "BANNED" not in read, read)
+    check("...and the log already chosen is not read twice", "GUILD" not in read, read)
+    kept, dropped = recap.drop_duplicate_logs([short] + [
+        dict(f, heroicFights=len(f["raidScope"]["fightIDs"])) for f in found])
+    check("the fuller log replaces the one that stopped early",
+          [k["code"] for k in kept] == ["FULL"] and dropped[0]["report"] == "GUILD",
+          (kept and kept[0]["code"], dropped))
+
+
 def _src(report="R1", actors=None, elig=None, fids=None,
          damage=None, deaths=(), rankings=None, playerDetails=None):
     """One report's worth of blobs, in the shape recap.py aggregates over."""
@@ -4255,6 +4346,7 @@ def main():
                test_subtitle_aliases, test_health,
                test_source_blind,
                test_poll_failures,
+               test_fuller_logs,
                test_iam_grant_covers_config,
                test_recap_parsers, test_end_to_end,
                test_team_install,
