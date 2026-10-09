@@ -133,6 +133,9 @@ HEALTH_REMIND_HOURS = float(os.environ.get("HEALTH_REMIND_HOURS", "24"))
 # Warcraft Logs passes unremarked, short enough that a real outage is a morning's problem
 # rather than something found eighteen hours later by asking.
 SOURCE_BLIND_POLLS = int(os.environ.get("SOURCE_BLIND_POLLS", "4"))
+# Two, not four: an install's poll raising is not the ambiguous signal an empty report list
+# is. One failure is still a bad minute at somebody's API; two in a row is half an hour.
+POLL_FAILING_POLLS = int(os.environ.get("POLL_FAILING_POLLS", "2"))
 
 # Where this function invokes ITSELF to finish a slow /progress. Every other module reads
 # AWS_REGION for its own client; this one referenced a REGION that was never defined here,
@@ -1443,6 +1446,52 @@ def _alert_kind(prev, status, now, forced=False):
     return None
 
 
+def run_poll_failure_check(cfg, scope, now, now_iso, errors, immediate=False):
+    """Is the poll itself raising, run after run?
+
+    On 2026-10-07 Warcraft Logs began rejecting the account grant with a 401 while its
+    stored expiry was a year away. Every install's poll raised for a day and a half, each
+    one a tenant_poll_failed log line nobody was reading, and a Thursday's kill card, roll
+    calls and recaps went unposted until Ryan asked. Neither existing check could see it:
+    Discord was fine, and the source check runs inside the poll that never got that far.
+
+    `errors` maps each failing install to its error; empty means a clean run. `immediate`
+    skips the streak for a run that has no next attempt -- a failed recap is a lost night,
+    not a bad minute.
+    """
+    prev = store.get_poll_failures(scope) or {}
+    before = int(prev.get("failedPolls") or 0)
+    streak = before + 1 if errors else 0
+    if errors and immediate:
+        streak = max(streak, POLL_FAILING_POLLS)
+
+    status = health.POLL_FAILING if streak >= POLL_FAILING_POLLS else health.OK
+    prev_status = prev.get("status") or ""
+    changed = status != prev_status
+    since = now_iso if changed else (prev.get("since") or now_iso)
+    kind = _alert_kind(prev, status, now)
+
+    sent = False
+    if kind:
+        result = health.poll_result(status, streak, POLL_FAILING_POLLS, errors)
+        try:
+            sent = notify.publish(
+                cfg.get("alert_topic_arn"),
+                health.subject(kind, status, cfg.get("guild_name") or ""),
+                health.body(kind, result, cfg, now_iso, since=since))
+        except notify.NotifyError as exc:
+            log("poll_failure_alert_undeliverable", status=status, kind=kind, error=str(exc))
+
+    if changed or sent or streak != before:
+        store.put_poll_failures(scope, status, streak, since,
+                                now_iso if sent else (prev.get("notifiedAt") or ""))
+    if errors or changed:
+        log("poll_failures_checked", status=status, failedPolls=streak,
+            threshold=POLL_FAILING_POLLS, previous=prev_status or None,
+            notified=kind if sent else None, installs=sorted(errors or {}))
+    return status
+
+
 def probe_report_visibility(token, guild_id, start_ms, end_ms, check_history=False, **extra):
     """Separate a quiet announcement window from an inaccessible report history."""
     recent, rate = wcl.reports_in_window(token, guild_id, start_ms, end_ms, limit=5, **extra)
@@ -1849,7 +1898,7 @@ def handler(event, context):
     # raised: the poller is a single Lambda serving every install, so an
     # exception escaping here would stop every OTHER tenant being polled too --
     # one server's revoked channel must not silence the rest.
-    results, failed = [], []
+    results, failed, errors = [], [], {}
     # A manual invocation may name one team, so a hand-run recap or preview lands in
     # that team's channel alone rather than in every install's. The schedules send no
     # such field and fan out to everyone.
@@ -1862,6 +1911,20 @@ def handler(event, context):
         except Exception as exc:                                   # noqa: BLE001
             log("tenant_poll_failed", tenant=tenant_scope.tenant, error=repr(exc))
             failed.append(tenant_scope.tenant)
+            errors[tenant_scope.tenant] = repr(exc)
+
+    # Only what a schedule sends counts: a hand-run preview that raises on a bad argument
+    # is not an outage. A one-team run can report a failure but cannot clear the streak,
+    # because it says nothing about the installs it skipped.
+    spec = event if isinstance(event, dict) else {}
+    by_hand = {"dry", "preview", "manual", "hours", "backfill", "revision", "end"}
+    if spec.get("mode") in (None, "recap") and not by_hand & set(spec) \
+            and (errors or not only):
+        try:
+            run_poll_failure_check(cfg, scope, now, now_iso, errors,
+                                   immediate=spec.get("mode") == "recap")
+        except Exception as exc:                                   # noqa: BLE001
+            log("poll_failure_check_error", error=repr(exc))
 
     # One tenant keeps the old single-install response shape, so nothing that
     # reads this return value -- the tests, a manual invoke -- had to change.

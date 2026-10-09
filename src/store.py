@@ -1030,6 +1030,34 @@ def put_source(scope, status, blind_polls, since, notified_at=""):
         "since": _s(since), "notifiedAt": _s(notified_at or "")})
 
 
+POLL_FAILURES_SK = "POLLFAILURES"
+
+
+def get_poll_failures(scope):
+    """How many scheduled runs in a row have raised for some install.
+
+    One row for the whole deployment, on the server-wide install's partition: the installs
+    share the operator's credentials, so they break together, and one email is the right
+    number. Stored for the same reason the source streak is.
+    """
+    res = ddb.get_item(TableName=TABLE, Key={"pk": _s(scope.tenant), "sk": _s(POLL_FAILURES_SK)},
+                       ConsistentRead=True)
+    item = res.get("Item")
+    if not item:
+        return None
+    return {"status": (item.get("status") or {}).get("S") or "",
+            "failedPolls": int((item.get("failedPolls") or {}).get("N") or 0),
+            "since": (item.get("since") or {}).get("S") or "",
+            "notifiedAt": (item.get("notifiedAt") or {}).get("S") or ""}
+
+
+def put_poll_failures(scope, status, failed_polls, since, notified_at=""):
+    ddb.put_item(TableName=TABLE, Item={
+        "pk": _s(scope.tenant), "sk": _s(POLL_FAILURES_SK),
+        "status": _s(status), "failedPolls": _n(int(failed_polls or 0)),
+        "since": _s(since), "notifiedAt": _s(notified_at or "")})
+
+
 # --- tenant configuration -------------------------------------------------
 #
 # The CONFIG row is the install itself: which WoW guild this server tracks, and

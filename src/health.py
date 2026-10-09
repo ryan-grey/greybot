@@ -65,6 +65,11 @@ POST_DELETED = "post_deleted"
 # just as completely as being kicked and is invisible to every probe above.
 SOURCE_BLIND = "source_blind"
 
+# Not a Discord state either. The poll itself is raising, for some install, run after run:
+# a rejected Warcraft Logs grant, a Raider.IO outage, a bug. Each failure was already a log
+# line; this is what turns a streak of them into something a person hears about.
+POLL_FAILING = "poll_failing"
+
 # Worst first. Several of these go wrong at the same instant -- removing the app fails the
 # commands fetch AND deletes any webhook the app created -- so the mail has to lead with
 # the cause rather than whichever symptom happened to be probed first.
@@ -80,6 +85,7 @@ HEADLINE = {
     POST_DELETED: "A greyBot post was deleted in the {guild} Discord",
     WEBHOOK_GONE: "greyBot's announcement webhook no longer exists",
     SOURCE_BLIND: "greyBot cannot see any Warcraft Logs reports",
+    POLL_FAILING: "greyBot's polls are failing",
 }
 
 # What Ryan should actually do about it, which is the entire reason the mail is worth
@@ -122,6 +128,15 @@ ADVICE = {
                    "went private, and check whether OTHER guilds return reports too -- if "
                    "they do not, it is Warcraft Logs and not you. See "
                    "docs/wcl-reportdata-blind.md."),
+    POLL_FAILING: ("Discord is fine -- the poll is raising before it can announce anything, "
+                   "so kill cards, roll calls and recaps stop for every install listed "
+                   "below until it clears. Nothing is lost: the dedupe state is intact, and "
+                   "kills and roll calls post by themselves on the first good poll. A recap "
+                   "whose scheduled run failed does NOT come back by itself; re-run it with "
+                   "{\"mode\":\"recap\"}. If the error is an HTTP 401 from /api/v2/user, "
+                   "Warcraft Logs is rejecting the account grant: renew it with "
+                   "scripts/connect-wcl.py --refresh, or reconnect in Chrome if that is "
+                   "refused."),
 }
 
 
@@ -389,6 +404,17 @@ def check(cfg, now=None):
 
 
 ALERT, REMINDER, RECOVERY, TEST = "alert", "reminder", "recovery", "test"
+
+
+def poll_result(status, failed_polls, threshold, errors):
+    """A check() result describing the poll itself, one probe line per failing install."""
+    probes = [{"probe": "poll", "verdict": "raising" if status != OK else OK,
+               "consecutivePolls": failed_polls, "threshold": threshold}]
+    for tenant, error in sorted((errors or {}).items()):
+        probes.append({"probe": "install", "verdict": "failed",
+                       "tenant": tenant, "error": error})
+    return {"status": status, "definite": True, "probes": probes,
+            "cause": probes[0] if status != OK else None, "member": None}
 
 
 def subject(kind, status, guild_name):

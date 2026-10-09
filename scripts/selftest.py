@@ -3287,6 +3287,62 @@ def test_source_blind():
               == health.RECOVERY)
 
 
+def test_poll_failures():
+    """A poll that raises run after run has to reach a person.
+
+    On 2026-10-07 Warcraft Logs rejected the account grant and every install's poll raised
+    for a day and a half. Each failure was logged and none was mailed.
+    """
+    print("\nPolls that raise, and telling one bad minute from an outage")
+    from datetime import datetime, timedelta, timezone
+
+    import handler
+
+    now = datetime(2026, 10, 7, 15, 33, tzinfo=timezone.utc)
+    _iso = handler._iso
+    cfg = {"guild_name": "Scrambled",
+           "alert_topic_arn": "arn:aws:sns:us-east-1:0:ryangrey-dev-alerts"}
+    pk = keys.Scope.build("us", "proudmoore", "Scrambled", TEST_TENANT)
+    errors = {"TENANT#1#meers-raid": "WCLError('HTTP 401 from /api/v2/user: ')"}
+    FAKE_DDB.items.clear()
+    SENT.clear()
+
+    handler.run_poll_failure_check(cfg, pk, now, _iso(now), {})
+    check("a clean first run says nothing", SENT == [], SENT)
+
+    handler.run_poll_failure_check(cfg, pk, now, _iso(now), errors)
+    check("one failed poll stays quiet", SENT == [], SENT)
+    check("...but the streak is persisted",
+          store.get_poll_failures(pk)["failedPolls"] == 1, store.get_poll_failures(pk))
+
+    t = now + timedelta(minutes=15)
+    handler.run_poll_failure_check(cfg, pk, t, _iso(t), errors)
+    check("a second in a row sends exactly one email", len(SENT) == 1, SENT)
+    check("...naming the install and its error",
+          "meers-raid" in SENT[0]["body"] and "HTTP 401" in SENT[0]["body"], SENT[0]["body"])
+    check("...and how to renew the grant", "connect-wcl.py --refresh" in SENT[0]["body"])
+
+    t = now + timedelta(hours=1)
+    handler.run_poll_failure_check(cfg, pk, t, _iso(t), errors)
+    check("still failing an hour later sends nothing more", len(SENT) == 1, SENT)
+
+    t = now + timedelta(hours=25)
+    handler.run_poll_failure_check(cfg, pk, t, _iso(t), errors)
+    check("a day later it reminds, once",
+          len(SENT) == 2 and SENT[1]["subject"].startswith("Still:"), SENT)
+
+    t = now + timedelta(hours=26)
+    handler.run_poll_failure_check(cfg, pk, t, _iso(t), {})
+    check("a clean poll sends one all-clear", len(SENT) == 3, SENT)
+    check("...and resets the streak", store.get_poll_failures(pk)["failedPolls"] == 0)
+
+    FAKE_DDB.items.clear()
+    SENT.clear()
+    handler.run_poll_failure_check(cfg, pk, now, _iso(now), errors, immediate=True)
+    check("a failed recap run mails at once: there is no next attempt",
+          len(SENT) == 1, SENT)
+
+
 def _src(report="R1", actors=None, elig=None, fids=None,
          damage=None, deaths=(), rankings=None, playerDetails=None):
     """One report's worth of blobs, in the shape recap.py aggregates over."""
@@ -4180,6 +4236,7 @@ def main():
                test_interactions, test_progress_slow_path,
                test_subtitle_aliases, test_health,
                test_source_blind,
+               test_poll_failures,
                test_iam_grant_covers_config,
                test_recap_parsers, test_end_to_end,
                test_team_install,

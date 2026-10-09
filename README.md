@@ -720,7 +720,10 @@ Without a connection, the existing public API remains in use.
 
 The helper reports the grant's expiry; renew it with the same command plus `--refresh`,
 or reconnect in Chrome if authorization was revoked. An expired grant raises an explicit
-error rather than silently treating private raids as absent. Private and unlisted recap
+error rather than silently treating private raids as absent. Warcraft Logs can also reject
+a grant long before its stored expiry (it did on 2026-10-07); the runtime cannot renew it,
+so two scheduled polls raising in a row, or one failed recap run, email the alerts topic
+with each install's error (`poll_failing`), remind daily and send one all-clear. Private and unlisted recap
 sources default to a Discord attachment, with no public recap webpage or image upload.
 An install may explicitly opt into public recap pages and images with its CONFIG
 `publishPrivateRecaps` string set to `true`; this does not change the source report's
