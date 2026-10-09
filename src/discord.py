@@ -148,7 +148,7 @@ def _post_json(url, payload, headers=None, timeout=10, sleep=time.sleep, max_att
 
 
 def _post_raw(url, body, content_type, headers=None, timeout=10, sleep=time.sleep,
-              max_attempts=MAX_ATTEMPTS):
+              max_attempts=MAX_ATTEMPTS, method="POST"):
     """The retry loop itself, over bytes the caller has already encoded.
 
     Split out so a multipart upload gets exactly the same rate-limit and 5xx handling as
@@ -157,7 +157,7 @@ def _post_raw(url, body, content_type, headers=None, timeout=10, sleep=time.slee
     last = None
     for attempt in range(1, max_attempts + 1):
         req = urllib.request.Request(
-            url, data=body, method="POST",
+            url, data=body, method=method,
             headers={"Content-Type": content_type,
                      "User-Agent": "scrambled-raid-bot/1.0",
                      **(headers or {})})
@@ -415,8 +415,11 @@ def _tied(rows, key):
 
 def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso_ts=None,
                 thumbnail_url=None, guild_label=None, guild_url=None, recap_url=None,
-                difficulty="Heroic", card_url=None):
+                difficulty="Heroic", card_url=None, revision=None):
     """The morning-after card. One embed, no ping, same visual language as a kill card.
+
+    `revision` is {"date", "changes": [...]} on a corrected recap: the same dated note
+    the card carries, repeated as text for anyone who cannot read the image.
 
     Every section is optional and silently absent when it could not be read. A recap that
     lost its rankings blob is a card without a parse line, not a card that says "parse
@@ -560,6 +563,11 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
                             "inline": False}]
     else:
         embed.pop("fields")
+    if revision and revision.get("changes"):
+        embed.setdefault("fields", []).append({
+            "name": f"Updated {revision['date']} · What changed",
+            "value": "\n".join("• " + line for line in revision["changes"])[:1024],
+            "inline": False})
     if report_url:
         embed["url"] = report_url
     if iso_ts:
@@ -574,6 +582,23 @@ def recap_embed(guild_name, raid_name, night_text, summary, report_url=None, iso
     return {"embeds": [embed], "allowed_mentions": {"parse": []}}
 
 CHANNEL_API = "https://discord.com/api/v10/channels"
+
+
+def edit_in(destination, message_id, payload, timeout=10, sleep=time.sleep,
+            max_attempts=MAX_ATTEMPTS):
+    """Replace a message the bot already posted, in place.
+
+    A correction edits rather than reposts: the replies and reactions under the original
+    stay attached to it, and nobody is notified a second time. Bot-token installs only --
+    a webhook's messages are edited through the webhook, which nothing here needs yet.
+    """
+    token, channel = destination.get("bot_token"), destination.get("channel")
+    if not token or not channel or not message_id:
+        raise DiscordError("editing needs a bot token, a channel id and a message id")
+    return _post_raw(f"{CHANNEL_API}/{channel}/messages/{message_id}",
+                     json.dumps(payload).encode("utf-8"), "application/json",
+                     headers={"Authorization": f"Bot {token}"}, timeout=timeout,
+                     sleep=sleep, max_attempts=max_attempts, method="PATCH")
 
 
 DM_API = "https://discord.com/api/v10/users/@me/channels"

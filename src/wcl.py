@@ -420,7 +420,7 @@ query($code: String!) {
   %s
   reportData {
     report(code: $code) {
-      code title startTime endTime visibility
+      code title startTime endTime visibility owner { id name }
       guild { id name } guildTag { id name } zone { id name }
       masterData { actors(type: "Player") { id name server type subType } }
       fights(killType: Encounters) {

@@ -335,8 +335,13 @@ def _column(canvas, x, y, w, title, icon, rows, empty, badge=None):
 
 
 def render(summary, guild_name=None, night_text=None, raid_name=None, difficulty=None,
-           raiders=None, *, cells=None, kicker="RAID RECAP", signup_role_icons=False):
-    """The grid as PNG bytes, or None if anything at all went wrong."""
+           raiders=None, *, cells=None, kicker="RAID RECAP", signup_role_icons=False,
+           revision=None):
+    """The grid as PNG bytes, or None if anything at all went wrong.
+
+    `revision` is {"date", "changes": [...]} on a corrected card, drawn as a dated note
+    between the header and the columns -- the same box the roll call and vault cards use.
+    """
     try:
         from PIL import Image, ImageDraw
     except ImportError:
@@ -365,7 +370,20 @@ def render(summary, guild_name=None, night_text=None, raid_name=None, difficulty
             chip_rows[-1].append((cx, cw, label))
             cx += cw + 8
         chip_height = 30 * len(chip_rows) if chips else 24
-        head_h = 24 + 18 + 34 + 24 + chip_height + 8
+        note_font = measure.font("regular", 13)
+        revision_lines = []
+        for note in (revision or {}).get("changes") or ():
+            line = "•"
+            for word in str(note).split():
+                candidate = line + " " + word
+                if measure.width(candidate, note_font) > WIDTH_CSS - 2 * PAD - 24:
+                    revision_lines.append(line)
+                    line = "  " + word
+                else:
+                    line = candidate
+            revision_lines.append(line)
+        revision_height = 42 + 19 * len(revision_lines) if revision_lines else 0
+        head_h = 24 + 18 + 34 + 24 + chip_height + 8 + revision_height
         height = TOPBAR + head_h + ROWS * col_h + (ROWS - 1) * COL_GAP + PAD
 
         image = Image.new("RGB", (WIDTH_CSS * SCALE, int(height * SCALE)), BG)
@@ -407,6 +425,16 @@ def render(summary, guild_name=None, night_text=None, raid_name=None, difficulty
                         MUTED)
             y += 24
         y += 8
+
+        if revision_lines:
+            canvas.rect(PAD, y, WIDTH_CSS - PAD, y + revision_height - 10,
+                        fill=CHIP_ACCENT_BG, radius=8)
+            canvas.text(PAD + 12, y + 9, f"UPDATED {revision['date']} · WHAT CHANGED",
+                        canvas.font("semibold", 12), ACCENT)
+            for index, line in enumerate(revision_lines):
+                canvas.text(PAD + 12, y + 30 + index * 19, line,
+                            canvas.font("regular", 13), INK)
+            y += revision_height
 
         # .cols
         for i, (title, icon, rows, empty, badge) in enumerate(cells):

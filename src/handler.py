@@ -706,7 +706,7 @@ def kill_card_url(cfg, slug, boss_key, boss_name, headline, lines, art_url, acce
 
 
 def recap_card_url(cfg, page_path, summary, guild_name, night_text, raid_name, difficulty,
-                   dry=False):
+                   dry=False, revision=None):
     """Draw the recap grid and publish it, or return None and let the fields do it.
 
     Keyed beside the page it belongs to -- cards/recap/<team>/<night>.png -- so a retry
@@ -722,7 +722,7 @@ def recap_card_url(cfg, page_path, summary, guild_name, night_text, raid_name, d
             return None
         png = recap_card.render(summary, guild_name=guild_name, night_text=night_text,
                                 raid_name=raid_name, difficulty=difficulty,
-                                raiders=summary.get("raiders"))
+                                raiders=summary.get("raiders"), revision=revision)
         if not png:
             log("recap_card_not_drawn", night=page_path,
                 note="posting with the field grid instead")
@@ -730,6 +730,13 @@ def recap_card_url(cfg, page_path, summary, guild_name, night_text, raid_name, d
                 recap_card_alert(cfg, page_path, guild_name, "the card could not be drawn "
                                  "(recap_card.render returned nothing)")
             return None
+        if dry and revision:
+            # A correction is looked at before it replaces anything, so its dry run
+            # publishes the drawing under a preview key that no post points at.
+            import hashlib
+            key = f"cards/recap/preview/{page_path}-{hashlib.sha1(png).hexdigest()[:8]}.png"
+            publish_bytes(cfg, key, png, "image/png")
+            return f"{cfg['recap_page_url']}/{key}"
         if dry:
             log("recap_card_drawn", night=page_path, bytes=len(png), published=False,
                 note="dry run — drawn, not published")
@@ -1927,7 +1934,7 @@ def handler(event, context):
     if wcl.public_only["active"]:
         errors[WCL_GRANT] = f"{wcl.public_only['why']}; reading public reports only"
     spec = event if isinstance(event, dict) else {}
-    by_hand = {"dry", "preview", "manual", "hours", "backfill", "revision", "end"}
+    by_hand = {"dry", "preview", "manual", "hours", "backfill", "revision", "end", "revise"}
     if spec.get("mode") in (None, "recap") and not by_hand & set(spec) \
             and (errors or not only):
         try:
@@ -2007,7 +2014,7 @@ def poll_one(event, cfg, scope, now, now_iso, started):
             return {"ok": True, "skipped": "not_bootstrapped"}
         return recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started,
                            dry=bool(event.get("dry")), hours=event.get("hours"),
-                           manual=bool(event.get("manual")))
+                           manual=bool(event.get("manual")), revise=event.get("revise"))
 
     # The first-run branch. Nothing below this line can run until a bootstrap has been
     # recorded, so there is no ordering in which run one announces anything.
@@ -2905,7 +2912,7 @@ def night_difficulty(cfg, fights):
 
 
 def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, dry=False,
-                hours=None, manual=False):
+                hours=None, manual=False, revise=None):
     """Post one raid night's recap, or post nothing and say why.
 
     Every exit that posts nothing is a log line, never a message. "No raid this week" in
@@ -2923,6 +2930,16 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     point is to look at a real card BEFORE turning the feature on -- a preview gated behind
     the switch it exists to inform is not a preview.
 
+    `revise` corrects a recap that is already posted, by hand, for one team:
+    {"night": "2026-10-06", "reports": [codes], "date": "2026-10-09", "changes": [...],
+    "message": id}. The guild's own log of a night can stop early while a raider's
+    personal log has all of it (2026-10-06: one boss of three), and nothing in the
+    night's window can find a log filed under somebody else's account -- so the reports
+    are NAMED. They still pass the same classifier, the result must land on the named
+    night, and it carries the dated What-changed note on the card, the page and the
+    message. It edits the message it is given and never posts a new one; with `dry` it
+    publishes a preview drawing and touches nothing else. The night stays claimed.
+
     It must not claim, for the same reason the kill preview must not: a dry run that took
     the ordinary path would mark the night posted, and the real recap would then be
     correctly, silently and permanently skipped. It writes NOTHING at all -- not the
@@ -2933,10 +2950,20 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         log("recap_source_scope_required", title=cfg["wcl_report_title"],
             note="waiting for this explicit report source to receive its team scope")
         return {"ok": True, "skipped": "source_scope_required"}
+    revision = None
+    if revise:
+        codes = [str(c) for c in (revise.get("reports") or []) if c]
+        changes = [str(c) for c in (revise.get("changes") or []) if c]
+        if not (scope.team and codes and changes and revise.get("date") and revise.get("night")
+                and (dry or revise.get("message"))):
+            raise RuntimeError("a recap revision needs a team, night, reports, date, changes "
+                               "and, unless dry, the message to edit")
+        revision = {"date": str(revise["date"]), "changes": changes}
+        log("recap_revision_start", night=revise["night"], reports=codes, dry=bool(dry))
     if dry:
         log("recap_dry_run_start",
             note="rendering from real data — will not post and will not claim the night")
-    elif manual:
+    elif manual or revise:
         # `enabled` governs whether the SCHEDULE may post. A human invoking this by hand
         # with an explicit flag has already made that decision for one night, so the switch
         # does not gate it -- which is what makes it possible to show the guild a real card
@@ -2971,8 +2998,14 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     end_ms = int(now.timestamp() * 1000)
     start_ms = int((now - timedelta(hours=lookback)).timestamp() * 1000)
     extra = ({"user_id": int(cfg["wcl_user_id"])} if cfg.get("wcl_user_id") else {})
-    reports, rate = wcl.reports_in_window(token, gid, start_ms, end_ms,
-                                          limit=RECAP_MAX_REPORTS, **extra)
+    if revise:
+        # Named by a person, so none of the source filters below apply to them: those
+        # exist to pick a night's reports out of a feed, and these were picked by hand.
+        reports, cfg = [{"code": c} for c in codes], {
+            **cfg, "wcl_report_title": "", "wcl_report_owner_id": "", "raid_days": ""}
+    else:
+        reports, rate = wcl.reports_in_window(token, gid, start_ms, end_ms,
+                                              limit=RECAP_MAX_REPORTS, **extra)
     title = str(cfg.get("wcl_report_title") or "").strip()
     owner = str(cfg.get("wcl_report_owner_id") or "").strip()
     if bool(title) != bool(owner):
@@ -3002,6 +3035,9 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     night_diff, diff_name = None, None
     for meta in reports:
         detail, rate = wcl.report_detail(token, meta["code"])
+        if revise:
+            # A named report arrives as a bare code; the page credits its title and owner.
+            meta = {**meta, "title": detail.get("title"), "owner": detail.get("owner")}
         if night_diff is None:
             night_diff, diff_name = night_difficulty(cfg, detail.get("fights"))
         raid_scope = (recap_mod.raid_scope(detail.get("fights"), night_diff)
@@ -3116,7 +3152,10 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     earliest = min(chosen, key=lambda c: c["base"])
     night = _local(_at(earliest["base"]))
     night_key = night.strftime("%Y-%m-%d")
-    if not dry and not store.claim_recap(scope, night_key):
+    if revise and night_key != str(revise["night"]):
+        log("recap_revision_wrong_night", asked=revise["night"], found=night_key)
+        return {"ok": False, "night": night_key, "posted": False, "wrongNight": True}
+    if not dry and not revise and not store.claim_recap(scope, night_key):
         log("recap_already_posted", night=night_key, note="claimed by an earlier run")
         return {"ok": True, "night": night_key, "posted": False, "duplicate": True}
 
@@ -3189,7 +3228,8 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     sources_meta = [{"code": c["meta"]["code"], "title": c["meta"].get("title"),
                      "url": report_url(c["meta"]["code"]),
                      "owner": (c["meta"].get("owner") or {}).get("name"),
-                     "ownerUrl": recap_page.guild_reports_url(gid),
+                     # A named log may be a raider's own, not the guild's: no guild link.
+                     "ownerUrl": None if revise else recap_page.guild_reports_url(gid),
                      "when": _iso(_at(c["base"]))} for c in chosen]
     # A team's page lives under its slug. Two teams raid the same Tuesday, and one night
     # key for both would have the second recap overwrite the first's page.
@@ -3210,7 +3250,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         region=cfg.get("guild_region"),
         world_bosses=summary.get("worldBosses"), difficulty=diff_label,
         raiders_heading="Raiders" if uses_team_recap(cfg) else "Prog Raiders",
-        ilvl_scale=ilvl_scale, pulls=summary.get("pulls"))
+        ilvl_scale=ilvl_scale, pulls=summary.get("pulls"), revision=revision)
 
     # Published BEFORE the card is posted, and the link is dropped if the put fails. A card
     # in the channel saying "full recap here" that 404s is worse than a card with no
@@ -3228,7 +3268,7 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
     # The drawn grid, published beside the page. None -- no bucket, no Pillow, a refused
     # put, a dry run -- means the embed carries the six fields itself.
     card_url = recap_card_url(cfg, page_path, summary, who, night_text, tier["label"],
-                              diff_label, dry=dry)
+                              diff_label, dry=dry, revision=revision)
     attachment = None
     if discord_only:
         try:
@@ -3247,7 +3287,32 @@ def recap_night(token, cfg, scope, now, now_iso, gid, profile, index, started, d
         guild_label=raiderio.guild_display(profile, cfg["guild_name"], cfg["guild_realm"]),
         guild_url=raiderio.profile_url(profile, cfg["guild_region"], cfg["guild_realm"],
                                        cfg["guild_name"]),
-        recap_url=page_url, difficulty=diff_label, card_url=card_url)
+        recap_url=page_url, difficulty=diff_label, card_url=card_url, revision=revision)
+    if dry and revise:
+        log("recap_revision_preview", night=night_key, card=card_url,
+            bosses=summary.get("bosses"), raiders=summary.get("raiders"),
+            reports=[c["meta"]["code"] for c in chosen], skipped=skipped)
+        return {"ok": True, "night": night_key, "posted": False, "dry": True,
+                "card": card_url, "payload": payload, "pulls": summary.get("pulls"),
+                "bosses": summary.get("bosses"), "raiders": summary.get("raiders"),
+                "reports": [c["meta"]["code"] for c in chosen], "skipped": skipped}
+    if revise:
+        if not card_url or discord_only:
+            # The note has to be ON the card. A correction that could only say so in text
+            # would replace a drawn card with a field grid, which is not a correction.
+            log("recap_revision_no_card", night=night_key)
+            return {"ok": False, "night": night_key, "posted": False}
+        try:
+            discord.edit_in(destination(cfg), str(revise["message"]), payload)
+        except discord.DiscordError as exc:
+            log("recap_revision_failed", night=night_key, error=str(exc))
+            return {"ok": False, "night": night_key, "posted": False}
+        log("recap_revised", night=night_key, team=scope.team, message=str(revise["message"]),
+            card=card_url, reports=[c["meta"]["code"] for c in chosen], skipped=skipped,
+            bosses=summary.get("bosses"), raiders=summary.get("raiders"),
+            changes=revision["changes"])
+        return {"ok": True, "night": night_key, "posted": False, "revised": True,
+                "card": card_url, "page": page_url}
     if dry:
         log("recap_dry_run", night=night_key, slug=tier["slug"], difficulty=diff_name,
             bosses=summary.get("bosses"), prog=(summary.get("prog") or {}).get("name"),

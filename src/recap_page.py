@@ -214,6 +214,12 @@ section { margin-top:48px; }
 .killed .standing {
   color:var(--muted); background:var(--chip); border:1px solid var(--line);
 }
+.revised {
+  margin-top:16px; padding:12px 16px; border-radius:8px; font-size:14px;
+  background:var(--chip-accent-bg);
+}
+.revised strong { color:var(--accent); font-size:12px; letter-spacing:.04em; text-transform:uppercase; }
+.revised ul { margin:6px 0 0; padding-left:20px; }
 .killed .n { color:var(--muted); font-weight:400; }
 .killed .standing .n { color:var(--ink); }
 
@@ -483,8 +489,11 @@ def _chips(boss_labels, pulls):
 def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
            raiders=None, canonical=None, region=None, world_bosses=None,
            difficulty="Heroic", raiders_heading="Prog Raiders", ilvl_scale=None,
-           pulls=None):
+           pulls=None, revision=None):
     """One night's recap page as a complete HTML document.
+
+    `revision` is {"date", "changes": [...]} on a corrected page: a dated "What changed"
+    note under the chips, saying the same thing the corrected card says.
 
     `raiders_heading` names the people in the columns. The guild install says "Prog
     Raiders", which is the Discord role the prog team carries; a team install passes its
@@ -510,6 +519,10 @@ def render(guild_name, raid_name, night_text, boss_labels, rows, reports,
                    f'<sup>&dagger;</sup></span>')
     killed_block = (f'<div class="killed">{killed}</div>' if killed
                     else '<p class="lede">No kills &mdash; a full night on progression.</p>')
+    if revision and revision.get("changes"):
+        notes = "".join(f"<li>{_esc(note)}</li>" for note in revision["changes"])
+        killed_block += (f'\n  <div class="revised"><strong>Updated {_esc(revision["date"])}'
+                         f' &middot; What changed</strong><ul>{notes}</ul></div>')
     title = f"{guild_name} — {night_text}"
     canonical_tag = (f'\n<link rel="canonical" href="{_esc(canonical)}">'
                      if canonical else "")
